@@ -18,6 +18,43 @@ export type LocatedRange = {
   end: number;
 };
 
+/** 在单段文本内定位 original（供 Decoration 的块内偏移→PM 位置映射使用） */
+export type InTextRange = { start: number; end: number };
+export type LocateInTextResult =
+  | ({ ok: true } & InTextRange)
+  | {
+      ok: false;
+      reason: "original_not_found" | "ambiguous" | "context_mismatch";
+    };
+
+export function locateInText(
+  text: string,
+  original: string,
+  prefix?: string,
+  suffix?: string,
+): LocateInTextResult {
+  const occurrences = findOccurrences(text, original);
+  if (occurrences.length === 0) return { ok: false, reason: "original_not_found" };
+
+  const withCtx = occurrences.filter((s) =>
+    contextMatches(text, s, s + original.length, prefix, suffix),
+  );
+
+  let start: number;
+  if (occurrences.length === 1) {
+    // 唯一出现：若提供了上下文却不吻合，说明文本已变化
+    if (withCtx.length !== 1) return { ok: false, reason: "context_mismatch" };
+    start = occurrences[0];
+  } else if (withCtx.length === 1) {
+    start = withCtx[0];
+  } else if (withCtx.length === 0) {
+    return { ok: false, reason: "context_mismatch" };
+  } else {
+    return { ok: false, reason: "ambiguous" };
+  }
+  return { ok: true, start, end: start + original.length };
+}
+
 export type AnchorFailure =
   | { ok: false; reason: "block_not_found"; blockId: string }
   | { ok: false; reason: "original_not_found"; blockId: string; original: string }
@@ -75,61 +112,16 @@ export function locateRange(
     return { ok: false, reason: "block_not_found", blockId: scope.blockId };
   }
   const text = doc.blocks[idx].text;
-
-  const occurrences = findOccurrences(text, scope.original);
-  if (occurrences.length === 0) {
+  const r = locateInText(text, scope.original, scope.prefix, scope.suffix);
+  if (!r.ok) {
     return {
       ok: false,
-      reason: "original_not_found",
+      reason: r.reason,
       blockId: scope.blockId,
       original: scope.original,
-    };
+    } as AnchorResult;
   }
-
-  let start: number;
-  if (occurrences.length === 1) {
-    start = occurrences[0];
-    const end = start + scope.original.length;
-    // 仅出现一次时，若提供了上下文却不吻合，说明文本已变化
-    if (!contextMatches(text, start, end, scope.prefix, scope.suffix)) {
-      return {
-        ok: false,
-        reason: "context_mismatch",
-        blockId: scope.blockId,
-        original: scope.original,
-      };
-    }
-    return { ok: true, blockId: scope.blockId, start, end };
-  }
-
-  // 多次出现：用 prefix/suffix 消歧
-  const matched = occurrences.filter((s) =>
-    contextMatches(text, s, s + scope.original.length, scope.prefix, scope.suffix),
-  );
-  if (matched.length === 1) {
-    const s = matched[0];
-    return {
-      ok: true,
-      blockId: scope.blockId,
-      start: s,
-      end: s + scope.original.length,
-    };
-  }
-  if (matched.length === 0) {
-    return {
-      ok: false,
-      reason: "context_mismatch",
-      blockId: scope.blockId,
-      original: scope.original,
-    };
-  }
-  return {
-    ok: false,
-    reason: "ambiguous",
-    blockId: scope.blockId,
-    original: scope.original,
-    occurrences: matched.length,
-  };
+  return { ok: true, blockId: scope.blockId, start: r.start, end: r.end };
 }
 
 /**

@@ -24,3 +24,66 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* ── 审阅建议的编辑器标记（阶段 2）──────────────────────────────
+   颜色不作为唯一信息载体：每类同时有专属线型/图标（见侧栏）。 */
+
+/* 局部建议：下划线（Decoration.inline） */
+.rev-underline {
+  cursor: pointer;
+  text-decoration-line: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+  border-radius: 2px;
+  transition: background-color 0.12s ease;
+}
+.rev-underline:hover {
+  background-color: rgb(0 0 0 / 0.06);
+}
+/* 各类别用不同颜色 + 线型区分（同时满足可访问性） */
+.rev-grammar {
+  text-decoration-color: #dc2626; /* 红 */
+  text-decoration-style: solid;
+}
+.rev-clarity {
+  text-decoration-color: #2563eb; /* 蓝 */
+  text-decoration-style: solid;
+}
+.rev-style {
+  text-decoration-color: #7c3aed; /* 紫 */
+  text-decoration-style: solid;
+}
+.rev-structure {
+  text-decoration-color: #0891b2; /* 青 */
+  text-decoration-style: solid;
+}
+.rev-logic {
+  text-decoration-color: #ea580c; /* 橙 */
+  text-decoration-style: double;
+}
+.rev-consistency {
+  text-decoration-color: #65a30d; /* 黄绿 */
+  text-decoration-style: wavy;
+}
+
+/* 段落级建议：左侧竖线徽标（Decoration.node） */
+.rev-block-marker {
+  position: relative;
+  box-shadow: inset 3px 0 0 0 #f59e0b; /* 琥珀色竖线 */
+  padding-left: 0.5rem;
+  border-radius: 2px;
+}
+.rev-block-marker:hover {
+  background-color: rgb(245 158 11 / 0.06);
+}
+
+/* 选中态：正文标记与侧栏卡片双向高亮 */
+.rev-selected.rev-underline {
+  background-color: rgb(37 99 235 / 0.16);
+  outline: 2px solid rgb(37 99 235 / 0.5);
+  outline-offset: 1px;
+}
+.rev-selected.rev-block-marker {
+  background-color: rgb(245 158 11 / 0.14);
+  box-shadow: inset 4px 0 0 0 #d97706;
+}
