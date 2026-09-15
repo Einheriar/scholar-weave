@@ -236,3 +236,8 @@ npm run typecheck / lint / test，并按阶段 commit。不要扩张到非 MVP �
    `getByRole("listbox")` / `getByRole("option")` 必须从**根**找，
    **不要 scope 到 `getByRole("dialog")`**（在 dialog 里能找到的 count 是 0）。
    触发器 `button[aria-label="..."]` 仍在原位，可以正常 scope。
+7. **`<main>` 的 `w-full` 不能删** — `body` 是 `flex flex-col`（layout.tsx），
+   而 `<main>` 带 `mx-auto max-w-7xl`。flex 子项的**交叉轴**上一旦有 `auto` 外边距，
+   就不再被 `align-items: stretch` 撑开，而是按 fit-content 定宽——整页宽度于是由
+   内容决定：正文短或刚清空时整页缩窄，正文长时才撑满 `max-w-7xl`。表现出来就是
+   「同一个窗口宽度下，输入框宽度却在变」（与是否有内容相关，跟滚动条无关）。

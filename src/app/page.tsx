@@ -536,7 +536,9 @@ export default function Home() {
   const loading = reviewUi.phase === "loading";
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-7xl flex-col px-6 py-6">
+    // w-full 不可省：body 是 flex 列容器，交叉轴上的 auto 边距会让本元素按
+    // fit-content 定宽（由内容撑开），正文一短整页就跟着变窄。
+    <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-6 py-6">
       {/* 顶栏 */}
       <header className="mb-5 flex flex-wrap items-center gap-3">
         <input
