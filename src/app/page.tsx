@@ -9,6 +9,12 @@ import { ReviewSidebar } from "@/components/review/ReviewSidebar";
 import { ChangeSetPreview } from "@/components/review/ChangeSetPreview";
 import { ContextChat, type ChatTurn } from "@/components/chat/ContextChat";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { SettingsPanel } from "@/components/SettingsPanel";
+import {
+  loadSettings,
+  settingsToRequestBody,
+  type UserSettings,
+} from "@/lib/settings";
 import type {
   ChangeSet,
   ChatContext,
@@ -57,6 +63,15 @@ export default function Home() {
   const [copyState, setCopyState] = useState<"idle" | "copied">("idle");
   /** 供屏幕阅读器播报的状态文本（定位、快捷键等） */
   const [announce, setAnnounce] = useState("");
+
+  // 设置面板
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settings, setSettings] = useState<UserSettings>(loadSettings);
+
+  // 设置变化时保存
+  const handleSettingsChange = useCallback((next: UserSettings) => {
+    setSettings(next);
+  }, []);
 
   const editorRef = useRef<DocumentEditorHandle>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -107,6 +122,7 @@ export default function Home() {
     abortRef.current = controller;
     setReviewUi({ phase: "loading" });
     setSelectedId(null);
+    const prefs = settingsToRequestBody(settings);
     try {
       const res = await fetch("/api/review", {
         method: "POST",
@@ -118,8 +134,10 @@ export default function Home() {
           checksum: doc.checksum,
           mode,
           language: "en",
-          style: "学术",
-          preserveTerms: [],
+          style: settings.review.style || undefined,
+          preserveTerms: prefs.reviewPrefs.preserveTerms,
+          customPrompt: prefs.reviewPrefs.customPrompt,
+          llmConfig: prefs.llmConfig,
           blocks: doc.blocks.map((b) => ({ id: b.id, text: b.text })),
         }),
       });
@@ -140,7 +158,7 @@ export default function Home() {
         message: e instanceof Error ? e.message : "审阅失败。",
       });
     }
-  }, [doc, mode]);
+  }, [doc, mode, settings]);
 
   const cancelReview = useCallback(() => {
     abortRef.current?.abort();
@@ -684,7 +702,45 @@ export default function Home() {
         </p>
       </footer>
 
+      {/* 设置按钮（在主题切换上方） */}
+      <button
+        type="button"
+        onClick={() => setSettingsOpen((v) => !v)}
+        aria-label="Settings"
+        title="Settings"
+        className="fixed bottom-28 left-4 z-50 flex h-10 w-10 items-center justify-center rounded-full border border-neutral-300 bg-white/90 shadow-md backdrop-blur-sm transition-colors hover:bg-neutral-100 dark:border-neutral-600 dark:bg-neutral-800/90 dark:hover:bg-neutral-700"
+      >
+        <svg
+          width="20"
+          height="20"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="text-neutral-600 dark:text-neutral-300"
+        >
+          <line x1="4" y1="21" x2="4" y2="14" />
+          <line x1="4" y1="10" x2="4" y2="3" />
+          <line x1="12" y1="21" x2="12" y2="12" />
+          <line x1="12" y1="8" x2="12" y2="3" />
+          <line x1="20" y1="21" x2="20" y2="16" />
+          <line x1="20" y1="12" x2="20" y2="3" />
+          <line x1="1" y1="14" x2="7" y2="14" />
+          <line x1="9" y1="8" x2="15" y2="8" />
+          <line x1="17" y1="16" x2="23" y2="16" />
+        </svg>
+      </button>
+
       <ThemeToggle />
+
+      <SettingsPanel
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        settings={settings}
+        onSettingsChange={handleSettingsChange}
+      />
     </main>
   );
 }

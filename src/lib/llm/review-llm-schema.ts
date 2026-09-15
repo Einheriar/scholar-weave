@@ -46,6 +46,17 @@ export const ReviewRequestSchema = z.object({
   style: z.string().optional(),
   /** 必须保留、不得改动的术语或文本 */
   preserveTerms: z.array(z.string()).default([]),
+  /** 用户自定义提示词（追加到系统提示末尾） */
+  customPrompt: z.string().optional(),
+  /** 用户 LLM 配置（优先于服务端 env） */
+  llmConfig: z
+    .object({
+      apiKey: z.string().min(1),
+      baseURL: z.string().optional(),
+      model: z.string().optional(),
+      reasoningEffort: z.string().optional(),
+    })
+    .optional(),
   /** 带稳定 ID 的段落列表 */
   blocks: z.array(
     z.object({

@@ -39,6 +39,10 @@ function buildSystemPrompt(req: ReviewRequest): string {
     req.preserveTerms.length > 0
       ? `\n必须逐字保留、绝不得修改以下术语/文本：${req.preserveTerms.map((t) => `「${t}」`).join("、")}。任何 edit 的 original 与 replacement 都不得触碰这些内容。`
       : "";
+  // 用户自定义提示词：追加到末尾，仅影响语气/风格/侧重点，不影响协议
+  const custom = req.customPrompt?.trim()
+    ? `\n\n【用户补充要求】\n${req.customPrompt.trim()}`
+    : "";
 
   return `你是一个专业的学术文本审阅助手。你的任务是审阅用户提供的${language}文档，输出结构化的审阅建议。
 
@@ -69,7 +73,7 @@ ${SCOPE_GUIDE}
 【质量要求】
 - 只报告真实、必要的问题，不要为凑数而提意见。
 - edit 的 replacement 必须能直接替换 original 并使句子更正确，且不得改变原意。
-- 拿不准的问题不要提；无法精确定位的不要造 edit。`;
+- 拿不准的问题不要提；无法精确定位的不要造 edit。${custom}`;
 }
 
 function buildUserPrompt(req: ReviewRequest): string {

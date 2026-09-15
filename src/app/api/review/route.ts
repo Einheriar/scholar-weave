@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
-import { getProviderFromEnv } from "@/lib/llm/provider";
+import {
+  getProviderFromEnv,
+  getProviderFromUserConfig,
+} from "@/lib/llm/provider";
 import { buildReviewMessages } from "@/lib/llm/prompts";
 import {
   LLMReviewResponseSchema,
@@ -64,16 +67,20 @@ export async function POST(request: Request) {
     return err(413, "too_long", `文档总字数超过上限（${MAX_TOTAL_CHARS}）。`);
   }
 
-  // 构造 prompt 与 provider
+  // 构造 prompt 与 provider（用户配置优先于 env）
   let provider;
-  try {
-    provider = getProviderFromEnv();
-  } catch (e) {
-    return err(
-      500,
-      "provider_misconfigured",
-      e instanceof Error ? e.message : "LLM 服务未配置。",
-    );
+  if (reqBody.llmConfig?.apiKey) {
+    provider = getProviderFromUserConfig(reqBody.llmConfig);
+  } else {
+    try {
+      provider = getProviderFromEnv();
+    } catch (e) {
+      return err(
+        500,
+        "provider_misconfigured",
+        e instanceof Error ? e.message : "LLM 服务未配置。",
+      );
+    }
   }
   const messages = buildReviewMessages(reqBody);
 
@@ -89,6 +96,7 @@ export async function POST(request: Request) {
       jsonMode: true,
       signal: controller.signal,
       maxTokens: 16000,
+      reasoningEffort: reqBody.llmConfig?.reasoningEffort,
     });
   } catch (e) {
     if (e instanceof Error && e.name === "AbortError") {

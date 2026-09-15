@@ -17,6 +17,8 @@ export type GenerateOptions = {
   temperature?: number;
   maxTokens?: number;
   signal?: AbortSignal;
+  /** DeepSeek-style reasoning effort（minimal/low/medium/high/xhigh/max/ultra） */
+  reasoningEffort?: string;
 };
 
 export interface LLMProvider {
@@ -42,4 +44,20 @@ export function getProviderFromEnv(): LLMProvider {
   const model = process.env.LLM_MODEL ?? "deepseek-chat";
   const baseURL = process.env.OPENAI_BASE_URL ?? "https://api.openai.com";
   return new OpenAIProvider({ apiKey, baseURL, model });
+}
+
+/**
+ * 从用户请求体构造 provider（用户设置优先于 env）。
+ * 客户端传来的配置只在本次请求内使用，不落盘。
+ */
+export function getProviderFromUserConfig(config: {
+  apiKey: string;
+  baseURL?: string;
+  model?: string;
+}): LLMProvider {
+  return new OpenAIProvider({
+    apiKey: config.apiKey,
+    baseURL: config.baseURL,
+    model: config.model || "deepseek-chat",
+  });
 }

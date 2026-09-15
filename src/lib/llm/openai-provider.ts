@@ -28,6 +28,8 @@ export class OpenAIProvider implements LLMProvider {
     };
     if (options.maxTokens !== undefined) body.max_tokens = options.maxTokens;
     if (options.jsonMode) body.response_format = { type: "json_object" };
+    // DeepSeek reasoning effort: minimal/low/medium/high/xhigh/max/ultra
+    if (options.reasoningEffort) body.reasoning_effort = options.reasoningEffort;
 
     let res: Response;
     try {
