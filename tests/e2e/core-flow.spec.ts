@@ -124,7 +124,8 @@ test.describe("核心流程：接受、撤销与复制", () => {
 
     const clipboard = await page.evaluate(() => navigator.clipboard.readText());
     const paras = await paragraphTexts(page);
-    expect(clipboard).toBe(paras.join("\n\n"));
+    // Windows 剪贴板把换行规范化为 CRLF，比较前归一化，避免平台差异误报
+    expect(clipboard.replace(/\r\n/g, "\n")).toBe(paras.join("\n\n"));
   });
 });
 
@@ -138,7 +139,7 @@ test.describe("核心流程：键盘快捷键", () => {
 
     const clipboard = await page.evaluate(() => navigator.clipboard.readText());
     const paras = await paragraphTexts(page);
-    expect(clipboard).toBe(paras.join("\n\n"));
+    expect(clipboard.replace(/\r\n/g, "\n")).toBe(paras.join("\n\n"));
   });
 
   test("对话输入框聚焦时 Cmd/Ctrl+Enter 不触发审阅", async ({ page }) => {
