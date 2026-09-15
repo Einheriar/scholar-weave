@@ -50,6 +50,11 @@ npm start          # 启动生产服务器
 npm run package:app # 打包成可双击启动的本地应用（见下）
 ```
 
+> **刚拿到源码（新克隆 / 解压 zip）时，先跑一次 `npm run build` 或 `npm run dev`。**
+> Next 会在构建时生成类型文件（`next-env.d.ts` 与 `.next/types/`），它们被 git 忽略、不在源码包里。
+> 少了它们，`npm run typecheck` 会报 `Cannot find name 'LayoutProps'`——这是缺生成物，不是代码有问题。
+> 跑一次构建即可恢复。
+
 ### 端到端测试
 
 ```bash
