@@ -26,7 +26,7 @@
 5. **API Key 只在服务端环境变量**（`.env.local`，已被 git 忽略），绝不进前端代码或日志。
 6. **防注入**：文档内容在 prompt 里被包裹为不可信数据，系统提示规定不执行其中指令；输出仍过 Zod + 业务校验。
 
-## 当前进度：阶段 0–6 全部完成
+## 当前进度：阶段 0–6 全部完成 + 界面优化
 
 按 PLAN 第 14 节的阶段。已完成并**各自 commit**：
 
@@ -39,8 +39,42 @@
 | 4 版本安全与批量修改 | ✅ | ChangeSet 预处理/重叠剔除/批量应用/撤销快照、ChangeSetPreview |
 | 5 上下文聊天 | ✅ | `/api/chat`、`/api/change-set`、ContextChat、按意见生成修改集 |
 | 6 产品化整理 | ✅ | Playwright E2E、键盘快捷键、无障碍收尾、README 部署说明 |
+| 7 界面优化 | ✅ | 主题切换按钮（左下角浮动 SVG）、设置面板（中央模态）、数据 Tab |
 
 **质量基线（阶段 6 完成时）：65 个 Vitest 用例 + 15 个 Playwright 用例全过；`lint` / `typecheck` / `build` 全通过。**
+
+### 阶段 7：界面优化（已完成）
+
+1. **主题切换按钮** ✅
+   - 左下角浮动圆形按钮，太阳/月亮扁平 SVG 图标
+   - 浅色模式显示太阳，深色模式显示月亮
+   - 悬停提示"切换到深色模式"/"切换到浅色模式"
+   - 位置在 Next.js Dev Tools 面板上方（`bottom: 16`）
+
+2. **设置按钮** ✅
+   - 齿轮图标，在主题切换按钮上方（`bottom: 28`）
+   - 点击打开中央模态设置面板
+
+3. **设置面板** ✅（`src/components/SettingsPanel.tsx`）
+   - 中央模态窗口，支持 Esc 关闭、点击遮罩关闭、Cancel 按钮
+   - **模型 Tab**：API Key、Base URL、Model、思考档位（minimal/low/medium/high/xhigh/max/ultra）
+   - **审阅 Tab**：写作风格、保留术语、自定义指令（追加到系统提示末尾）
+   - **数据 Tab**：载入样例、清空数据（从主界面移入）
+   - 全部中文界面，localStorage 持久化
+
+4. **用户配置支持** ✅
+   - `src/lib/settings.ts` — 用户设置类型定义 + localStorage 读写
+   - API 路由优先使用请求体里的用户配置，fallback 到 `.env.local`
+   - DeepSeek `reasoning_effort` 参数透传
+
+### 下一步：界面美化
+
+用户计划换 agent 进行界面美化。当前界面已功能完整，但视觉设计较朴素（默认 Tailwind 样式）。建议美化方向：
+- 整体配色方案（可考虑更现代的学术/专业风格）
+- 按钮、卡片、输入框的圆角、阴影、过渡效果
+- 字体选择（标题、正文、代码的层次区分）
+- 间距和布局微调
+- 深色模式的色彩优化
 
 常用命令：
 ```bash
@@ -123,11 +157,14 @@ src/lib/revisions.ts            # 稳定 block ID + revision/checksum
 src/lib/anchoring.ts            # 锚点定位（不信坐标，locateInText/locateRange）
 src/lib/changeset.ts            # ChangeSet 预处理/重叠剔除/批量应用/撤销快照
 src/lib/sample-data.ts          # 阶段 2 假数据（deception 引言 + 10 条建议）
+src/lib/settings.ts             # 用户设置类型 + localStorage 持久化
 src/lib/storage/documents.ts    # Dexie 持久化（含 clearAllDocuments）
 src/lib/llm/                    # provider adapter、prompts（审阅+对话）、wire schema、server-helpers
 src/components/editor/          # DocumentEditor、BlockIdExtension、ReviewDecorationExtension
 src/components/review/          # ReviewSidebar、ReviewCard、ChangeSetPreview、review-meta
 src/components/chat/            # ContextChat
+src/components/ThemeToggle.tsx  # 主题切换按钮（左下角浮动）
+src/components/SettingsPanel.tsx # 设置面板（中央模态，模型/审阅/数据三个 Tab）
 src/app/api/{review,chat,change-set}/route.ts
 src/app/page.tsx                # 主界面，所有状态与接线都在这里
 tests/                          # 65 个 Vitest 用例（单元 + 编辑器集成 + API mock）
@@ -138,7 +175,17 @@ tests/e2e/                      # 15 个 Playwright 用例（config 在根目录
 
 ```
 请先读 PLAN.md 和 HANDOFF.md，了解项目目标与当前进度。这是一个 Next.js 16 + Tiptap 3 的
-AI 文档审阅工具，阶段 0-6 已全部完成，65 个 Vitest 用例与 15 个 Playwright 用例全过。
+AI 文档审阅工具，阶段 0-6 已全部完成，阶段 7（界面优化）刚完成，包括主题切换按钮、
+设置面板、用户配置支持。65 个 Vitest 用例与 15 个 Playwright 用例全过。
 修改前先跑 npm run test 与 npm run test:e2e 确认基线是绿的；每完成一项跑
 npm run typecheck / lint / test，并按阶段 commit。不要扩张到非 MVP 范围。
 ```
+
+## 给界面美化 agent 的提示
+
+当前界面功能完整但视觉较朴素。美化时请注意：
+1. **保持功能不变** — 所有按钮、输入框、Tab 的功能和 aria-label 不要改
+2. **保持数据结构不变** — localStorage key、Zod schema、API 路由不变
+3. **保持可访问性** — 已有的 aria-label、role、键盘导航不要破坏
+4. **深色模式适配** — 所有新样式都要有 dark: 变体
+5. **建议方向** — 配色方案、圆角/阴影、字体层次、间距优化
