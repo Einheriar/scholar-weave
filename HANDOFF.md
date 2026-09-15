@@ -93,6 +93,24 @@ npm run build      # 生产构建
 - 批量接受 ChangeSet 目前依赖编辑器 history 撤销（Ctrl+Z），没有像单条那样在卡片上提供“撤销本次修改”的独立按钮。PLAN 5.1 只要求单条可撤销，故未扩 scope。
 - E2E 强依赖内置样例文本片段（mock 从请求体按文本反查 blockId），改动 `sample-data.ts` 的措辞时需同步更新 `tests/e2e/helpers.ts`。
 
+### ⚠️ 安全注意：用户配置的 API Key 以明文存储在 localStorage
+
+设置面板允许用户在前端配置自己的 API Key / Base URL / Model / 思考档位（`src/lib/settings.ts`，持久化到 `localStorage["supergrammarly-settings"]`）。
+
+**当前状态（本地项目，可接受）：**
+- Key 明文存在浏览器 localStorage，任何能打开 DevTools 的人都能看到。
+- 适用于个人本地使用，不上公网。
+
+**如果要部署到公网，必须先解决：**
+1. **不要允许用户在前端输入 API Key** — 改为只在服务端 `.env.local` 配置，前端设置面板隐藏 Model Tab 或改为只读展示。
+2. 如果必须支持用户自带 Key → 需要 Web Crypto 加密存储（PBKDF2 派生 + AES-GCM），或改为后端托管密钥。
+3. 公网部署必须加身份验证 + 限流（README 部署说明里已强调）。
+
+相关代码：
+- `src/lib/settings.ts` — 明文 localStorage 存储
+- `src/components/SettingsPanel.tsx` — 设置面板 UI
+- `src/app/api/review/route.ts` — 优先使用请求体里的用户配置，fallback 到 env
+
 ## 不要做的事（PLAN 明确的非 MVP 范围）
 
 登录/付费/多用户、多人协作、Word/PDF 富文本无损导入导出、浏览器扩展、Office Add-in、原生移动应用、离线本地模型管理、自动后台改写、完整版本控制。桌面封装（Tauri）等演进方向见 PLAN 第 18 节，MVP 验证前不做。
