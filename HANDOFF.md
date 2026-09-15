@@ -231,3 +231,8 @@ npm run typecheck / lint / test，并按阶段 commit。不要扩张到非 MVP �
    （globals.css 的 @theme 映射，自带深浅双套值），不要再手写 neutral/blue 色值
 5. **动画** — 复用 `animate-item-in`/`animate-modal-fade`/`animate-modal-pop`，
    并保证 `prefers-reduced-motion` 下可用
+6. **`Select` 的浮层是 portal 到 `body` 的（阶段 9 起）** — 因为设置面板正文是
+   `overflow-y-auto`，绝对定位会被裁切。写测试或用 Playwright 找下拉时：
+   `getByRole("listbox")` / `getByRole("option")` 必须从**根**找，
+   **不要 scope 到 `getByRole("dialog")`**（在 dialog 里能找到的 count 是 0）。
+   触发器 `button[aria-label="..."]` 仍在原位，可以正常 scope。
