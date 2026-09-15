@@ -20,10 +20,10 @@ export const CATEGORY_META: Record<
 
 export const STATUS_META: Record<ReviewStatus, { label: string; className: string }> =
   {
-    open: { label: "待处理", className: "bg-neutral-100 text-neutral-600" },
-    accepted: { label: "已接受", className: "bg-green-100 text-green-700" },
-    rejected: { label: "已忽略", className: "bg-neutral-100 text-neutral-400" },
-    stale: { label: "已过期", className: "bg-amber-100 text-amber-700" },
+    open: { label: "待处理", className: "bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300" },
+    accepted: { label: "已接受", className: "bg-green-100 text-green-700 dark:bg-green-950/50 dark:text-green-300" },
+    rejected: { label: "已忽略", className: "bg-neutral-100 text-neutral-400 dark:bg-neutral-800" },
+    stale: { label: "已过期", className: "bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300" },
   };
 
 export const SEVERITY_META: Record<

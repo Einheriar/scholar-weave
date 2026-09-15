@@ -56,15 +56,15 @@ export function ReviewCard({
         className={
           "cursor-pointer rounded-lg border p-3 text-sm shadow-sm transition-colors " +
           (selected
-            ? "border-blue-400 bg-blue-50 ring-1 ring-blue-300"
-            : "border-neutral-200 bg-white hover:border-neutral-300") +
+            ? "border-blue-400 bg-blue-50 ring-1 ring-blue-300 dark:bg-blue-950/40 dark:ring-blue-700"
+            : "border-neutral-200 bg-white hover:border-neutral-300 dark:border-neutral-800 dark:bg-neutral-900 dark:hover:border-neutral-700") +
           (item.status === "stale" ? " opacity-60" : "")
         }
         onClick={() => onSelect(item.id)}
       >
         {/* 头部：类型 / 类别 / 严重度 / 状态 */}
         <div className="mb-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-          <span className="rounded bg-neutral-800 px-1.5 py-0.5 font-medium text-white">
+          <span className="rounded bg-neutral-800 px-1.5 py-0.5 font-medium text-white dark:bg-neutral-700">
             {KIND_LABEL[item.kind]}
           </span>
           <span className={`flex items-center gap-1 ${cat.textClass}`}>
@@ -80,25 +80,25 @@ export function ReviewCard({
           </span>
         </div>
 
-        <h4 className="mb-1 font-medium text-neutral-900">{item.title}</h4>
-        <p className="mb-2 leading-relaxed text-neutral-600">
+        <h4 className="mb-1 font-medium text-neutral-900 dark:text-neutral-100">{item.title}</h4>
+        <p className="mb-2 leading-relaxed text-neutral-600 dark:text-neutral-400">
           {item.explanation}
         </p>
 
         {/* edit：展示 原文 → 替换 */}
         {item.kind === "edit" && item.replacement !== undefined && (
-          <div className="mb-2 space-y-1 rounded-md bg-neutral-50 p-2 text-xs">
+          <div className="mb-2 space-y-1 rounded-md bg-neutral-50 p-2 text-xs dark:bg-neutral-800/60">
             {item.scope.type === "range" && (
               <div className="flex gap-1.5">
                 <span className="shrink-0 text-neutral-400">原文</span>
-                <span className="break-all text-red-700 line-through">
+                <span className="break-all text-red-700 line-through dark:text-red-400">
                   {item.scope.original}
                 </span>
               </div>
             )}
             <div className="flex gap-1.5">
               <span className="shrink-0 text-neutral-400">改为</span>
-              <span className="break-all font-medium text-green-700">
+              <span className="break-all font-medium text-green-700 dark:text-green-400">
                 {item.replacement}
               </span>
             </div>
@@ -121,7 +121,7 @@ export function ReviewCard({
               </button>
               <button
                 type="button"
-                className="rounded-md border border-neutral-300 px-2.5 py-1 text-xs text-neutral-600 hover:bg-neutral-100"
+                className="rounded-md border border-neutral-300 px-2.5 py-1 text-xs text-neutral-600 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
                 onClick={(e) => {
                   e.stopPropagation();
                   onReject(item.id);
@@ -136,7 +136,7 @@ export function ReviewCard({
             <>
               <button
                 type="button"
-                className="rounded-md border border-neutral-300 px-2.5 py-1 text-xs text-neutral-600 hover:bg-neutral-100"
+                className="rounded-md border border-neutral-300 px-2.5 py-1 text-xs text-neutral-600 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
                 onClick={(e) => {
                   e.stopPropagation();
                   onChat?.(item.id);
@@ -147,7 +147,7 @@ export function ReviewCard({
               <button
                 type="button"
                 disabled={applyingOpinion}
-                className="rounded-md border border-blue-300 px-2.5 py-1 text-xs text-blue-700 hover:bg-blue-50 disabled:opacity-40"
+                className="rounded-md border border-blue-300 px-2.5 py-1 text-xs text-blue-700 hover:bg-blue-50 disabled:opacity-40 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-950/40"
                 onClick={(e) => {
                   e.stopPropagation();
                   onApplyOpinion?.(item.id);
@@ -172,7 +172,7 @@ export function ReviewCard({
           )}
 
           {item.status === "stale" && (
-            <span className="text-xs text-amber-600">
+            <span className="text-xs text-amber-600 dark:text-amber-400">
               原文已变化，无法定位
             </span>
           )}

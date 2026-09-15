@@ -65,7 +65,7 @@ export function ChangeSetPreview({
   return (
     <div
       ref={panelRef}
-      className="rounded-lg border border-blue-300 bg-blue-50/60 p-3 text-sm"
+      className="rounded-lg border border-blue-300 bg-blue-50/60 p-3 text-sm dark:border-blue-800 dark:bg-blue-950/30"
       role="dialog"
       aria-labelledby="changeset-preview-title"
       onKeyDown={(e) => {
@@ -76,17 +76,17 @@ export function ChangeSetPreview({
       }}
     >
       <div className="mb-2">
-        <h3 id="changeset-preview-title" className="font-semibold text-neutral-800">
+        <h3 id="changeset-preview-title" className="font-semibold text-neutral-800 dark:text-neutral-200">
           修改集预览
         </h3>
-        <p className="mt-0.5 text-xs text-neutral-600">{changeSet.summary}</p>
+        <p className="mt-0.5 text-xs text-neutral-600 dark:text-neutral-400">{changeSet.summary}</p>
       </div>
 
       <ul className="mb-2 max-h-64 space-y-1.5 overflow-y-auto">
         {applicable.map((r) => (
           <li
             key={r.edit.id}
-            className="flex items-start gap-2 rounded-md border border-neutral-200 bg-white p-2"
+            className="flex items-start gap-2 rounded-md border border-neutral-200 bg-white p-2 dark:border-neutral-800 dark:bg-neutral-900"
           >
             <input
               type="checkbox"
@@ -96,14 +96,14 @@ export function ChangeSetPreview({
               aria-label={`选择修改：${r.edit.explanation || r.edit.original}`}
             />
             <div className="min-w-0 flex-1 text-xs">
-              <div className="break-all text-red-700 line-through">
+              <div className="break-all text-red-700 line-through dark:text-red-400">
                 {r.edit.original}
               </div>
-              <div className="break-all font-medium text-green-700">
+              <div className="break-all font-medium text-green-700 dark:text-green-400">
                 {r.edit.replacement}
               </div>
               {r.edit.explanation && (
-                <div className="mt-0.5 text-neutral-500">{r.edit.explanation}</div>
+                <div className="mt-0.5 text-neutral-500 dark:text-neutral-400">{r.edit.explanation}</div>
               )}
             </div>
           </li>
@@ -111,13 +111,13 @@ export function ChangeSetPreview({
       </ul>
 
       {rejected.size > 0 && (
-        <div className="mb-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
+        <div className="mb-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
           <p className="mb-1 font-medium">以下 {rejected.size} 条无法应用：</p>
           <ul className="space-y-0.5">
             {[...rejected.entries()].map(([id, reason]) => (
               <li key={id} className="break-all">
                 · {editById.get(id)?.original ?? id}
-                <span className="text-amber-600">
+                <span className="text-amber-600 dark:text-amber-400">
                   （{reason === "overlap" ? "与其他修改重叠" : "原文定位失败"}）
                 </span>
               </li>
@@ -139,14 +139,14 @@ export function ChangeSetPreview({
           type="button"
           disabled={applicableIds.length === 0}
           onClick={() => onAccept(applicableIds)}
-          className="rounded-md border border-blue-300 px-3 py-1.5 text-xs text-blue-700 hover:bg-blue-100 disabled:opacity-40"
+          className="rounded-md border border-blue-300 px-3 py-1.5 text-xs text-blue-700 hover:bg-blue-100 disabled:opacity-40 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-900/40"
         >
           全部接受（{applicableIds.length}）
         </button>
         <button
           type="button"
           onClick={onDiscard}
-          className="ml-auto rounded-md border border-neutral-300 px-3 py-1.5 text-xs text-neutral-600 hover:bg-neutral-100"
+          className="ml-auto rounded-md border border-neutral-300 px-3 py-1.5 text-xs text-neutral-600 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
         >
           放弃
         </button>

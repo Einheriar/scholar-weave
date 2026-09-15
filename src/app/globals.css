@@ -1,8 +1,19 @@
 @import "tailwindcss";
 
+/* 深浅色由用户手动切换（顶栏按钮），不跟随系统偏好：
+   <html> 上的 .dark class 是唯一开关（ThemeToggle 写入，layout 内联脚本恢复）。 */
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
+  color-scheme: light;
   --background: #ffffff;
   --foreground: #171717;
+}
+
+.dark {
+  color-scheme: dark;
+  --background: #0a0a0a;
+  --foreground: #ededed;
 }
 
 @theme inline {
@@ -10,13 +21,6 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {
@@ -39,6 +43,9 @@ body {
 }
 .rev-underline:hover {
   background-color: rgb(0 0 0 / 0.06);
+}
+.dark .rev-underline:hover {
+  background-color: rgb(255 255 255 / 0.09);
 }
 /* 各类别用不同颜色 + 线型区分（同时满足可访问性） */
 .rev-grammar {
@@ -75,6 +82,9 @@ body {
 }
 .rev-block-marker:hover {
   background-color: rgb(245 158 11 / 0.06);
+}
+.dark .rev-block-marker:hover {
+  background-color: rgb(245 158 11 / 0.1);
 }
 
 /* 选中态：正文标记与侧栏卡片双向高亮 */

@@ -8,6 +8,7 @@ import {
 import { ReviewSidebar } from "@/components/review/ReviewSidebar";
 import { ChangeSetPreview } from "@/components/review/ChangeSetPreview";
 import { ContextChat, type ChatTurn } from "@/components/chat/ContextChat";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import type {
   ChangeSet,
   ChatContext,
@@ -521,16 +522,16 @@ export default function Home() {
         <input
           value={doc.title}
           onChange={(e) => setDoc({ ...doc, title: e.target.value })}
-          className="w-full max-w-xs border-b border-transparent bg-transparent text-lg font-semibold focus:border-neutral-300 focus:outline-none"
+          className="w-full max-w-xs border-b border-transparent bg-transparent text-lg font-semibold focus:border-neutral-300 focus:outline-none dark:focus:border-neutral-600"
           aria-label="文档标题"
         />
-        <label className="flex items-center gap-1 text-xs text-neutral-600">
+        <label className="flex items-center gap-1 text-xs text-neutral-600 dark:text-neutral-400">
           审阅模式
           <select
             value={mode}
             onChange={(e) => setMode(e.target.value as ReviewMode)}
             disabled={loading}
-            className="rounded border border-neutral-300 bg-white px-2 py-1 text-xs focus:border-blue-400 focus:outline-none"
+            className="rounded border border-neutral-300 bg-white px-2 py-1 text-xs focus:border-blue-400 focus:outline-none dark:border-neutral-700 dark:bg-neutral-900"
             aria-label="审阅模式"
           >
             {(Object.keys(MODE_LABEL) as ReviewMode[]).map((m) => (
@@ -545,7 +546,7 @@ export default function Home() {
           <button
             type="button"
             onClick={cancelReview}
-            className="rounded-md border border-red-300 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50"
+            className="rounded-md border border-red-300 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950/40"
           >
             取消审阅
           </button>
@@ -564,7 +565,7 @@ export default function Home() {
           type="button"
           onClick={copyAll}
           title="复制全文（Cmd/Ctrl+Shift+C）"
-          className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm text-neutral-600 hover:bg-neutral-100"
+          className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm text-neutral-600 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
         >
           {copyState === "copied" ? "已复制 ✓" : "复制全文"}
         </button>
@@ -572,10 +573,12 @@ export default function Home() {
         <button
           type="button"
           onClick={loadSample}
-          className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm text-neutral-600 hover:bg-neutral-100"
+          className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm text-neutral-600 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
         >
           载入样例
         </button>
+
+        <ThemeToggle />
 
         <div className="ml-auto flex items-center gap-3 text-xs text-neutral-400">
           <span>{openCount} 条待处理</span>
@@ -598,17 +601,17 @@ export default function Home() {
 
       {/* 审阅状态条 */}
       {reviewUi.phase === "loading" && (
-        <p className="mb-3 rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-700" role="status">
+        <p className="mb-3 rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-700 dark:bg-blue-950/40 dark:text-blue-300" role="status">
           正在审阅文档…（LLM 生成中，可点击“取消审阅”）
         </p>
       )}
       {reviewUi.phase === "error" && (
-        <p className="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
+        <p className="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300" role="alert">
           {reviewUi.message}
         </p>
       )}
       {reviewUi.phase === "done" && reviewUi.summary && (
-        <p className="mb-3 rounded-md bg-neutral-100 px-3 py-2 text-sm text-neutral-700">
+        <p className="mb-3 rounded-md bg-neutral-100 px-3 py-2 text-sm text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300">
           <span className="font-medium">全文总结：</span>
           {reviewUi.summary}
         </p>
@@ -639,7 +642,7 @@ export default function Home() {
 
           {/* 上下文对话 */}
           {chatError && (
-            <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
+            <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300" role="alert">
               {chatError}
             </p>
           )}

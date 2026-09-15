@@ -81,13 +81,13 @@ export function ReviewSidebar({
 
   return (
     <aside
-      className="flex h-full w-full flex-col overflow-hidden rounded-lg border border-neutral-300 bg-neutral-50"
+      className="flex h-full w-full flex-col overflow-hidden rounded-lg border border-neutral-300 bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900"
       aria-label="审阅建议侧栏"
     >
-      <div className="border-b border-neutral-200 px-3 py-2">
+      <div className="border-b border-neutral-200 px-3 py-2 dark:border-neutral-800">
         <div className="flex items-baseline justify-between">
-          <h2 className="text-sm font-semibold text-neutral-800">审阅建议</h2>
-          <span className="text-xs text-neutral-500">
+          <h2 className="text-sm font-semibold text-neutral-800 dark:text-neutral-200">审阅建议</h2>
+          <span className="text-xs text-neutral-500 dark:text-neutral-400">
             {counts.open} 待处理 / 共 {counts.total}
           </span>
         </div>
@@ -153,8 +153,8 @@ export function ReviewSidebar({
           const excluded = scopeFilter !== "all" && scopeFilter !== scope;
           return (
             <section key={scope} aria-label={title}>
-              <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-neutral-500">
-                <span className="inline-block h-2 w-2 rounded-full bg-neutral-300" aria-hidden />
+              <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+                <span className="inline-block h-2 w-2 rounded-full bg-neutral-300 dark:bg-neutral-600" aria-hidden />
                 {SCOPE_LABEL[scope]} · {title}
                 <span className="text-neutral-400">({list.length})</span>
               </h3>
@@ -205,7 +205,7 @@ function FilterSelect({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded border border-neutral-300 bg-white px-1 py-0.5 text-xs focus:border-blue-400 focus:outline-none"
+        className="w-full rounded border border-neutral-300 bg-white px-1 py-0.5 text-xs focus:border-blue-400 focus:outline-none dark:border-neutral-700 dark:bg-neutral-900"
         aria-label={`筛选${label}`}
       >
         {options.map(([v, l]) => (

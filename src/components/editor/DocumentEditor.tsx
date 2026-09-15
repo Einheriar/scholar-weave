@@ -220,7 +220,7 @@ export const DocumentEditor = forwardRef<
   }));
 
   return (
-    <div className="rounded-lg border border-neutral-300 bg-white shadow-sm">
+    <div className="rounded-lg border border-neutral-300 bg-white shadow-sm dark:border-neutral-700 dark:bg-neutral-900">
       <EditorContent editor={editor} />
     </div>
   );
