@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { buttonClass } from "@/components/ui/button";
+import { Select } from "@/components/ui/select";
 import {
   saveSettings,
   DEFAULT_SETTINGS,
@@ -197,19 +198,17 @@ export function SettingsPanel({
               </div>
               <div>
                 <label className={labelCls}>思考档位</label>
-                <select
+                <Select
                   value={draft.llm.reasoningEffort}
-                  onChange={(e) =>
-                    updateLLM({ reasoningEffort: e.target.value as ReasoningEffort })
+                  onChange={(v) =>
+                    updateLLM({ reasoningEffort: v as ReasoningEffort })
                   }
-                  className={inputCls}
-                >
-                  {REASONING_EFFORT_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label} — {opt.description}
-                    </option>
-                  ))}
-                </select>
+                  options={REASONING_EFFORT_OPTIONS.map((opt) => ({
+                    value: opt.value,
+                    label: `${opt.label} — ${opt.description}`,
+                  }))}
+                  ariaLabel="思考档位"
+                />
                 <p className="mt-1.5 text-xs text-text-faint">
                   控制模型在回复前的思考深度。档位越高，分析越深入，但响应越慢。
                 </p>

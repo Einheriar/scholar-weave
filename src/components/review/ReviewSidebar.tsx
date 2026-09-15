@@ -8,6 +8,7 @@ import type {
 } from "@/lib/review-schema";
 import { ReviewCard } from "./ReviewCard";
 import { CATEGORY_META, SCOPE_LABEL, STATUS_META } from "./review-meta";
+import { Select } from "@/components/ui/select";
 
 type ScopeType = ReviewItem["scope"]["type"];
 type Kind = ReviewItem["kind"];
@@ -236,18 +237,13 @@ function FilterSelect({
   return (
     <label className="flex min-w-0 flex-col gap-1">
       <span className="text-text-faint">{label}</span>
-      <select
+      <Select
         value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full min-w-0 truncate rounded-lg border border-border bg-surface px-1.5 py-1 text-xs shadow-sm transition-colors focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand-ring"
-        aria-label={`筛选${label}`}
-      >
-        {options.map(([v, l]) => (
-          <option key={v} value={v}>
-            {l}
-          </option>
-        ))}
-      </select>
+        onChange={onChange}
+        options={options.map(([v, l]) => ({ value: v, label: l }))}
+        ariaLabel={`筛选${label}`}
+        size="sm"
+      />
     </label>
   );
 }

@@ -11,6 +11,7 @@ import { ContextChat, type ChatTurn } from "@/components/chat/ContextChat";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { SettingsPanel } from "@/components/SettingsPanel";
 import { buttonClass } from "@/components/ui/button";
+import { Select } from "@/components/ui/select";
 import {
   loadSettings,
   settingsToRequestBody,
@@ -541,24 +542,21 @@ export default function Home() {
         <input
           value={doc.title}
           onChange={(e) => setDoc({ ...doc, title: e.target.value })}
-          className="w-full max-w-xs rounded-lg border border-transparent bg-transparent px-2 py-1 text-lg font-semibold tracking-tight transition-colors hover:border-border focus:border-brand focus:bg-surface focus:outline-none focus:ring-2 focus:ring-brand-ring"
+          className="w-72 shrink-0 rounded-lg border border-transparent bg-transparent px-2 py-1 text-lg font-semibold tracking-tight transition-colors hover:border-border focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand-ring"
           aria-label="文档标题"
         />
         <label className="flex items-center gap-1.5 text-xs text-text-muted">
           审阅模式
-          <select
+          <Select
             value={mode}
-            onChange={(e) => setMode(e.target.value as ReviewMode)}
-            disabled={loading}
-            className="rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs shadow-sm transition-colors focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand-ring"
-            aria-label="审阅模式"
-          >
-            {(Object.keys(MODE_LABEL) as ReviewMode[]).map((m) => (
-              <option key={m} value={m}>
-                {MODE_LABEL[m]}
-              </option>
-            ))}
-          </select>
+            onChange={(v) => setMode(v as ReviewMode)}
+            options={(Object.keys(MODE_LABEL) as ReviewMode[]).map((m) => ({
+              value: m,
+              label: MODE_LABEL[m],
+            }))}
+            ariaLabel="审阅模式"
+            className="w-28"
+          />
         </label>
 
         {loading ? (
