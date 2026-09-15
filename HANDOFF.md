@@ -3,6 +3,9 @@
 > 写给接手此项目的 agent / 开发者。
 > 项目计划与产品定义见根目录 [PLAN.md](./PLAN.md)——先读它。
 > 本文档只描述**当前进度、已验证的事实、以及接下来要做的事**。
+>
+> **这是项目唯一的交接文件。** 不要新建 `HANDOFF-xxx.md` 之类的阶段分册——
+> 阶段性的交接内容直接写进本文档对应章节，写完即删掉临时分册（内容先合并进来再删）。
 
 ## 项目一句话
 
@@ -26,7 +29,7 @@
 5. **API Key 只在服务端环境变量**（`.env.local`，已被 git 忽略），绝不进前端代码或日志。
 6. **防注入**：文档内容在 prompt 里被包裹为不可信数据，系统提示规定不执行其中指令；输出仍过 Zod + 业务校验。
 
-## 当前进度：阶段 0–6 全部完成 + 界面优化 + 界面美化
+## 当前进度：阶段 0–9 全部完成（含界面优化 + 美化）
 
 按 PLAN 第 14 节的阶段。已完成并**各自 commit**：
 
@@ -49,6 +52,7 @@
 
 1. **思考档位砍成 4 档 + 关**（`src/lib/settings.ts`）：原 7 档（minimal/low/medium/high/xhigh/max/ultra）太多，改为
    `auto`（默认，不传参交给模型）/ `off`（不思考）/ `low` / `high` / `max`。old 7 档值迁移时统一落到 `auto`。
+   `low/high/max` 取自另一个 agent 的调研结论——与 Kimi K3、DeepSeek 原生档位对齐的「行业最大公约数」，不要再扩档。
 2. **协议层映射独立**（`src/lib/llm/thinking.ts`）：`resolveThinkingParam()` 把档位翻译成请求参数，服务端 provider 与前端共用，
    不再放在浏览器侧的 settings.ts 里。`auto` 不传参；`off` 传 `enable_thinking: false`（DeepSeek 风格端点）；
    `low/high/max` 作为 `reasoning_effort` 原样透传。**有意不做按模型能力的 clamp 映射表**：端点不支持就让 400 暴露给用户，
@@ -63,8 +67,19 @@
 6. **顺手修复：下拉被模态裁切**（`src/components/ui/select.tsx`）：自定义 Select 原来用绝对定位，在设置面板这个
    `overflow-y-auto` 滚动容器里会被裁掉——底部的「思考档位」5 个选项只能看到 1 个（实测 1000px 视口下仍被裁 132px）。
    改为 portal 挂到 body + `fixed` 定位，下方空间不足自动向上翻转，滚动/缩放时跟随。所有 4 处 Select 都已验证。
+7. **顺手修复：整页宽度随正文内容变化**（`src/app/page.tsx`，commit `eaeb7be`）：`body` 是 `flex flex-col`，
+   而 `<main>` 带 `mx-auto max-w-7xl`。flex 子项在交叉轴上一旦有 `auto` 外边距，就不再被 `align-items: stretch`
+   撑开，而是按 fit-content 定宽——于是整页宽度由内容决定：正文短或刚清空时整页缩窄（1440 视口下 `main`
+   只有 1029px），正文长时才撑满 1280px。表现出来就是「同一窗口宽度下输入框宽度却在变」（与滚动条无关，
+   压视口高度强制出滚动条后窄的依然是 1029px）。给 `<main>` 补 `w-full` 后，1600/1440/1000/900 四种视口下
+   「有内容 / 空文档」两种状态宽度均一致。
 
 **测试**：新增 `tests/settings.test.ts`（迁移/预设/请求体 8 个）与 `tests/thinking.test.ts`（档位映射 + provider 请求体 12 个）。
+
+**已完成并验证（commit `e6282cf`，含 `eaeb7be` 补修）**：typecheck / lint / 85 个 Vitest / 15 个 E2E / 生产构建全过。
+浏览器实测（Playwright + 系统 Chrome，深浅色各一遍）：旧扁平格式（含 Key + `xhigh` 档）→ 刷新后 Key 保留、档位回落 `auto`；
+预设新建 / 改名 / 切换 / 删除 / 落盘 / 刷新回读；**切换预设不互相覆盖 Key**（旧痛点已解决）；删除预设是草稿态
+（点「取消」不落盘、点「保存」才生效）；只剩 1 条预设时删除按钮 disabled；档位下拉 5 项齐全且深浅色配色正常。
 
 
 ### 阶段 8：界面美化（已完成）
@@ -164,6 +179,8 @@ npm run build      # 生产构建
 
 - 批量接受 ChangeSet 目前依赖编辑器 history 撤销（Ctrl+Z），没有像单条那样在卡片上提供“撤销本次修改”的独立按钮。PLAN 5.1 只要求单条可撤销，故未扩 scope。
 - E2E 强依赖内置样例文本片段（mock 从请求体按文本反查 blockId），改动 `sample-data.ts` 的措辞时需同步更新 `tests/e2e/helpers.ts`。
+- **代理支持（Zero Omega 这类）不需要做**：LLM 请求由 Next.js 服务端 fetch 发出，不经过浏览器，浏览器代理插件只影响用户访问页面本身。服务端若要走代理得设 `HTTPS_PROXY` 环境变量（Node 原生 fetch 不自动读，需 undici 的 `EnvHttpProxyAgent` 之类）。用户问过后没要求实现，搁置。
+- **按模型能力的档位 clamp 映射表有意不做**：端点不支持某档位就直接 400 报错给用户，比静默降级好。将来真要做映射表再加（见阶段 9 第 2 条）。
 
 ### ⚠️ 安全注意：用户配置的 API Key 以明文存储在 localStorage
 
@@ -214,9 +231,9 @@ tests/e2e/                      # 15 个 Playwright 用例（config 在根目录
 
 ```
 请先读 PLAN.md 和 HANDOFF.md，了解项目目标与当前进度。这是一个 Next.js 16 + Tiptap 3 的
-AI 文档审阅工具，阶段 0-8 已全部完成，阶段 9（思考档位四档化 + 模型配置预设）刚完成：
-档位改为 auto/off/low/high/max，LLM 配置按命名预设组织（切换不丢 Key），并修掉了
-设置面板里下拉被模态裁切的问题。85 个 Vitest 用例与 15 个 Playwright 用例全过。
+AI 文档审阅工具，阶段 0-9 已全部完成：档位改为 auto/off/low/high/max，LLM 配置按命名预设
+组织（切换不丢 Key），并修掉了设置面板下拉被模态裁切、整页宽度随正文内容变化两个问题。
+85 个 Vitest 用例与 15 个 Playwright 用例全过。
 修改前先跑 npm run test 与 npm run test:e2e 确认基线是绿的；每完成一项跑
 npm run typecheck / lint / test，并按阶段 commit。不要扩张到非 MVP 范围。
 ```
