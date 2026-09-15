@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // 打包产物（npm run package:app）：含复制的 app 与 node_modules，不参与 lint
+    "dist/**",
   ]),
 ]);
 

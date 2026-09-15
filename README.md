@@ -47,6 +47,7 @@ npm run test       # Vitest（单元/集成）
 npm run test:e2e   # Playwright（端到端）
 npm run build      # 生产构建
 npm start          # 启动生产服务器
+npm run package:app # 打包成可双击启动的本地应用（见下）
 ```
 
 ### 端到端测试
@@ -58,6 +59,42 @@ npm run test:e2e
 `playwright.config.ts` 会自动启动 `npm run dev`（已存在服务时复用）。E2E 用例会拦截 `/api/review`、`/api/chat`，用固定响应验证前端接线，**不需要 API Key，也不消耗模型额度**。
 
 本机配置说明：用例使用系统安装的 Google Chrome（`channel: "chrome"`），而不是 Playwright 下载的 chromium——下载构建所需的系统依赖在本机不可用。若在别处运行，可先 `npx playwright install --with-deps chromium` 再改用默认浏览器。
+
+## 打包成可双击启动的本地应用
+
+日常使用不必每次开终端跑 `npm run dev`。可以打成一个自包含目录，双击启动、自动开浏览器：
+
+```bash
+npm run package:app
+```
+
+产物在 `dist/`（约 70 MB）：
+
+```text
+dist/
+├─ app/            Next.js 服务本体，自带依赖，只需要系统有 Node
+│  └─ .env.local   密钥配置（打包时从项目根目录复制）
+├─ start.mjs       跨平台启动器（起服务 + 打开浏览器）
+├─ start.cmd       Windows 双击入口
+└─ start.sh        Linux/macOS 双击入口
+```
+
+启动方式：
+
+- **Windows**：双击 `dist\start.cmd`（或在该目录执行 `node start.mjs`）
+- **Linux / macOS**：`./dist/start.sh`（或 `node dist/start.mjs`）
+
+默认跑在 3000 端口，改端口用 `PORT=3200 node start.mjs`。关掉窗口即停止服务。草稿存在浏览器本地，换端口或换浏览器不会丢，但不同浏览器之间互不可见。
+
+### 关于在 Windows 上使用
+
+有两条路，按你的偏好选：
+
+1. **在 Windows 上打包（推荐）**：把项目源码拷到 Windows，装好 Node.js（20.9+，[下载](https://nodejs.org/)），在该目录执行 `npm install` 然后 `npm run package:app`。之后双击 `dist\start.cmd` 即可，日常不用再装 Node 依赖，只需要这台机器保持装了 Node。
+
+2. **把本机（Linux）打好的包直接拷过去**：**不行**。打包产物里带平台专属的原生二进制（图片优化用的 `sharp`，Linux 版是 `@img/sharp-linux-x64`），在 Windows 上无法加载。必须换到 Windows 重新打一次。
+
+如果连 Node 也不想在 Windows 上装，可以给产物再套一层 Node 单文件运行时（`node --experimental-sea-config` 打包或 `pkg`），把 `node.exe` 和 `app/` 放一起，让启动器调用自带的 `node.exe`。这属于额外的分发工作量，本项目没有预置。
 
 ## 部署
 
