@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { buttonClass } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
+import { renderMiniMarkdown } from "@/lib/mini-markdown";
 import {
   saveSettings,
   DEFAULT_SETTINGS,
@@ -41,6 +42,14 @@ export function SettingsPanel({
   const [tab, setTab] = useState<Tab>("model");
   const [draft, setDraft] = useState<UserSettings>(settings);
   const [saved, setSaved] = useState(false);
+  // 自定义指令框「双层」状态：聚焦编辑源文本（等宽），失焦渲染 markdown 预览。
+  // 底层存储与发送的始终是源文本，渲染只影响前端显示。
+  const [customPromptFocused, setCustomPromptFocused] = useState(false);
+  // 切换预设时的刷新感：key 变化触发下方字段容器的 animate-item-in 重播
+  const [presetSwitchTick, setPresetSwitchTick] = useState(0);
+  // 测试连接状态
+  const [testStatus, setTestStatus] = useState<"idle" | "testing">("idle");
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   // 面板每次打开时重置 draft：用“上次同步的 settings”做渲染期比对，
   // 只在引用变化时 setState（React 推荐的 derived-state-from-props 模式）
   const [prevSynced, setPrevSynced] = useState<{ open: boolean; settings: UserSettings }>({
@@ -94,6 +103,49 @@ export function SettingsPanel({
       return { ...d, llm: { activeId: presets[0].id, presets } };
     });
   }, []);
+
+  /** 测试当前选中预设的连接（含代理）：发一个极小的请求探测连通性 */
+  const handleTestConnection = useCallback(async () => {
+    const preset = getActivePreset(draft);
+    if (!preset.apiKey || testStatus === "testing") return;
+    setTestStatus("testing");
+    setTestResult(null);
+    try {
+      const res = await fetch("/api/test-connection", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          llmConfig: {
+            apiKey: preset.apiKey,
+            baseURL: preset.baseURL || undefined,
+            model: preset.model || undefined,
+            reasoningEffort: preset.reasoningEffort,
+            proxy: preset.proxy.enabled
+              ? { type: preset.proxy.type, host: preset.proxy.host, port: preset.proxy.port }
+              : undefined,
+          },
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        setTestResult({ ok: true, message: "连接成功" });
+      } else {
+        setTestResult({
+          ok: false,
+          message: data?.error?.message ?? `连接失败（HTTP ${res.status}）`,
+        });
+      }
+    } catch (e) {
+      setTestResult({
+        ok: false,
+        message: e instanceof Error ? e.message : "连接失败。",
+      });
+    } finally {
+      setTestStatus("idle");
+      // 15 秒后自动清除结果
+      setTimeout(() => setTestResult(null), 15000);
+    }
+  }, [draft, testStatus]);
 
   const updateReview = useCallback(
     (patch: Partial<UserSettings["review"]>) => {
@@ -189,43 +241,48 @@ export function SettingsPanel({
         <div className="flex-1 overflow-y-auto px-6 py-5">
           {tab === "model" && (
             <div className="space-y-5">
-              {/* 配置预设：切换只改 activeId，各预设的 Key/模型各自保留 */}
-              <div className="rounded-xl border border-border bg-surface-muted/50 p-3.5">
-                <div className="flex items-end gap-2">
-                  <div className="min-w-0 flex-1">
-                    <label className={labelCls}>当前配置</label>
-                    <Select
-                      value={draft.llm.activeId}
-                      onChange={(id) =>
-                        setDraft((d) => ({
-                          ...d,
-                          llm: { ...d.llm, activeId: id },
-                        }))
-                      }
-                      options={draft.llm.presets.map((p) => ({
-                        value: p.id,
-                        label: p.name,
-                      }))}
-                      ariaLabel="当前配置"
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleAddPreset}
-                    className={buttonClass("secondary", "md") + " shrink-0"}
-                  >
-                    + 新建
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleDeletePreset}
-                    disabled={draft.llm.presets.length <= 1}
-                    className={buttonClass("danger", "md") + " shrink-0"}
-                  >
-                    删除
-                  </button>
+              {/* 配置预设选择器：切换只改 activeId，各预设的 Key/模型/代理各自保留。
+                  视觉上与其他字段平级——一个预设包含下面所有字段，不分组。 */}
+              <div className="flex items-end gap-2">
+                <div className="min-w-0 flex-1">
+                  <label className={labelCls}>当前配置</label>
+                  <Select
+                    value={draft.llm.activeId}
+                    onChange={(id) => {
+                      setDraft((d) => ({
+                        ...d,
+                        llm: { ...d.llm, activeId: id },
+                      }));
+                      setPresetSwitchTick((t) => t + 1);
+                    }}
+                    options={draft.llm.presets.map((p) => ({
+                      value: p.id,
+                      label: p.name,
+                    }))}
+                    ariaLabel="当前配置"
+                  />
                 </div>
-                <div className="mt-3">
+                <button
+                  type="button"
+                  onClick={handleAddPreset}
+                  className={buttonClass("secondary", "md") + " shrink-0"}
+                >
+                  + 新建
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeletePreset}
+                  disabled={draft.llm.presets.length <= 1}
+                  className={buttonClass("danger", "md") + " shrink-0"}
+                >
+                  删除
+                </button>
+              </div>
+
+              {/* 切换预设时给字段容器一个入场动画，让切换有"内容刷新了"的感知 */}
+              <div key={presetSwitchTick} className="animate-item-in space-y-5">
+              <div className="flex items-end gap-2">
+                <div className="min-w-0 flex-1">
                   <label className={labelCls}>配置名称</label>
                   <input
                     type="text"
@@ -236,11 +293,33 @@ export function SettingsPanel({
                     placeholder="例如：DeepSeek 主力号"
                     className={inputCls}
                   />
-                  <p className="mt-1.5 text-xs text-text-faint">
-                    预设会记住各自的 Key / 地址 / 模型，切换不会互相覆盖。
-                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-2 pb-0.5">
+                  <button
+                    type="button"
+                    onClick={handleTestConnection}
+                    disabled={testStatus === "testing" || !activePreset.apiKey}
+                    className={buttonClass("secondary", "md")}
+                  >
+                    {testStatus === "testing" ? "测试中…" : "测试连接"}
+                  </button>
                 </div>
               </div>
+              {testResult && (
+                <p
+                  className={
+                    "-mt-3 text-xs " +
+                    (testResult.ok
+                      ? "text-emerald-600 dark:text-emerald-400"
+                      : "text-red-600 dark:text-red-400")
+                  }
+                >
+                  {testResult.message}
+                </p>
+              )}
+              <p className="-mt-3 text-xs text-text-faint">
+                预设会记住各自的 Key / 地址 / 模型 / 代理，切换不会互相覆盖。
+              </p>
 
               <div>
                 <label className={labelCls}>API Key</label>
@@ -301,6 +380,79 @@ export function SettingsPanel({
                   控制模型在回复前的思考深度。「默认」不传参交给模型；「不思考」会请求关闭思考（不支持的提供商会报错）。
                 </p>
               </div>
+
+              {/* 代理：只影响服务端 → LLM 供应商的请求，不影响浏览器本身的网络 */}
+              <div>
+                <label className={labelCls}>代理</label>
+                <div className="flex items-center gap-3">
+                  <label className="flex cursor-pointer items-center gap-1.5 text-sm text-foreground">
+                    <input
+                      type="checkbox"
+                      checked={activePreset.proxy.enabled}
+                      onChange={(e) =>
+                        updateActivePreset({
+                          proxy: { ...activePreset.proxy, enabled: e.target.checked },
+                        })
+                      }
+                      className="accent-[#0da678]"
+                    />
+                    启用代理
+                  </label>
+                  {activePreset.proxy.enabled && (
+                    <Select
+                      value={activePreset.proxy.type}
+                      onChange={(v) =>
+                        updateActivePreset({
+                          proxy: {
+                            ...activePreset.proxy,
+                            type: v as "http" | "socks5",
+                          },
+                        })
+                      }
+                      options={[
+                        { value: "http", label: "HTTP" },
+                        { value: "socks5", label: "SOCKS5" },
+                      ]}
+                      ariaLabel="代理类型"
+                    />
+                  )}
+                </div>
+                {activePreset.proxy.enabled && (
+                  <div className="mt-2 flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={activePreset.proxy.host}
+                      onChange={(e) =>
+                        updateActivePreset({
+                          proxy: { ...activePreset.proxy, host: e.target.value },
+                        })
+                      }
+                      placeholder="127.0.0.1"
+                      className={inputCls.replace("w-full", "min-w-0 flex-1 w-auto")}
+                      aria-label="代理主机"
+                    />
+                    <input
+                      type="number"
+                      value={activePreset.proxy.port}
+                      onChange={(e) => {
+                        const p = parseInt(e.target.value, 10);
+                        if (!isNaN(p) && p > 0 && p < 65536) {
+                          updateActivePreset({
+                            proxy: { ...activePreset.proxy, port: p },
+                          });
+                        }
+                      }}
+                      placeholder="7890"
+                      className={inputCls.replace("w-full", "w-24 shrink-0")}
+                      aria-label="代理端口"
+                    />
+                  </div>
+                )}
+                <p className="mt-1.5 text-xs text-text-faint">
+                  仅用于服务端连接 LLM 供应商，不影响浏览器本身的网络。浏览器插件代理管不到 LLM 请求。
+                </p>
+              </div>
+              </div>
             </div>
           )}
 
@@ -334,15 +486,40 @@ export function SettingsPanel({
               </div>
               <div>
                 <label className={labelCls}>自定义指令</label>
-                <textarea
-                  value={draft.review.customPrompt}
-                  onChange={(e) => updateReview({ customPrompt: e.target.value })}
-                  placeholder={"给审阅助手的补充指令...\n\n例如：重点关注被动语态\n     对标点符号严格要求\n     偏好简洁的句子"}
-                  rows={8}
-                  className={inputCls + " resize-y font-mono"}
-                />
+                <div className="relative">
+                  <textarea
+                    value={draft.review.customPrompt}
+                    onChange={(e) => updateReview({ customPrompt: e.target.value })}
+                    onFocus={() => setCustomPromptFocused(true)}
+                    onBlur={() => setCustomPromptFocused(false)}
+                    placeholder={"给审阅助手的补充指令...\n\n支持 markdown 格式（# 标题、- 列表、**加粗** 等）。\n失焦时预览渲染效果，聚焦时编辑原文。\n\n例如：for example 不用 for instance\n     更倾向 neural activity"}
+                    rows={8}
+                    className={
+                      inputCls +
+                      " resize-y font-mono " +
+                      (customPromptFocused ||
+                      !draft.review.customPrompt.trim()
+                        ? ""
+                        : "invisible")
+                    }
+                  />
+                  {!customPromptFocused &&
+                    draft.review.customPrompt.trim() && (
+                      <div
+                        role="presentation"
+                        tabIndex={-1}
+                        className="absolute inset-0 cursor-text overflow-y-auto rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground shadow-sm"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          setCustomPromptFocused(true);
+                        }}
+                      >
+                        {renderMiniMarkdown(draft.review.customPrompt)}
+                      </div>
+                    )}
+                </div>
                 <p className="mt-1.5 text-xs text-text-faint">
-                  追加到系统提示末尾。JSON 输出协议和锚点规则已锁定，无法被覆盖。
+                  追加到系统提示末尾，底层存储与发送的是原始 markdown 源。JSON 输出协议和锚点规则已锁定，无法被覆盖。
                 </p>
               </div>
             </div>

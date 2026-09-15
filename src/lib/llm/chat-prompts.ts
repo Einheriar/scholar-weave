@@ -32,6 +32,8 @@ const CONTEXT_LABEL: Record<ChatRequest["context"]["type"], string> = {
 
 export function buildChatMessages(req: ChatRequest): ChatMessage[] {
   const language = req.language === "zh" ? "中文" : "英文";
+  // 解释语言：固定中文，与文档语言无关（用户是中文母语）
+  const explanationLanguage = "中文";
   const contextDesc = CONTEXT_LABEL[req.context.type];
   const reviewPart =
     req.context.type === "review" && req.reviewItem
@@ -42,6 +44,7 @@ export function buildChatMessages(req: ChatRequest): ChatMessage[] {
     : "";
 
   const system = `你是一个文档写作助手，正在就一份${language}文档与用户对话。当前对话上下文是：${contextDesc}。${reviewPart}${selectedPart}
+你的解释/回答用${explanationLanguage}撰写（无论文档是什么语言）；涉及替换正文时，replacement 用${language}（与对应段落原文一致）。
 
 ${SAFETY}
 
@@ -57,7 +60,17 @@ ${EDIT_ANCHOR}
 【行为准则】
 - 只有用户明确要求修改时才返回 answer_with_changes；解释、比较、回答问题时用 answer。
 - 修改要最小、精准，尊重用户附加的限制（如保留术语、更保守）。
-- 拿不准时不要生成修改，用 answer 说明。`;
+- 拿不准时不要生成修改，用 answer 说明。
+- answer 字段支持受限 markdown（段落、# 标题、- 列表、1. 有序列表、**加粗**、*斜体*、\`行内代码\`），可用于结构化说明；不要输出链接或图片。
+
+【重写意图】当用户说"推倒重来 / 重写 / 我有瓶颈"时，走 answer_with_changes，把 3 个版本放进 answer 字段（用 ## 标题分节）：
+## 稳健版
+（最小修改，贴近原文）
+## 逻辑增强版
+（强化因果链与过渡）
+## 精炼有力版
+（短句高冲击，Nature/Science 摘要风格）
+changeSet 里只放你推荐的那一版（说明里注明推荐哪一版）；用户点"预览修改"即可确认该版本。`;
 
   const user = `相关文档片段（block id 供 original 引用）：
 <document>
@@ -82,6 +95,8 @@ ${blocksSection(req.blocks)}
 
 export function buildChangeSetMessages(req: ChangeSetRequest): ChatMessage[] {
   const language = req.language === "zh" ? "中文" : "英文";
+  // 解释语言：固定中文（与审阅、对话一致）
+  const explanationLanguage = "中文";
   const scopeDesc =
     req.sourceReview.scope.type === "document"
       ? "整篇文档"
@@ -93,6 +108,7 @@ export function buildChangeSetMessages(req: ChangeSetRequest): ChatMessage[] {
     : "";
 
   const system = `你是一个文档修改助手。用户有一条针对${scopeDesc}的审阅意见，需要你把它转化成一组可直接执行的具体修改（${language}文档）。
+summary 与每条 explanation 用${explanationLanguage}撰写；replacement 用${language}（与对应段落原文一致）。
 
 ${SAFETY}
 

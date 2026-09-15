@@ -63,14 +63,20 @@ export function Select({
     const spaceBelow = window.innerHeight - r.bottom - GAP;
     const spaceAbove = r.top - GAP;
     const flipUp = spaceBelow < PANEL_MAX_H && spaceAbove > spaceBelow;
+    // 浮层宽度不小于按钮宽度，也不能窄于最长选项的文本（避免 "SOCKS5" 被截断）
+    const longest = options.reduce(
+      (max, o) => Math.max(max, o.label.length),
+      0,
+    );
+    const estMinWidth = longest * 8 + 40; // ~8px/字符 + padding + 选中勾
     setRect({
       left: r.left,
-      width: r.width,
+      width: Math.max(r.width, estMinWidth),
       ...(flipUp
         ? { bottom: window.innerHeight - r.top + GAP }
         : { top: r.bottom + GAP }),
     });
-  }, []);
+  }, [options]);
 
   useLayoutEffect(() => {
     if (!open) return;

@@ -42,7 +42,9 @@ export async function POST(request: Request) {
   }
 
   const messages = buildChangeSetMessages(body);
-  const result = await callLLMStructured(request, messages, LLMChangeSetSchema);
+  const result = await callLLMStructured(request, messages, LLMChangeSetSchema, {
+    llmConfig: body.llmConfig,
+  });
   if (!result.ok) return result.response;
 
   const doc: DocumentState = {

@@ -50,6 +50,23 @@ export const LLMChatResponseSchema = z.discriminatedUnion("type", [
 ]);
 export type LLMChatResponse = z.infer<typeof LLMChatResponseSchema>;
 
+/** 用户 LLM 配置（与审阅共用形态；优先于服务端 env） */
+const UserLLMConfigSchema = z
+  .object({
+    apiKey: z.string().min(1),
+    baseURL: z.string().optional(),
+    model: z.string().optional(),
+    reasoningEffort: z.string().optional(),
+    proxy: z
+      .object({
+        type: z.enum(["http", "socks5"]),
+        host: z.string().min(1),
+        port: z.number().int().positive().lt(65536),
+      })
+      .optional(),
+  })
+  .optional();
+
 /** POST /api/chat 请求 */
 export const ChatRequestSchema = z.object({
   documentId: z.string().min(1),
@@ -62,6 +79,8 @@ export const ChatRequestSchema = z.object({
   history: z.array(ChatMessageSchema).default([]),
   /** 必要文档片段：按上下文打包后的段落 */
   blocks: z.array(z.object({ id: z.string().min(1), text: z.string() })),
+  /** 用户 LLM 配置（优先于服务端 env） */
+  llmConfig: UserLLMConfigSchema,
   /** 上下文关联的建议（context.type === "review" 时） */
   reviewItem: z
     .object({
@@ -95,5 +114,7 @@ export const ChangeSetRequestSchema = z.object({
   instruction: z.string().optional(),
   blocks: z.array(z.object({ id: z.string().min(1), text: z.string() })),
   language: z.enum(["zh", "en"]).default("zh"),
+  /** 用户 LLM 配置（优先于服务端 env） */
+  llmConfig: UserLLMConfigSchema,
 });
 export type ChangeSetRequest = z.infer<typeof ChangeSetRequestSchema>;

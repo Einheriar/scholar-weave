@@ -26,14 +26,18 @@ severity 取值：info（提示）/ suggestion（建议）/ important（重要�
 const MODE_GUIDE: Record<ReviewRequest["mode"], string> = {
   proofread: `只纠错：仅报告明确的语法、拼写、标点、用词错误（category 主要是 grammar / consistency）。
 不做风格改写，不提主观优化意见。最小修改原则：能改一个词就不改一句话。`,
-  polish: `适度润色：在纠错基础上，顺带指出影响清晰度和流畅度的问题（grammar / clarity / style / consistency）。
-仍然保持最小修改，不改变作者的观点、结构和语气。`,
+  polish: `适度润色：在纠错基础上，指出影响清晰度、流畅度、学术语域的问题（grammar / clarity / style / consistency）。
+修改保持最小、不改变作者的观点、结构和论证；replacement 保持原文语域（中文文档给中文，英文文档给英文），不擅自"升级"文体。`,
   deep_review: `深度审阅：除语言问题外，还要给出结构、逻辑、论证层面的意见（structure / logic 多用 opinion）。
-可以提出段落级的重组建议（block + opinion），但全文级结构性意见用 document + opinion，不要直接给整段 replacement。`,
+可以提出段落级的重组建议（block + opinion），但全文级结构性意见用 document + opinion，不要直接给整段 replacement。
+【重写模式】用户在对话里说"推倒重来 / 重写 / 我有瓶颈"时，走对话通道：出 3 个不同风格的版本（稳健版 / 逻辑增强版 / 精炼有力版），让用户挑一版；用户挑中后再走 ChangeSet 预览确认，不要直接改正文。`,
 };
 
 function buildSystemPrompt(req: ReviewRequest): string {
+  // 文档语言：replacement 要写成什么语言跟它走（用户场景只有「中文文档 / 英文文档」两种）
   const language = req.language === "zh" ? "中文" : "英文";
+  // 解释语言：固定中文，与文档语言无关（用户是中文母语，只用中文看解释）
+  const explanationLanguage = "中文";
   const style = req.style?.trim() ? req.style.trim() : "保持原文风格";
   const preserve =
     req.preserveTerms.length > 0
@@ -52,7 +56,7 @@ function buildSystemPrompt(req: ReviewRequest): string {
 
 【审阅模式】${MODE_GUIDE[req.mode]}
 
-【输出语言与风格】用${language}撰写 explanation 与 title；目标写作风格：${style}。${preserve}
+【输出语言与风格】title 与 explanation 用${explanationLanguage}撰写（无论文档是什么语言）；edit 的 replacement 用${language}（与对应段落原文一致）。目标写作风格：${style}。${preserve}
 
 【输出协议】严格输出一个 JSON 对象：
 {
@@ -73,7 +77,8 @@ ${SCOPE_GUIDE}
 【质量要求】
 - 只报告真实、必要的问题，不要为凑数而提意见。
 - edit 的 replacement 必须能直接替换 original 并使句子更正确，且不得改变原意。
-- 拿不准的问题不要提；无法精确定位的不要造 edit。${custom}`;
+- 拿不准的问题不要提；无法精确定位的不要造 edit。
+- explanation 支持受限 markdown（段落、# 标题、- 列表、1. 有序列表、**加粗**、*斜体*、\`行内代码\`），可用于结构化说明；不要输出链接或图片。${custom}`;
 }
 
 function buildUserPrompt(req: ReviewRequest): string {

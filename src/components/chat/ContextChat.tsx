@@ -8,6 +8,7 @@ import type {
   ReviewItem,
 } from "@/lib/review-schema";
 import { buttonClass } from "@/components/ui/button";
+import { renderMiniMarkdown } from "@/lib/mini-markdown";
 
 export type ContextChatProps = {
   context: ChatContext;
@@ -87,7 +88,9 @@ export function ContextChat({
                   : "mr-10 rounded-2xl rounded-bl-sm bg-surface-muted text-foreground")
               }
             >
-              <p className="whitespace-pre-wrap break-words leading-relaxed">{t.content}</p>
+              <div className="break-words leading-relaxed">
+                {renderMiniMarkdown(t.content)}
+              </div>
               {t.changeSet && (
                 <button
                   type="button"

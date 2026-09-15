@@ -55,7 +55,9 @@ export async function POST(request: Request) {
   }
 
   const messages = buildChatMessages(body);
-  const result = await callLLMStructured(request, messages, LLMChatResponseSchema);
+  const result = await callLLMStructured(request, messages, LLMChatResponseSchema, {
+    llmConfig: body.llmConfig,
+  });
   if (!result.ok) return result.response;
   const llm = result.data;
 

@@ -28,6 +28,15 @@ export const REASONING_EFFORT_OPTIONS: Array<{
   { value: "max", label: "Max", description: "最大思考量" },
 ];
 
+export type ProxyType = "http" | "socks5";
+
+export type ProxyConfig = {
+  enabled: boolean;
+  type: ProxyType;
+  host: string;
+  port: number;
+};
+
 export type LLMPreset = {
   id: string;
   /** 用户自定义名称，例如 "DeepSeek 主力号" */
@@ -36,6 +45,8 @@ export type LLMPreset = {
   baseURL: string;
   model: string;
   reasoningEffort: ReasoningEffort;
+  /** 该预设专用的代理设置；enabled=false 时直连 */
+  proxy: ProxyConfig;
 };
 
 export type ReviewPreferences = {
@@ -67,17 +78,57 @@ const DEFAULT_PRESET: LLMPreset = {
   baseURL: "https://api.deepseek.com",
   model: "deepseek-chat",
   reasoningEffort: "auto",
+  proxy: { enabled: false, type: "http", host: "127.0.0.1", port: 7890 },
 };
+
+/** 给每个调用方一份独立的默认 proxy 结构 */
+function defaultProxy(): ProxyConfig {
+  return { ...DEFAULT_PRESET.proxy };
+}
 
 /** 给每个调用方一份独立的默认 llm 结构，避免共享 presets 数组被就地改写 */
 function defaultLlm(): UserSettings["llm"] {
   return { activeId: DEFAULT_PRESET.id, presets: [{ ...DEFAULT_PRESET }] };
 }
 
+/**
+ * 默认的软提示词（写作原则 + 风格约束），原样摘自用户提供的学术写作指令。
+ * 硬提示词（JSON 协议、锚点规则、模式说明）由系统提示词锁定，不在这里。
+ */
+export const DEFAULT_CUSTOM_PROMPT = `## Core Writing Principles (Mandatory)
+
+- **Concise & Elegant**: Eliminate redundancy and vague logic. Every sentence should be lean and purposeful.
+- **Academic Rigor**: Use formal, professional terminology with precise grammatical structures.
+- **Logical Coherence**: Ensure seamless transitions between sentences and paragraphs, maintaining a rigorous deductive order.
+- **Fluency**: Optimize sentence rhythm and variety. Avoid repetitive vocabulary and loose structures.
+- **Sentence Rhythm**: Favor moderately long sentences for establishing context or articulating complex mechanisms, followed by shorter sentences for emphasis or summary. The contrast in length creates momentum; do not flatten the rhythm into uniform sentence lengths.
+- **One Focus Per Sentence**: Each sentence should carry a single clear informational focus. Do not stack multiple layers of information (e.g., instrument, brain region, task, and outcome variable) into one sentence. Distribute information across sentences in a logical progression.
+- **Declarative vs. Argumentative Paragraphs**: Distinguish clearly between paragraphs that *argue* and paragraphs that *announce*. In particular, a "Current Study" paragraph at the end of an Introduction should declare the study design and hypotheses concisely, not re-argue the rationale already established in preceding paragraphs. A single clause of recapitulation is sufficient (e.g., "Given their consistent involvement in X and established relevance to Y, ...").
+- **Dialectical Structure in Discussion**: When engaging with competing findings or alternative explanations, follow a three-move pattern: (1) acknowledge the validity of the opposing view, (2) introduce a counterpoint or complication via contrast, (3) derive a new theoretical insight. This applies at both the paragraph and multi-paragraph level.
+
+## Style Constraints (User's DNA) - ALWAYS ACTIVE
+
+- **Vocabulary Tone:**
+  - Prefer formal causal and contrastive connectors (e.g., "Hence", "Thus", "However", "Specifically", "In particular") over colloquial alternatives (e.g., "So", "But", "Also").
+  - This is a *tonal preference*, not a fixed lexicon. Vary connector choice naturally to avoid monotony; the guiding principle is formality over casualness.
+  - **Core verbs:** "Investigate", "Demonstrate", "Dissociate", "Question", "Argue", "Complement". Use these and their synonyms where contextually appropriate.
+  - **AVOID:** "Growing research...", "Looking into...".
+  - **Rule:** Use "for example" instead of "for instance".
+- **Nominalization:**
+  - Prefer compressed noun phrases over full clauses when describing processes or mechanisms (e.g., "the recruitment of cognitive control mechanisms" rather than "how the brain recruits cognitive control mechanisms"). This increases information density and maintains a formal register.
+- **Voice:**
+  - In Methods, default to passive voice for procedural descriptions, but do not avoid active voice when it improves clarity (e.g., "We recruited..." is acceptable).
+  - In Results, let the data act as subject when possible (e.g., "Results indicate...", "Clustering analyses revealed...").
+  - In Introduction and Discussion, choose voice freely based on what best serves the sentence's communicative goal.
+- **Lexical & Phrasing Preferences (Vocabulary Filter):**
+  - Use "neural activity" INSTEAD OF "cortical activity".
+- **ATTENTION:**
+  - **NEVER** use em-dashes (—) or dash-enclosed clauses. Use commas, parentheses, or separate sentences instead.`;
+
 export const DEFAULT_SETTINGS: UserSettings = {
   llm: defaultLlm(),
   review: {
-    customPrompt: "",
+    customPrompt: DEFAULT_CUSTOM_PROMPT,
     style: "保持原文风格",
     preserveTerms: "",
   },
@@ -103,11 +154,13 @@ export function createPreset(name?: string): LLMPreset {
     baseURL: "https://api.deepseek.com",
     model: "deepseek-chat",
     reasoningEffort: "auto",
+    proxy: defaultProxy(),
   };
 }
 
 /** 归一化一条（可能来自旧数据/手改 localStorage 的）预设 */
 function normalizePreset(raw: Partial<LLMPreset>, fallbackId: string): LLMPreset {
+  const rawProxy = (raw as { proxy?: Partial<ProxyConfig> }).proxy;
   return {
     id: typeof raw.id === "string" && raw.id ? raw.id : fallbackId,
     name: typeof raw.name === "string" && raw.name ? raw.name : "配置",
@@ -123,6 +176,15 @@ function normalizePreset(raw: Partial<LLMPreset>, fallbackId: string): LLMPreset
     reasoningEffort: REASONING_EFFORT_OPTIONS.some((o) => o.value === raw.reasoningEffort)
       ? (raw.reasoningEffort as ReasoningEffort)
       : "auto",
+    proxy: {
+      enabled: rawProxy?.enabled === true,
+      type: rawProxy?.type === "socks5" ? "socks5" : "http",
+      host: typeof rawProxy?.host === "string" && rawProxy.host ? rawProxy.host : "127.0.0.1",
+      port:
+        typeof rawProxy?.port === "number" && rawProxy.port > 0 && rawProxy.port < 65536
+          ? rawProxy.port
+          : 7890,
+    },
   };
 }
 
@@ -185,9 +247,12 @@ export function loadSettings(): UserSettings {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return freshDefaults();
     const parsed = JSON.parse(raw) as Partial<UserSettings>;
+    const review = { ...DEFAULT_SETTINGS.review, ...parsed.review };
+    // 迁移：旧数据 customPrompt 为空时填入默认软提示词
+    if (!review.customPrompt) review.customPrompt = DEFAULT_CUSTOM_PROMPT;
     return {
       llm: migrateLlm(parsed.llm),
-      review: { ...DEFAULT_SETTINGS.review, ...parsed.review },
+      review,
     };
   } catch {
     return freshDefaults();
@@ -213,6 +278,13 @@ export function settingsToRequestBody(settings: UserSettings) {
           baseURL: preset.baseURL || undefined,
           model: preset.model || undefined,
           reasoningEffort: preset.reasoningEffort,
+          proxy: preset.proxy.enabled
+            ? {
+                type: preset.proxy.type,
+                host: preset.proxy.host,
+                port: preset.proxy.port,
+              }
+            : undefined,
         }
       : undefined,
     reviewPrefs: {

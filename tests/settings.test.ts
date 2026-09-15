@@ -83,6 +83,27 @@ describe("loadSettings 迁移", () => {
     localStorage.setItem(STORAGE_KEY_FOR_TEST, "{not-json");
     expect(loadSettings()).toEqual(DEFAULT_SETTINGS);
   });
+
+  it("旧数据里 customPrompt 为空串时回填默认软提示词", () => {
+    localStorage.setItem(
+      STORAGE_KEY_FOR_TEST,
+      JSON.stringify({
+        llm: { activeId: "a", presets: [/* 省略 llm，走迁移 */ undefined] },
+        review: { customPrompt: "", style: "保持原文风格" },
+      }),
+    );
+    const s = loadSettings();
+    expect(s.review.customPrompt.length).toBeGreaterThan(0);
+    expect(s.review.customPrompt).toContain("Core Writing Principles");
+  });
+
+  it("旧数据里没有 review 字段时用默认软提示词", () => {
+    localStorage.setItem(
+      STORAGE_KEY_FOR_TEST,
+      JSON.stringify({ llm: { activeId: "a" } }),
+    );
+    expect(loadSettings().review.customPrompt).toContain("Core Writing Principles");
+  });
 });
 
 describe("settingsToRequestBody", () => {
@@ -108,6 +129,7 @@ describe("settingsToRequestBody", () => {
       baseURL: "https://other.com",
       model: "other-model",
       reasoningEffort: "low",
+      proxy: { enabled: false, type: "http", host: "127.0.0.1", port: 7890 },
     });
     s.llm.presets[0].apiKey = "sk-main";
     const body = settingsToRequestBody(s);
@@ -125,6 +147,7 @@ describe("saveSettings 往返", () => {
       baseURL: "https://openrouter.ai/api",
       model: "anthropic/claude",
       reasoningEffort: "off",
+      proxy: { enabled: true, type: "socks5", host: "10.0.0.1", port: 1080 },
     });
     s.llm.activeId = "p2";
     saveSettings(s);

@@ -442,6 +442,7 @@ export default function Home() {
       chatAbortRef.current?.abort();
       const controller = new AbortController();
       chatAbortRef.current = controller;
+      const prefs = settingsToRequestBody(settings);
 
       try {
         const res = await fetch("/api/chat", {
@@ -465,6 +466,7 @@ export default function Home() {
                 }
               : undefined,
             language: "en",
+            llmConfig: prefs.llmConfig,
           }),
         });
         const data = await res.json();
@@ -504,6 +506,7 @@ export default function Home() {
       packBlocks,
       activeConvId,
       persistConversation,
+      settings,
     ],
   );
 
@@ -520,6 +523,7 @@ export default function Home() {
           : undefined;
       setApplyingOpinionId(id);
       setChatError(null);
+      const prefs = settingsToRequestBody(settings);
       try {
         const res = await fetch("/api/change-set", {
           method: "POST",
@@ -543,6 +547,7 @@ export default function Home() {
                 ? doc.blocks.map((b) => ({ id: b.id, text: b.text }))
                 : packBlocks({ type: "review", reviewId: id, blockId: scopeBlockId }),
             language: "en",
+            llmConfig: prefs.llmConfig,
           }),
         });
         const data = await res.json();
@@ -556,7 +561,7 @@ export default function Home() {
         setApplyingOpinionId(null);
       }
     },
-    [doc, reviews, packBlocks],
+    [doc, reviews, packBlocks, settings],
   );
 
   // ── 修改集：接受选中 / 放弃 ──
@@ -675,7 +680,7 @@ export default function Home() {
   return (
     // w-full 不可省：body 是 flex 列容器，交叉轴上的 auto 边距会让本元素按
     // fit-content 定宽（由内容撑开），正文一短整页就跟着变窄。
-    <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-6 py-6">
+    <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-6 py-6 2xl:max-w-[1400px]">
       {/* 顶栏 */}
       <header className="mb-5 flex flex-wrap items-center gap-3">
         {/* 窄屏才出现的「三条横线」：拉出左侧历史记录抽屉（宽屏有常驻左栏） */}

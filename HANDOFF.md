@@ -70,6 +70,10 @@
 | `revision` / `checksum` | `src/lib/revisions.ts` | ⚠️ `revision` 只是**每敲一个字符 +1 的计数器**；PLAN 10.5 设计的"响应回来比对 revision/checksum"**尚未接线**。真正防过期的是上面那条锚点定位（见 AGENTS.md 陷阱 12） |
 | 本地持久化 | `src/lib/storage/` | Dexie(IndexedDB)，库名 `super-grammarly`，两张表 `documents` / `conversations`；读写都过 Zod 校验 |
 | 密钥与防注入 | `src/lib/settings.ts`、`src/lib/llm/prompts.ts` | 服务端密钥只在 `.env.local`；用户自带的 Key 存在浏览器 localStorage（明文，见 AGENTS.md 安全注意）；文档内容在 prompt 里按不可信数据包裹 |
+| 提示词中英分离 | `src/lib/llm/prompts.ts`、`chat-prompts.ts` | 解释永远中文；replacement 跟文档语言（`page.tsx` 里 `language: "en"` 写死） |
+| 代理 | `LLMPreset.proxy` → `settingsToRequestBody` → `llmConfig.proxy` → `undici.ProxyAgent` | HTTP/SOCKS5；也可用服务端环境变量 `SOCKS5_PROXY`/`HTTPS_PROXY`/`HTTP_PROXY` |
+| 测试连接 | `POST /api/test-connection` | `maxTokens: 64, reasoningEffort: "off"` 发极小请求，10s 超时 |
+| 受限 markdown 渲染 | `src/lib/mini-markdown.tsx` | 不引第三方库；标题/列表/加粗/斜体/行内代码；用于自定义指令框失焦预览 + explanation/对话渲染 |
 
 ### 1.6 技术栈与代码地图
 
@@ -88,37 +92,27 @@
 左下角常驻两个浮动按钮：设置（bottom-16）、主题切换（bottom-4）
 ```
 
-服务端三个 API 路由：`/api/review`（整篇审阅）、`/api/chat`（上下文对话）、
-`/api/change-set`（把一条意见转成可执行的修改集）。
+服务端四个 API 路由：`/api/review`（整篇审阅）、`/api/chat`（上下文对话）、
+`/api/change-set`（把一条意见转成可执行的修改集）、`/api/test-connection`（测试连通性）。
 
 ---
 
 ## 二、当前状态
 
-**阶段 0–10 全部完成，无阻塞。** 已实现的功能没有已知缺陷或坏掉的地方；第四节的两条
-抽屉待办（遮罩点击关闭、开合动画）已完成并实测通过。PLAN 定义的阶段 0–6 均已落地；
-阶段 7–9 （界面优化、界面美化、思考档位四档化 + 模型配置预设）以及阶段 10「左侧对话历史」
-是在 PLAN 之外追加的迭代。
+**大量未提交改动，无阻塞。** 最近一次提交是 `0cf37a6`（阶段 10 对话历史 + 抽屉动画）。
+之后做的所有改动都还在工作区，尚未提交：
 
-| 阶段 | 状态 | 说明 |
-|------|------|------|
-| 0 项目初始化 | ✅ | Next 16 脚手架、依赖、Vitest、typecheck/test/lint 脚本 |
-| 1 编辑器与稳定段落 | ✅ | 文档模型、revision/checksum、BlockIdExtension、Dexie |
-| 2 静态建议原型 | ✅ | 假数据、Decoration、双向定位、筛选、接受/忽略、过期 |
-| 3 LLM 审阅 | ✅ | `/api/review`、provider adapter、防注入 prompt、真实 DeepSeek 验证 |
-| 4 版本安全与批量修改 | ✅ | ChangeSet 预处理/重叠剔除/批量应用/撤销快照、ChangeSetPreview |
-| 5 上下文聊天 | ✅ | `/api/chat`、`/api/change-set`、ContextChat、按意见生成修改集 |
-| 6 产品化整理 | ✅ | Playwright E2E、键盘快捷键、无障碍收尾、README 部署说明 |
-| 7 界面优化 | ✅ | 主题切换按钮、设置面板（中央模态）、数据 Tab |
-| 8 界面美化 | ✅ | 绿色设计令牌、纸张式编辑器、胶囊筛选器、对话气泡、全局过渡动画 |
-| 9 档位四档化 + 配置预设 | ✅ | 档位改 auto/off/low/high/max、LLM 配置按命名预设组织 |
-| 10 左侧对话历史 | ✅ | ChatGPT 式历史（宽屏常驻左栏 / 窄屏抽屉）、IndexedDB 持久化、刷新恢复 |
+1. **受限 markdown 渲染器**（`src/lib/mini-markdown.tsx`）+ 15 个单测
+2. **自定义指令输入框双层渲染**（聚焦源文本 / 失焦 markdown 预览）
+3. **ReviewCard / ChangeSetPreview / ContextChat 的 explanation 走渲染器**
+4. **提示词系统更新**：polish/deep_review 写作原则、explanation 锁定中文、对话加重写意图
+5. **代理功能**：`LLMPreset.proxy`（HTTP/SOCKS5）、`undici.ProxyAgent`、`/api/test-connection`
+6. **设置面板布局调整**：去掉配置卡片、测试连接按钮（配置名称旁）、切换预设动画
+7. **默认自定义指令**（`DEFAULT_CUSTOM_PROMPT`）：软提示词（Core Writing Principles + Style Constraints），**原样英文**摘自用户指令，可编辑
 
-**质量基线（最近一次全量验证）：** 107 个 Vitest 用例（15 文件）+ 23 个 Playwright 用例全过；
-`typecheck` / `lint`（0 问题）/ `build` 全通过。
+**质量基线：** 124 个 Vitest 用例（16 文件）全过；`typecheck` / `lint`（0 问题）/ `build` 全通过。
 
-> ⚠️ **工作区有未提交改动**：`plan/` 目录重组、版本号与页脚隐私说明、浮动按钮下移、
-> 页脚移除 `revision`、以及阶段 10 的对话历史。按 AGENTS.md 的「Git 操作」约定，
+> ⚠️ **工作区有未提交改动**。按 AGENTS.md 的「Git 操作」约定，
 > **commit / push 必须先获得用户明确同意**，不要自己提交。
 
 ---
@@ -127,25 +121,45 @@
 
 - `.env.local` 已配好密钥（git 忽略），当前 `LLM_MODEL=deepseek-flash`。
 - 开发服务器跑在 http://localhost:3000 （`npm run dev`）。
+- 生产服务器可跑在 http://localhost:3001 （`npm run build && npx next start -p 3001`）。
 - 真实 DeepSeek 链路已跑通：审阅返回三层建议、侧栏↔正文双向定位、单条接受改正文、
-  对话生成修改集并预览接受。
+  对话生成修改集并预览接受、测试连接返回 `{"ok":true}`。
 - E2E 用**系统安装的 Google Chrome**（`channel: "chrome"`），不是 Playwright 下载的 chromium
   ——本机缺后者所需的系统依赖。E2E 会 mock 掉 LLM，**不消耗 API 额度**。
+- **浏览器实测注意**：开发服务器（Turbopack）热更新不稳定，新代码可能不生效。
+  用生产构建（`npm run build` → `npx next start -p 3001`）验证最可靠。
 
 ---
 
 ## 四、下一步
 
-第四节的两条窄屏抽屉待办（遮罩点击关闭、开合过渡动画）已完成并实测通过，
-当前无其他已知待办。接手后先跑一遍基线确认是绿的：`npm run test`（107 个）
-与 `npm run test:e2e`（23 个，自动起 dev server）。继续扩展的方向见 PLAN 第 18 节；
-PLAN 明确的非 MVP 范围见 AGENTS.md「不要做的事」。
+### 4.1 默认自定义指令不生效 —— 已修复 ✅
+
+**根因有两个，都已解决：**
+
+1. **`loadSettings` 迁移逻辑之前其实没写进文件**：旧数据 `review.customPrompt` 为空串时，
+   `{ ...DEFAULT_SETTINGS.review, ...parsed.review }` 展开会用空串覆盖默认值。
+   已在 `src/lib/settings.ts` 的 `loadSettings` 里补了 `if (!review.customPrompt) review.customPrompt = DEFAULT_CUSTOM_PROMPT;`，
+   并在 `tests/settings.test.ts` 加了两个守护用例（空串回填 / 缺 review 字段用默认）。
+2. **:3001 上跑的是旧进程**：之前 `npm run build` 后启动新 server 时端口被旧进程占用
+   （`EADDRINUSE`），新 server 没起来，浏览器一直在访问旧构建。
+   `taskkill` 掉旧进程重启后才拿到新 bundle。
+
+**验证结果**（生产构建 :3001，浏览器实测）：
+- 设置面板「审阅」Tab → 自定义指令 textarea 显示完整 679 字符默认软提示词（`# 写作风格` 开头）
+- 失焦后 overlay 正确渲染 markdown（检测到 `h1`/`strong`/`li` 元素）
+- 聚焦时 textarea 恢复编辑态
+
+### 4.2 其他待办
+
+无。接手后先跑一遍基线确认是绿的：`npm run test`（124 个）
+与 `npm run test:e2e`（23 个，自动起 dev server）。
 
 ## 五、接手建议
 
-1. 先跑一遍基线确认是绿的：`npm run test`（107 个）与 `npm run test:e2e`（23 个，自动起 dev server）。
+1. 先跑一遍基线确认是绿的：`npm run test`（124 个）与 `npm run test:e2e`（23 个，自动起 dev server）。
 2. **动代码前读 [AGENTS.md](./AGENTS.md)**，尤其是「必须遵守的核心约束」「界面开发约定」
-   「浮动按钮与页面底部布局」「已知陷阱」——里面记着这个项目已经踩过的 14 个坑，
+   「浮动按钮与页面底部布局」「已知陷阱」——里面记着这个项目已经踩过的 18 个坑，
    其中好几个是"看起来像 bug、其实是有意为之"的取舍。
 3. 改完按 AGENTS.md 收尾：跑 `typecheck` / `lint` / `test`，必要时加 `test:e2e`；
    **提交前先征得用户同意**。

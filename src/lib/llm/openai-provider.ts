@@ -1,5 +1,18 @@
 import type { ChatMessage, GenerateOptions, LLMProvider, ProviderConfig } from "./provider";
 import { resolveThinkingParam } from "./thinking";
+import { ProxyAgent } from "undici";
+
+/**
+ * 构造代理 dispatcher；proxy 为 undefined 时返回 null（直连）。
+ * http:// 与 socks5:// 都通过 undici 的 ProxyAgent 支持（Node 内置模块）。
+ */
+function buildProxyDispatcher(
+  proxy: { type: "http" | "socks5"; host: string; port: number } | undefined,
+): ProxyAgent | null {
+  if (!proxy) return null;
+  const scheme = proxy.type === "socks5" ? "socks5://" : "http://";
+  return new ProxyAgent(`${scheme}${proxy.host}:${proxy.port}`);
+}
 
 /**
  * OpenAI 兼容协议的 provider（DeepSeek、OpenAI、及其他兼容端点通用）。
@@ -10,11 +23,14 @@ export class OpenAIProvider implements LLMProvider {
   private readonly apiKey: string;
   private readonly baseURL: string;
   private readonly model: string;
+  /** 代理 dispatcher；null 表示直连 */
+  private readonly dispatcher: ProxyAgent | null;
 
   constructor(config: ProviderConfig) {
     this.apiKey = config.apiKey;
     this.baseURL = (config.baseURL ?? "https://api.openai.com").replace(/\/$/, "");
     this.model = config.model;
+    this.dispatcher = buildProxyDispatcher(config.proxy);
   }
 
   async generate(
@@ -38,7 +54,7 @@ export class OpenAIProvider implements LLMProvider {
 
     let res: Response;
     try {
-      res = await fetch(url, {
+      const fetchOpts: RequestInit & { dispatcher?: ProxyAgent } = {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -46,7 +62,9 @@ export class OpenAIProvider implements LLMProvider {
         },
         body: JSON.stringify(body),
         signal: options.signal,
-      });
+      };
+      if (this.dispatcher) fetchOpts.dispatcher = this.dispatcher;
+      res = await fetch(url, fetchOpts);
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") throw err;
       throw new Error(

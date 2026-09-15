@@ -2,6 +2,7 @@
 
 import type { ReviewItem } from "@/lib/review-schema";
 import { buttonClass } from "@/components/ui/button";
+import { renderMiniMarkdown } from "@/lib/mini-markdown";
 import {
   CATEGORY_META,
   KIND_LABEL,
@@ -82,9 +83,9 @@ export function ReviewCard({
         </div>
 
         <h4 className="mb-1 font-medium tracking-tight text-foreground">{item.title}</h4>
-        <p className="mb-2.5 leading-relaxed text-text-muted">
-          {item.explanation}
-        </p>
+        <div className="mb-2.5 text-sm leading-relaxed text-text-muted">
+          {renderMiniMarkdown(item.explanation)}
+        </div>
 
         {/* edit：展示 原文 → 替换 */}
         {item.kind === "edit" && item.replacement !== undefined && (

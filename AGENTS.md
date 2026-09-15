@@ -72,6 +72,7 @@ src/lib/tiptap-convert.ts       # DocumentState ↔ ProseMirror JSON 互转
 src/lib/sample-data.ts          # 内置样例文档 + 10 条假建议（E2E 依赖其措辞）
 src/lib/settings.ts             # 用户设置（LLM 命名预设 + 审阅偏好）+ localStorage 持久化 + 旧格式迁移
 src/lib/chat-history.ts         # 对话历史纯函数（标题派生、排序、upsert、相对时间），不碰存储与 React
+src/lib/mini-markdown.tsx       # 受限 markdown 渲染器（标题/列表/加粗/斜体/行内代码），不引第三方库
 src/lib/storage/db.ts           # Dexie 实例唯一持有者（documents + conversations 两张表）
 src/lib/storage/documents.ts    # 草稿文档持久化（含 clearAllDocuments）
 src/lib/storage/conversations.ts # 对话历史持久化（列表/保存/删除/清空）
@@ -174,11 +175,13 @@ tests/e2e/                      # Playwright 用例（helpers.ts 里是 mock 与
 13. **Dexie 的 `version().stores()` 是「合并」语义，不是「每级都要列全」——但删表要显式写 `null`。** 加 `conversations` 表时我一度按「漏写会让旧表消失」去写注释，实测（Dexie 4，`tests/conversations.test.ts` 里留了守护用例）证明是错的：`version(2).stores({ conversations: "id" })` 之后 `documents` 依然在，`db.tables` 是 `["conversations","documents"]`。所以**新增表时多写一行旧表是"为了可读"而不是"为了不丢表"**；真要删表，必须写 `documents: null`。别把这条理解反了去"修" `src/lib/storage/db.ts`。
 14. **新增/改动 IndexedDB 表结构时，同时看一眼「清空数据」是否覆盖到它。** 设置面板的「清空数据」调的是 `clearAll`，它会同时清 `documents` 与 `conversations`；以后再加表，忘了加进去就会出现「清空后刷新又冒出来」的怪象。
 15. **退出动画必须带 `animation-fill-mode: forwards`，且不要和「延迟卸载」分开记。** 约定 8 的「closing 状态 + `onAnimationEnd` 后卸载」只解决了一半：动画播完到 React 响应事件、提交卸载之间至少还有一帧，没有 fill 的话元素样式会回落到自然位置（抽屉就是 `translateX(0)` 完全可见），表现是「收进去之后闪一下才消失」。进入动画同理用 `both` 防首帧闪烁。排查这类闪烁别靠肉眼，用 `requestAnimationFrame` 逐帧采样 `getBoundingClientRect()`，一帧的跳变立刻现形（实测修复前采样到 x 从 -225 跳回 0）。
+16. **「自定义指令」等支持 markdown 的输入框要做成「双层」：聚焦显示源文本，失焦渲染成富文本，底层存储与发送的始终是源文本。** 实现方式（`SettingsPanel.tsx`）：textarea 和覆盖在其上的 `<div role="presentation">` 渲染层互斥显示——聚焦时 textarea 可见（`font-mono` 等宽），失焦时渲染层可见、textarea `invisible`（不能 `hidden`/`display:none`，否则占位消失布局跳动）。渲染层用 `onMouseDown e.preventDefault()` + 手动 `focus()` 切回编辑态。渲染器用 `src/lib/mini-markdown.tsx`（受限 markdown：标题/列表/加粗/斜体/行内代码，不引第三方库）。
+17. **提示词系统的中英语言是分离的：解释永远中文，replacement 跟文档语言。** 用户场景只有两种（中文文档 / 英文文档），解释都读中文。`buildSystemPrompt` / `buildChatMessages` / `buildChangeSetMessages` 里 `explanationLanguage` 固定中文，`language` 字段只决定 replacement 写成中文还是英文。page.tsx 里 `language: "en"` 是三处写死的，不要把它当 bug 改掉。
+18. **浏览器代理插件（Zero Omega / SwitchyOmega）对 LLM 请求无效**——LLM 请求是服务端 `fetch`，不经过浏览器。服务端代理有两条路：(1) 用户在设置面板按预设配（`LLMPreset.proxy`，HTTP/SOCKS5 均可），经 `settingsToRequestBody` → `llmConfig.proxy` → `OpenAIProvider` 的 `undici.ProxyAgent`；(2) 服务端环境变量 `SOCKS5_PROXY` / `HTTPS_PROXY` / `HTTP_PROXY`（`getProviderFromEnv` 自动读）。两条路互斥，用户配置优先。
 
 ## 有意为之的取舍（不要当 bug 改掉）
 
 - **不做按模型能力的档位 clamp 映射表**：思考档位（`auto`/`off`/`low`/`high`/`max`）里端点不支持的档位就直接让它 400 报错给用户，比静默降级更好。将来真要做映射表再加。
-- **代理（Zero Omega 之类）不需要处理**：LLM 请求由 Next.js 服务端 `fetch` 发出，不经过浏览器，浏览器代理插件只影响用户访问页面本身。服务端若要走代理得设 `HTTPS_PROXY`（Node 原生 `fetch` 不自动读，需要 undici 的 `EnvHttpProxyAgent` 之类）。
 - **批量接受 ChangeSet 依赖编辑器自带的 `Ctrl+Z`**，没有像单条那样提供「撤销本次修改」的独立按钮。PLAN 5.1 只要求单条可撤销。
 - **档位只保留 5 个（`auto`/`off`/`low`/`high`/`max`），不要再扩档**：`low/high/max` 是与 Kimi K3、DeepSeek 原生档位对齐的公约数。
 

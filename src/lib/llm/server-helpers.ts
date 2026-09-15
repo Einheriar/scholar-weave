@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import type { z } from "zod";
-import { getProviderFromEnv } from "./provider";
+import { getProviderFromEnv, getProviderFromUserConfig } from "./provider";
 import type { ChatMessage } from "./provider";
 
 /**
@@ -40,11 +40,23 @@ export async function callLLMStructured<S extends z.ZodType>(
   request: Request,
   messages: ChatMessage[],
   schema: S,
-  opts: { timeoutMs?: number; maxTokens?: number } = {},
+  opts: {
+    timeoutMs?: number;
+    maxTokens?: number;
+    llmConfig?: {
+      apiKey: string;
+      baseURL?: string;
+      model?: string;
+      reasoningEffort?: string;
+      proxy?: { type: "http" | "socks5"; host: string; port: number };
+    };
+  } = {},
 ): Promise<CallLLMResult<z.infer<S>>> {
   let provider;
   try {
-    provider = getProviderFromEnv();
+    provider = opts.llmConfig?.apiKey
+      ? getProviderFromUserConfig(opts.llmConfig)
+      : getProviderFromEnv();
   } catch (e) {
     return {
       ok: false,

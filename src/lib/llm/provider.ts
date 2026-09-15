@@ -30,13 +30,24 @@ export interface LLMProvider {
   generate(messages: ChatMessage[], options?: GenerateOptions): Promise<string>;
 }
 
+export type ProxyConfig = {
+  type: "http" | "socks5";
+  host: string;
+  port: number;
+};
+
 export type ProviderConfig = {
   apiKey: string;
   baseURL?: string;
   model: string;
+  /** 代理；undefined 表示直连 */
+  proxy?: ProxyConfig;
 };
 
-/** 从环境变量构造当前配置的 provider（密钥只在服务端读取） */
+/**
+ * 从环境变量构造当前配置的 provider（密钥只在服务端读取）。
+ * 代理也支持从环境变量读：HTTPS_PROXY / HTTP_PROXY / SOCKS5_PROXY。
+ */
 export function getProviderFromEnv(): LLMProvider {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -46,7 +57,8 @@ export function getProviderFromEnv(): LLMProvider {
   }
   const model = process.env.LLM_MODEL ?? "deepseek-chat";
   const baseURL = process.env.OPENAI_BASE_URL ?? "https://api.openai.com";
-  return new OpenAIProvider({ apiKey, baseURL, model });
+  const proxy = resolveProxyFromEnv();
+  return new OpenAIProvider({ apiKey, baseURL, model, proxy });
 }
 
 /**
@@ -57,10 +69,34 @@ export function getProviderFromUserConfig(config: {
   apiKey: string;
   baseURL?: string;
   model?: string;
+  proxy?: ProxyConfig;
 }): LLMProvider {
   return new OpenAIProvider({
     apiKey: config.apiKey,
     baseURL: config.baseURL,
     model: config.model || "deepseek-chat",
+    proxy: config.proxy,
   });
+}
+
+/**
+ * 从环境变量解析代理配置。
+ * 依次看 SOCKS5_PROXY / HTTPS_PROXY / HTTP_PROXY，有就用。
+ */
+function resolveProxyFromEnv(): ProxyConfig | undefined {
+  const socks5 = process.env.SOCKS5_PROXY;
+  if (socks5) return parseProxyUrl(socks5, "socks5");
+  const https = process.env.HTTPS_PROXY ?? process.env.HTTP_PROXY;
+  if (https) return parseProxyUrl(https, "http");
+  return undefined;
+}
+
+function parseProxyUrl(url: string, defaultType: "http" | "socks5"): ProxyConfig | undefined {
+  try {
+    const u = new URL(url);
+    const type = u.protocol.replace(":", "") === "socks5" ? "socks5" : defaultType;
+    return { type, host: u.hostname, port: parseInt(u.port, 10) };
+  } catch {
+    return undefined;
+  }
 }

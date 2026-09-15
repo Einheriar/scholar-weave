@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeSet, ConcreteEdit, DocumentState } from "@/lib/review-schema";
 import { prepareChangeSet } from "@/lib/changeset";
 import { buttonClass } from "@/components/ui/button";
+import { renderMiniMarkdown } from "@/lib/mini-markdown";
 
 export type ChangeSetPreviewProps = {
   changeSet: ChangeSet;
@@ -104,7 +105,9 @@ export function ChangeSetPreview({
                 {r.edit.replacement}
               </div>
               {r.edit.explanation && (
-                <div className="mt-0.5 text-text-faint">{r.edit.explanation}</div>
+                <div className="mt-0.5 text-text-faint">
+                  {renderMiniMarkdown(r.edit.explanation)}
+                </div>
               )}
             </div>
           </li>

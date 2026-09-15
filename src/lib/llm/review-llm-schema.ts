@@ -55,6 +55,14 @@ export const ReviewRequestSchema = z.object({
       baseURL: z.string().optional(),
       model: z.string().optional(),
       reasoningEffort: z.string().optional(),
+      /** 该预设的代理；enabled=false 或未提供时直连 */
+      proxy: z
+        .object({
+          type: z.enum(["http", "socks5"]),
+          host: z.string().min(1),
+          port: z.number().int().positive().lt(65536),
+        })
+        .optional(),
     })
     .optional(),
   /** 带稳定 ID 的段落列表 */
