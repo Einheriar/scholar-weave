@@ -29,6 +29,16 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - 长期有效的知识**不要**留在 `HANDOFF.md`；`HANDOFF.md` 变长说明有内容放错了位置。
 - 更新文档时同步核对里面的数字（测试用例数、完成阶段、关键文件地图）是否还准。
 
+## Git 操作：先获得许可，再执行
+
+**默认不要自己执行 `git commit` / `git push`**，以及 `git reset` / `git rebase` / 强制推送等会改写历史或影响远端的命令。
+
+- 想提交时，先把改动做完、自测通过，然后把「改了什么 + 建议的提交信息」讲给用户，**等用户明确同意后再执行**。
+- 用户明确说「提交吧」「commit」= 已授权**本次**提交；下一次仍要重新问。授权不跨任务延续。
+- 「你觉得合适就提交」这类不算明确允许——仍然先问。
+- `git push` 是对外操作，即使本次提交已获授权，推送也要**单独确认**（当前仓库没有配置远端）。
+- 只读命令不受限制，随时可用：`git status` / `git diff` / `git log` / `git show` / `git ls-files` / `git check-ignore`。
+
 ## 技术栈与关键约定
 
 - Next.js 16（App Router，Turbopack）+ React 19 + TypeScript 5 + Tailwind 4；`src/` 目录，别名 `@/* → src/*`
@@ -134,4 +144,4 @@ npm start           # 启动生产服务器
 npm run package:app # 打包成可双击启动的本地应用（见 README）
 ```
 
-每完成一项改动，跑 `typecheck` / `lint` / `test`，必要时加 `test:e2e`；按阶段 commit。
+每完成一项改动，跑 `typecheck` / `lint` / `test`，必要时加 `test:e2e`；提交前先征得用户同意（见上「Git 操作」）。
