@@ -148,8 +148,9 @@ export function ReviewSidebar({
         )}
         {sections.map(({ scope, title, empty }) => {
           const list = byScope[scope];
-          if (scopeFilter !== "all" && scopeFilter !== scope) return null;
-          if (list.length === 0) return null;
+          // 三个范围区始终作为 landmark 存在（无障碍分组导航）；
+          // 被范围筛选排除时显示为空区，而不是整块移除。
+          const excluded = scopeFilter !== "all" && scopeFilter !== scope;
           return (
             <section key={scope} aria-label={title}>
               <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-neutral-500">
@@ -158,7 +159,9 @@ export function ReviewSidebar({
                 <span className="text-neutral-400">({list.length})</span>
               </h3>
               {list.length === 0 ? (
-                <p className="text-xs text-neutral-400">{empty}</p>
+                <p className="text-xs text-neutral-400">
+                  {excluded ? "（当前筛选不含此范围）" : empty}
+                </p>
               ) : (
                 <ul className="space-y-2">
                   {list.map((item) => (

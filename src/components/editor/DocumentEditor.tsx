@@ -9,7 +9,6 @@ import {
 } from "react";
 import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import { TextSelection } from "@tiptap/pm/state";
 import { BlockIdExtension } from "./BlockIdExtension";
 import {
   ReviewDecorationExtension,
@@ -190,10 +189,14 @@ export const DocumentEditor = forwardRef<
       if (!editor) return;
       const pos = findItemPosition(editor, docRef.current, item);
       if (pos == null) return;
+      // 选中该建议对应的正文范围（PLAN 6.2），而不是只把光标落在起点
+      const size = editor.state.doc.content.size;
+      const from = Math.max(0, Math.min(pos.from, size));
+      const to = Math.max(from, Math.min(pos.to, size));
       editor
         .chain()
         .focus()
-        .setTextSelection(TextSelection.near(editor.state.doc.resolve(pos.from)))
+        .setTextSelection(to > from ? { from, to } : from)
         .scrollIntoView()
         .run();
     },
@@ -225,7 +228,8 @@ export const DocumentEditor = forwardRef<
 
 /**
  * 计算某条建议在 ProseMirror 文档中的位置范围。
- * range：用锚点定位；block：整段范围。
+ * range：用锚点定位；block：整段的 **行内内容** 范围（不含段落节点边界，
+ * 这样既能作为合法文本选区，也能被 insertContentAt 安全替换）。
  */
 function findItemPosition(
   editor: Editor,
@@ -244,7 +248,7 @@ function findItemPosition(
     if (start == null) return null;
     const node = editor.state.doc.nodeAt(start);
     if (!node) return null;
-    return { from: start, to: start + node.nodeSize };
+    return { from: start + 1, to: start + node.nodeSize - 1 };
   }
   return null; // document 级无正文位置
 }

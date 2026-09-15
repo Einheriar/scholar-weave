@@ -1,37 +1,107 @@
 # superGrammarly
 
-本地优先、Web 优先的 AI 文档审阅工作台。把长文本交给 LLM 检查语病、清晰度和行文质量，审阅结果以"全文意见 / 段落意见 / 局部修改"三层形式绑定到原文位置，所有修改必须先预览、再由用户逐条确认后才会应用。
+本地优先、Web 优先的 AI 文档审阅工作台。把长文本交给 LLM 检查语病、清晰度和行文质量，审阅结果以“全文意见 / 段落意见 / 局部修改”三层形式绑定到原文位置，所有修改必须先预览、再由用户逐条确认后才会应用。
 
-完整的产品定义、技术设计与实施计划见 [PLAN.md](./PLAN.md)。
+完整的产品定义、技术设计与实施计划见 [PLAN.md](./PLAN.md)；当前进度与接手须知见 [HANDOFF.md](./HANDOFF.md)。
 
 ## 技术栈
 
-- Next.js (App Router) + TypeScript + React
-- Tiptap 编辑器（Decoration 实现建议标记，不污染正文）
+- Next.js 16 (App Router, Turbopack) + TypeScript + React 19
+- Tiptap 3 编辑器（Decoration 实现建议标记，不污染正文）
 - Zod 作为运行时数据协议的唯一来源
 - Dexie (IndexedDB) 本地持久化
-- Vitest + Testing Library（单元测试），Playwright（端到端测试，阶段 6）
+- Vitest + Testing Library（单元/集成测试）
+- Playwright（端到端测试）
+- LLM：OpenAI 兼容协议，当前默认接入 DeepSeek
 
-## 开发
+## 本地运行
 
 ```bash
 npm install
-npm run dev        # 开发服务器
-npm run typecheck  # 类型检查
-npm run test       # 单元测试
-npm run lint       # ESLint
+cp .env.example .env.local   # 然后填入密钥
+npm run dev                  # http://localhost:3000
 ```
 
-阶段 3 接入 LLM 前，先复制 `.env.example` 为 `.env.local` 并填入密钥。密钥只存在于服务端环境变量中。
+打开页面会自动载入内置样例；也可以点顶栏“载入样例”随时复位。点“开始审阅”会调用真实 LLM。
+
+### 环境变量
+
+密钥只存在于服务端环境变量（`.env.local`，已被 git 忽略），**不会**打包进前端代码，也不会写入浏览器存储。可用变量见 [.env.example](./.env.example)：
+
+| 变量 | 说明 |
+|------|------|
+| `LLM_PROVIDER` | 目前只实现 `openai`（OpenAI 兼容协议） |
+| `OPENAI_API_KEY` | 供应商密钥 |
+| `OPENAI_BASE_URL` | 兼容接口 base URL。DeepSeek 为 `https://api.deepseek.com`；用官方 OpenAI 时留空 |
+| `LLM_MODEL` | 模型名。DeepSeek 可用 `deepseek-flash`、`deepseek-v4-pro` |
+
+> 注意：`deepseek-flash` 等推理模型会消耗 reasoning token。若审阅返回空结果（`finish=length`），需要提高 `/api/review` 的 `max_tokens`（当前 16000）。
+
+## 常用命令
+
+```bash
+npm run dev        # 开发服务器
+npm run typecheck  # tsc --noEmit
+npm run lint       # ESLint
+npm run test       # Vitest（单元/集成）
+npm run test:e2e   # Playwright（端到端）
+npm run build      # 生产构建
+npm start          # 启动生产服务器
+```
+
+### 端到端测试
+
+```bash
+npm run test:e2e
+```
+
+`playwright.config.ts` 会自动启动 `npm run dev`（已存在服务时复用）。E2E 用例会拦截 `/api/review`、`/api/chat`，用固定响应验证前端接线，**不需要 API Key，也不消耗模型额度**。
+
+本机配置说明：用例使用系统安装的 Google Chrome（`channel: "chrome"`），而不是 Playwright 下载的 chromium——下载构建所需的系统依赖在本机不可用。若在别处运行，可先 `npx playwright install --with-deps chromium` 再改用默认浏览器。
+
+## 部署
+
+本地个人使用直接在本机跑 Next 服务即可。
+
+若部署到公网，**必须**先补上（PLAN 8.3）：
+
+1. 身份验证——否则任何人都能消耗你的 API 额度。
+2. 请求限流与用量控制。
+3. 密钥仅保留在服务端环境变量中。
+
+```bash
+npm run build
+npm start          # 默认 http://localhost:3000
+```
+
+## 隐私与数据发送
+
+- 用户文档草稿仅保存在**本浏览器**的 IndexedDB，不会上传到本服务之外。
+- 点击“开始审阅”或发送对话后，**相关文档内容会发送给所配置的 LLM 供应商**（当前为 DeepSeek）用于生成结果。
+- 服务端默认不记录正文日志；API Key 只在服务端环境变量中。
+- 文档内容在 prompt 中按不可信数据包裹，其中的指令性文本不会被当作系统指令执行。
+
+## 核心约束（实现时不要破坏）
+
+1. **不信任 LLM 字符坐标**：定位一律用 `blockId + 逐字 original + prefix/suffix`（`src/lib/anchoring.ts`）。定位失败标记 `stale`，绝不猜测位置强行替换。
+2. **稳定 block ID**：普通编辑保留 ID、拆分保留前半段、合并保留目标段（`src/lib/revisions.ts`）。
+3. **严格区分 `opinion` 与 `edit`**：`opinion` 不可执行且禁带 `replacement`；`edit` 必有 `replacement` 且 scope 不能是 `document`（schema `superRefine` 强制）。
+4. **LLM 永不未经确认改正文**：全文/结构意见必须走“生成 ChangeSet → 差异预览 → 用户确认”。
+5. **防注入**：文档在 prompt 中包裹为不可信数据，输出仍需过 Zod 与业务校验。
 
 ## 实施进度
 
-按 PLAN.md 第 14 节的阶段推进：
+按 PLAN.md 第 14 节推进，阶段 0–6 均已完成：
 
 - [x] 阶段 0：项目初始化
-- [ ] 阶段 1：编辑器与稳定段落
-- [ ] 阶段 2：静态建议原型（假数据验证交互）
-- [ ] 阶段 3：LLM 审阅
-- [ ] 阶段 4：版本安全与批量修改
-- [ ] 阶段 5：上下文聊天
-- [ ] 阶段 6：产品化整理
+- [x] 阶段 1：编辑器与稳定段落
+- [x] 阶段 2：静态建议原型（假数据验证交互）
+- [x] 阶段 3：LLM 审阅
+- [x] 阶段 4：版本安全与批量修改
+- [x] 阶段 5：上下文聊天
+- [x] 阶段 6：产品化整理
+
+### 测试覆盖
+
+- Vitest：65 个用例（锚点定位、block ID 稳定性、ChangeSet 重叠/批量应用、编辑器批量替换与撤销、三个 API 端点的 mock 用例）。
+- Playwright：14 个用例（三层建议与双向定位、接受与逐字撤销、过期建议、复制全文、键盘快捷键、审阅成功/失败、纯解释与带修改集的对话）。

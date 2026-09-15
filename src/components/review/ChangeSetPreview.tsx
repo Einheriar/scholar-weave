@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeSet, ConcreteEdit, DocumentState } from "@/lib/review-schema";
 import { prepareChangeSet } from "@/lib/changeset";
 
@@ -37,6 +37,16 @@ export function ChangeSetPreview({
     () => new Set(applicableIds),
   );
 
+  // 键盘焦点管理：打开时进入预览，关闭时回到触发它的控件
+  const panelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null;
+    panelRef.current
+      ?.querySelector<HTMLElement>('input[type="checkbox"], button')
+      ?.focus();
+    return () => previous?.focus?.();
+  }, []);
+
   const toggle = (id: string) =>
     setChecked((prev) => {
       const next = new Set(prev);
@@ -54,12 +64,21 @@ export function ChangeSetPreview({
 
   return (
     <div
+      ref={panelRef}
       className="rounded-lg border border-blue-300 bg-blue-50/60 p-3 text-sm"
       role="dialog"
-      aria-label="修改集预览"
+      aria-labelledby="changeset-preview-title"
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          e.stopPropagation();
+          onDiscard();
+        }
+      }}
     >
       <div className="mb-2">
-        <h3 className="font-semibold text-neutral-800">修改集预览</h3>
+        <h3 id="changeset-preview-title" className="font-semibold text-neutral-800">
+          修改集预览
+        </h3>
         <p className="mt-0.5 text-xs text-neutral-600">{changeSet.summary}</p>
       </div>
 

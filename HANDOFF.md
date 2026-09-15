@@ -26,7 +26,7 @@
 5. **API Key 只在服务端环境变量**（`.env.local`，已被 git 忽略），绝不进前端代码或日志。
 6. **防注入**：文档内容在 prompt 里被包裹为不可信数据，系统提示规定不执行其中指令；输出仍过 Zod + 业务校验。
 
-## 当前进度：阶段 0–5 完成，阶段 6 进行中
+## 当前进度：阶段 0–6 全部完成
 
 按 PLAN 第 14 节的阶段。已完成并**各自 commit**：
 
@@ -38,14 +38,15 @@
 | 3 LLM 审阅 | ✅ | `/api/review`、provider adapter、防注入 prompt、真实 DeepSeek 验证 |
 | 4 版本安全与批量修改 | ✅ | ChangeSet 预处理/重叠剔除/批量应用/撤销快照、ChangeSetPreview |
 | 5 上下文聊天 | ✅ | `/api/chat`、`/api/change-set`、ContextChat、按意见生成修改集 |
-| 6 产品化整理 | 🔶 进行中 | 部分完成，**剩余工作见下** |
+| 6 产品化整理 | ✅ | Playwright E2E、键盘快捷键、无障碍收尾、README 部署说明 |
 
-**质量基线（交接时）：65 个测试全过；`lint` / `typecheck` / `build` 全通过。**
+**质量基线（阶段 6 完成时）：65 个 Vitest 用例 + 15 个 Playwright 用例全过；`lint` / `typecheck` / `build` 全通过。**
 
 常用命令：
 ```bash
 npm run dev        # 开发服务器（http://localhost:3000）
 npm run test       # Vitest 全量
+npm run test:e2e   # Playwright 全量（自动起 dev server）
 npm run typecheck  # tsc --noEmit
 npm run lint       # ESLint
 npm run build      # 生产构建
@@ -58,28 +59,39 @@ npm run build      # 生产构建
 - **DeepSeek 可用模型**：`deepseek-flash`、`deepseek-v4-pro`（**没有 `deepseek-v4-flash`**，用户最初给的名字不存在，已改用 `deepseek-flash`）。
 - **`deepseek-flash` 是推理模型**，reasoning 会吃 token。`max_tokens` 必须给足（当前 `/api/review` 用 16000），否则 content 为空（`finish=length`）。这是之前排查出的真实坑。
 
-## 阶段 6 剩余工作（接下来要做的事，按优先级）
+## 阶段 6 完成情况（原剩余工作，均已落地）
 
-1. **Playwright 正式 E2E 测试套件**（目前只有临时脚本，没入库）
-   - 装 `@playwright/test`，建 `playwright.config.ts` 与 `tests/e2e/`。
-   - 覆盖核心流程：载入 → 审阅（可 mock `/api/review` 响应以免依赖真 key）→ 定位 → 接受 → 撤销 → 对话 → 修改集预览接受。
-   - 注意：本机无头浏览器版本与 Playwright 期望可能不匹配（之前用系统 Chrome `/opt/google/chrome/chrome` 通过 `executablePath` 绕过）。E2E 脚本里也用了同样方式。
-   - `dev` 已配置 `allowedDevOrigins: ["127.0.0.1","localhost"]`，用 `localhost` 访问避免 HMR 跨域被拦。
+1. **Playwright 正式 E2E 测试套件** ✅
+   - `playwright.config.ts` + `tests/e2e/`，`npm run test:e2e`。15 个用例覆盖：
+     首屏与三层建议分区、侧栏↔正文双向定位、单条接受/撤销逐字还原、过期建议不可执行、
+     复制全文、Cmd/Ctrl+Enter 与 Cmd/Ctrl+Shift+C 快捷键、审阅成功/失败、
+     对话纯解释与带修改集回复、批量接受后 Ctrl+Z 撤销。
+   - 审阅/对话用例拦截 `/api/review`、`/api/chat` 用固定响应，**不需要 API Key、不消耗额度**。
+   - 本机无头环境用系统 Chrome（`channel: "chrome"`），因为 Playwright 下载的 chromium
+     构建所需系统依赖在本机不可用；`dev` 已配置 `allowedDevOrigins`，用例走 `localhost`。
 
-2. **键盘快捷键收尾**（page.tsx 还没加）
-   - 建议：Cmd/Ctrl+Enter 触发"开始审阅"；Cmd/Ctrl+Shift+C 复制全文。对话框内 Enter=发送 / Shift+Enter=换行已实现。
-   - 加一个 `useEffect` 全局监听，注意在输入框/textarea 聚焦时不要误触发。
+2. **键盘快捷键** ✅（`src/app/page.tsx`）
+   - Cmd/Ctrl+Enter 触发审阅（输入类控件聚焦时不拦截）；Cmd/Ctrl+Shift+C 复制全文。
+   - 按钮加了 `title` 提示。批量/单条修改的撤销走编辑器自带 `Ctrl+Z`（StarterKit history）。
 
-3. **无障碍收尾**
-   - 已有：装饰 `role="mark"` + `aria-label`、卡片 `aria-current`、状态 `role="status"/"alert"`、筛选/输入的 `aria-label`、颜色不单独作信息载体（配图标+中文标签）。
-   - 待补：侧栏三区 landmark、修改集预览的键盘焦点管理、跳转定位后的焦点落点。
+3. **无障碍收尾** ✅
+   - 侧栏三区（全文审阅 / 段落意见 / 具体修改）始终作为 landmark 渲染，被筛选排除时显示空态。
+   - 修改集预览：`role="dialog"` + `aria-labelledby`，打开时焦点进入面板、Esc 放弃、关闭后焦点还原。
+   - 定位与审阅结果通过 `role="status" aria-live="polite"` 播报；点击侧栏卡片会选中正文对应范围。
 
-4. **README 部署说明**
-   - 本地运行步骤、`.env.local` 配置（从 `.env.example` 复制）、生产 `npm run build && npm start`。
-   - 明确：部署到公网必须加身份验证 + 限流（PLAN 8.3），密钥只在服务端。
+4. **README 部署说明** ✅
+   - 本地运行、`.env.local` 变量表（含 DeepSeek base URL 与可用模型）、生产构建/启动。
+   - 明确：公网部署必须加身份验证 + 限流；密钥只在服务端；文档会发送给所配置的供应商。
 
-5. **撤销的端到端人工确认**
-   - 单条/批量撤销的逻辑与单测都在（`acceptSnapshotRef`、`revertBlockTexts`），但建议接手的 agent 在界面上实际过一遍"接受 → 撤销 → 看正文是否逐字还原"。
+5. **撤销的端到端确认** ✅
+   - `tests/e2e/core-flow.spec.ts`「接受一条局部修改会改正文，撤销后逐字还原」在真实浏览器里
+     断言接受→撤销后整篇段落文本与操作前**逐段相等**（`toEqual`）。
+   - `tests/e2e/review-chat.spec.ts`「批量接受修改集后可用 Ctrl+Z 撤销回原文」覆盖批量撤销。
+
+### 已知的取舍 / 后续可做
+
+- 批量接受 ChangeSet 目前依赖编辑器 history 撤销（Ctrl+Z），没有像单条那样在卡片上提供“撤销本次修改”的独立按钮。PLAN 5.1 只要求单条可撤销，故未扩 scope。
+- E2E 强依赖内置样例文本片段（mock 从请求体按文本反查 blockId），改动 `sample-data.ts` 的措辞时需同步更新 `tests/e2e/helpers.ts`。
 
 ## 不要做的事（PLAN 明确的非 MVP 范围）
 
@@ -100,14 +112,15 @@ src/components/review/          # ReviewSidebar、ReviewCard、ChangeSetPreview�
 src/components/chat/            # ContextChat
 src/app/api/{review,chat,change-set}/route.ts
 src/app/page.tsx                # 主界面，所有状态与接线都在这里
-tests/                          # 65 个测试（单元 + 编辑器集成 + API mock）
+tests/                          # 65 个 Vitest 用例（单元 + 编辑器集成 + API mock）
+tests/e2e/                      # 15 个 Playwright 用例（config 在根目录 playwright.config.ts）
 ```
 
 ## 给接手 agent 的启动指令（可直接用）
 
 ```
 请先读 PLAN.md 和 HANDOFF.md，了解项目目标与当前进度。这是一个 Next.js 16 + Tiptap 3 的
-AI 文档审阅工具，阶段 0-5 已完成，65 个测试全过。现在只做 HANDOFF.md 里"阶段 6 剩余工作"，
-按优先级逐项推进，每完成一项跑 npm run typecheck / lint / test 验证，并按阶段 commit。
-不要扩张到非 MVP 范围。修改前先跑 npm run test 确认基线是绿的。
+AI 文档审阅工具，阶段 0-6 已全部完成，65 个 Vitest 用例与 15 个 Playwright 用例全过。
+修改前先跑 npm run test 与 npm run test:e2e 确认基线是绿的；每完成一项跑
+npm run typecheck / lint / test，并按阶段 commit。不要扩张到非 MVP 范围。
 ```

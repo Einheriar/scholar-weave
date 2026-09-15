@@ -54,6 +54,8 @@ export default function Home() {
   const [applyingOpinionId, setApplyingOpinionId] = useState<string | null>(null);
   const [activeChangeSet, setActiveChangeSet] = useState<ChangeSet | null>(null);
   const [copyState, setCopyState] = useState<"idle" | "copied">("idle");
+  /** 供屏幕阅读器播报的状态文本（定位、快捷键等） */
+  const [announce, setAnnounce] = useState("");
 
   const editorRef = useRef<DocumentEditorHandle>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -126,6 +128,7 @@ export default function Home() {
       }
       setReviews(data.items as ReviewItem[]);
       setReviewUi({ phase: "done", summary: data.documentSummary ?? "" });
+      setAnnounce(`审阅完成，共 ${(data.items as ReviewItem[]).length} 条建议。`);
     } catch (e) {
       if (e instanceof Error && e.name === "AbortError") {
         setReviewUi({ phase: "idle" });
@@ -144,16 +147,31 @@ export default function Home() {
   }, []);
 
   // ── 建议定位 / 状态 ──
-  const handleSelect = useCallback((id: string) => {
-    setSelectedId(id);
-    setReviews((rs) => {
-      const item = rs.find((r) => r.id === id);
-      if (item && item.scope.type !== "document") {
+  const handleSelect = useCallback(
+    (id: string) => {
+      setSelectedId(id);
+      const item = reviews.find((r) => r.id === id);
+      if (!item) return;
+      if (item.scope.type !== "document") {
+        // 定位到正文对应范围，并把键盘焦点交给编辑器（PLAN 6.2）
         editorRef.current?.revealItem(item);
+        setAnnounce(`已定位到建议：${item.title}`);
+      } else {
+        setAnnounce(`已选中全文建议：${item.title}`);
       }
-      return rs;
-    });
-  }, []);
+    },
+    [reviews],
+  );
+
+  /** 点击正文标记（正文→侧栏）：只做选中与播报，不反向移动光标 */
+  const handleBodySelect = useCallback(
+    (id: string) => {
+      setSelectedId(id);
+      const item = reviews.find((r) => r.id === id);
+      if (item) setAnnounce(`已选中正文中的建议：${item.title}`);
+    },
+    [reviews],
+  );
 
   // 接受某条 edit 前的文本快照（撤销时还原正文用）：reviewId → (blockId → 原文)
   const acceptSnapshotRef = useRef<Map<string, Map<string, string>>>(new Map());
@@ -455,6 +473,37 @@ export default function Home() {
     [reviews],
   );
 
+  // ── 键盘快捷键（阶段 6）──
+  // Cmd/Ctrl+Enter：开始审阅；Cmd/Ctrl+Shift+C：复制全文。
+  // 在输入类控件聚焦时不拦截 Cmd+Enter，避免和对话输入冲突。
+  useEffect(() => {
+    const isTextEntry = (el: EventTarget | null) => {
+      const node = el as HTMLElement | null;
+      if (!node || typeof node.tagName !== "string") return false;
+      return (
+        node.tagName === "INPUT" ||
+        node.tagName === "TEXTAREA" ||
+        node.tagName === "SELECT" ||
+        node.isContentEditable
+      );
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!e.metaKey && !e.ctrlKey) return;
+      if (e.shiftKey && e.key.toLowerCase() === "c") {
+        e.preventDefault();
+        void copyAll();
+        return;
+      }
+      if (e.key === "Enter" && !e.shiftKey && !isTextEntry(e.target)) {
+        if (reviewUi.phase === "loading") return;
+        e.preventDefault();
+        void runReview();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [runReview, copyAll, reviewUi.phase]);
+
   if (!doc) {
     return (
       <main className="flex min-h-screen items-center justify-center text-neutral-500">
@@ -504,6 +553,7 @@ export default function Home() {
           <button
             type="button"
             onClick={runReview}
+            title="开始审阅（Cmd/Ctrl+Enter）"
             className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
           >
             开始审阅
@@ -513,6 +563,7 @@ export default function Home() {
         <button
           type="button"
           onClick={copyAll}
+          title="复制全文（Cmd/Ctrl+Shift+C）"
           className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm text-neutral-600 hover:bg-neutral-100"
         >
           {copyState === "copied" ? "已复制 ✓" : "复制全文"}
@@ -572,7 +623,7 @@ export default function Home() {
             onDocumentChange={handleDocChange}
             reviewItems={reviews}
             selectedReviewId={selectedId}
-            onSelectReview={setSelectedId}
+            onSelectReview={handleBodySelect}
             onSelectionChange={setSelection}
           />
 
@@ -619,6 +670,10 @@ export default function Home() {
       </div>
 
       <footer className="mt-3 space-y-1 text-xs text-neutral-400">
+        {/* 屏幕阅读器播报：定位、快捷键与审阅结果 */}
+        <p className="sr-only" role="status" aria-live="polite">
+          {announce}
+        </p>
         <p>
           阶段 4-6 · revision {doc.revision} · {doc.blocks.length} 段
         </p>
