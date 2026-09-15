@@ -103,13 +103,13 @@ export function SettingsPanel({
             id="settings-title"
             className="text-lg font-semibold text-neutral-800 dark:text-neutral-200"
           >
-            Settings
+            设置
           </h2>
           <button
             type="button"
             onClick={onClose}
             className="rounded-lg p-1.5 text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-600 dark:hover:bg-neutral-800"
-            aria-label="Close settings"
+            aria-label="关闭设置"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
               <line x1="18" y1="6" x2="6" y2="18" />
@@ -122,8 +122,8 @@ export function SettingsPanel({
         <div className="flex border-b border-neutral-200 dark:border-neutral-700">
           {(
             [
-              { key: "model", label: "Model" },
-              { key: "review", label: "Review" },
+              { key: "model", label: "模型" },
+              { key: "review", label: "审阅" },
             ] as const
           ).map(({ key, label }) => (
             <button
@@ -156,7 +156,7 @@ export function SettingsPanel({
                   autoComplete="off"
                 />
                 <p className="mt-1.5 text-xs text-neutral-400">
-                  Your OpenAI-compatible API key. Stored locally in this browser only.
+                  你的 OpenAI 兼容 API 密钥，仅保存在此浏览器本地。
                 </p>
               </div>
               <div>
@@ -170,7 +170,7 @@ export function SettingsPanel({
                 />
               </div>
               <div>
-                <label className={labelCls}>Model</label>
+                <label className={labelCls}>模型</label>
                 <input
                   type="text"
                   value={draft.llm.model}
@@ -180,7 +180,7 @@ export function SettingsPanel({
                 />
               </div>
               <div>
-                <label className={labelCls}>Reasoning Effort</label>
+                <label className={labelCls}>思考档位</label>
                 <select
                   value={draft.llm.reasoningEffort}
                   onChange={(e) =>
@@ -195,7 +195,7 @@ export function SettingsPanel({
                   ))}
                 </select>
                 <p className="mt-1.5 text-xs text-neutral-400">
-                  Controls how much the model thinks before responding. Higher effort = deeper analysis but slower.
+                  控制模型在回复前的思考深度。档位越高，分析越深入，但响应越慢。
                 </p>
               </div>
             </div>
@@ -204,43 +204,42 @@ export function SettingsPanel({
           {tab === "review" && (
             <div className="space-y-5">
               <div>
-                <label className={labelCls}>Writing Style</label>
+                <label className={labelCls}>写作风格</label>
                 <input
                   type="text"
                   value={draft.review.style}
                   onChange={(e) => updateReview({ style: e.target.value })}
-                  placeholder="e.g. Academic, Formal, Concise"
+                  placeholder="例如：学术、正式、简洁"
                   className={inputCls}
                 />
                 <p className="mt-1.5 text-xs text-neutral-400">
-                  Describe the target writing style for the reviewer.
+                  描述期望的写作风格，供审阅时参考。
                 </p>
               </div>
               <div>
-                <label className={labelCls}>Preserve Terms</label>
+                <label className={labelCls}>保留术语</label>
                 <input
                   type="text"
                   value={draft.review.preserveTerms}
                   onChange={(e) => updateReview({ preserveTerms: e.target.value })}
-                  placeholder="e.g. SIT, IDT, social category"
+                  placeholder="例如：SIT, IDT, social category"
                   className={inputCls}
                 />
                 <p className="mt-1.5 text-xs text-neutral-400">
-                  Comma-separated terms that must be preserved verbatim.
+                  逗号分隔的术语，审阅时必须逐字保留、不得修改。
                 </p>
               </div>
               <div>
-                <label className={labelCls}>Custom Instructions</label>
+                <label className={labelCls}>自定义指令</label>
                 <textarea
                   value={draft.review.customPrompt}
                   onChange={(e) => updateReview({ customPrompt: e.target.value })}
-                  placeholder={"Additional instructions for the reviewer...\n\ne.g. Focus on passive voice\n     Be strict about comma usage\n     Prefer concise sentences"}
+                  placeholder={"给审阅助手的补充指令...\n\n例如：重点关注被动语态\n     对标点符号严格要求\n     偏好简洁的句子"}
                   rows={8}
                   className={inputCls + " resize-y font-mono"}
                 />
                 <p className="mt-1.5 text-xs text-neutral-400">
-                  Appended to the system prompt. The JSON output protocol and anchor
-                  rules are locked and cannot be overridden.
+                  追加到系统提示末尾。JSON 输出协议和锚点规则已锁定，无法被覆盖。
                 </p>
               </div>
             </div>
@@ -254,12 +253,12 @@ export function SettingsPanel({
             onClick={handleReset}
             className="text-sm text-neutral-400 transition-colors hover:text-neutral-600 dark:hover:text-neutral-300"
           >
-            Reset to defaults
+            恢复默认
           </button>
           <div className="flex items-center gap-3">
             {saved && (
               <span className="text-sm text-green-600 dark:text-green-400">
-                Saved!
+                已保存！
               </span>
             )}
             <button
@@ -267,14 +266,14 @@ export function SettingsPanel({
               onClick={onClose}
               className="rounded-md border border-neutral-300 px-4 py-2 text-sm font-medium text-neutral-600 transition-colors hover:bg-neutral-100 dark:border-neutral-600 dark:text-neutral-300 dark:hover:bg-neutral-800"
             >
-              Cancel
+              取消
             </button>
             <button
               type="button"
               onClick={handleSave}
               className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
             >
-              Save
+              保存
             </button>
           </div>
         </div>

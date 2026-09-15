@@ -17,13 +17,13 @@ export const REASONING_EFFORT_OPTIONS: Array<{
   label: string;
   description: string;
 }> = [
-  { value: "minimal", label: "Minimal", description: "Fastest, least reasoning" },
-  { value: "low", label: "Low", description: "Quick responses" },
-  { value: "medium", label: "Medium", description: "Balanced" },
-  { value: "high", label: "High", description: "Deep analysis" },
-  { value: "xhigh", label: "XHigh", description: "Extra deep" },
-  { value: "max", label: "Max", description: "Maximum effort" },
-  { value: "ultra", label: "Ultra", description: "Beyond max (if supported)" },
+  { value: "minimal", label: "Minimal", description: "最快，最少思考" },
+  { value: "low", label: "Low", description: "快速响应" },
+  { value: "medium", label: "Medium", description: "平衡" },
+  { value: "high", label: "High", description: "深度分析" },
+  { value: "xhigh", label: "XHigh", description: "更深度" },
+  { value: "max", label: "Max", description: "最大思考量" },
+  { value: "ultra", label: "Ultra", description: "超越最大（若支持）" },
 ];
 
 export type LLMSettings = {

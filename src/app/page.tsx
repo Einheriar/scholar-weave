@@ -706,8 +706,8 @@ export default function Home() {
       <button
         type="button"
         onClick={() => setSettingsOpen((v) => !v)}
-        aria-label="Settings"
-        title="Settings"
+        aria-label="设置"
+        title="设置"
         className="fixed bottom-28 left-4 z-50 flex h-10 w-10 items-center justify-center rounded-full border border-neutral-300 bg-white/90 shadow-md backdrop-blur-sm transition-colors hover:bg-neutral-100 dark:border-neutral-600 dark:bg-neutral-800/90 dark:hover:bg-neutral-700"
       >
         <svg
