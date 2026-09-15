@@ -15,13 +15,15 @@ import {
  * 中央模态窗口，localStorage 持久化。
  */
 
-type Tab = "model" | "review";
+type Tab = "model" | "review" | "data";
 
 type SettingsPanelProps = {
   open: boolean;
   onClose: () => void;
   settings: UserSettings;
   onSettingsChange: (settings: UserSettings) => void;
+  onLoadSample?: () => void;
+  onClearAll?: () => void;
 };
 
 export function SettingsPanel({
@@ -29,6 +31,8 @@ export function SettingsPanel({
   onClose,
   settings,
   onSettingsChange,
+  onLoadSample,
+  onClearAll,
 }: SettingsPanelProps) {
   const [tab, setTab] = useState<Tab>("model");
   const [draft, setDraft] = useState<UserSettings>(settings);
@@ -124,6 +128,7 @@ export function SettingsPanel({
             [
               { key: "model", label: "模型" },
               { key: "review", label: "审阅" },
+              { key: "data", label: "数据" },
             ] as const
           ).map(({ key, label }) => (
             <button
@@ -241,6 +246,43 @@ export function SettingsPanel({
                 <p className="mt-1.5 text-xs text-neutral-400">
                   追加到系统提示末尾。JSON 输出协议和锚点规则已锁定，无法被覆盖。
                 </p>
+              </div>
+            </div>
+          )}
+
+          {tab === "data" && (
+            <div className="space-y-5">
+              <div>
+                <label className={labelCls}>示例数据</label>
+                <p className="mb-2 text-xs text-neutral-400">
+                  加载内置的示例论文和审阅建议，用于演示界面效果（不会调用 LLM）。
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onLoadSample?.();
+                    onClose();
+                  }}
+                  className="rounded-md border border-neutral-300 px-4 py-2 text-sm font-medium text-neutral-600 transition-colors hover:bg-neutral-100 dark:border-neutral-600 dark:text-neutral-300 dark:hover:bg-neutral-800"
+                >
+                  载入样例
+                </button>
+              </div>
+              <div>
+                <label className={labelCls}>本地数据</label>
+                <p className="mb-2 text-xs text-neutral-400">
+                  清除浏览器本地保存的草稿，并将编辑器重置为示例文档。此操作不可撤销。
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClearAll?.();
+                    onClose();
+                  }}
+                  className="rounded-md border border-red-300 px-4 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950/40"
+                >
+                  清空数据
+                </button>
               </div>
             </div>
           )}

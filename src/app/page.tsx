@@ -588,14 +588,6 @@ export default function Home() {
           {copyState === "copied" ? "已复制 ✓" : "复制全文"}
         </button>
 
-        <button
-          type="button"
-          onClick={loadSample}
-          className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm text-neutral-600 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
-        >
-          载入样例
-        </button>
-
         <div className="ml-auto flex items-center gap-3 text-xs text-neutral-400">
           <span>{openCount} 条待处理</span>
           <span role="status">
@@ -605,13 +597,6 @@ export default function Home() {
                 ? "已保存到本地"
                 : ""}
           </span>
-          <button
-            type="button"
-            onClick={clearAll}
-            className="text-neutral-400 underline hover:text-red-500"
-          >
-            清空数据
-          </button>
         </div>
       </header>
 
@@ -740,6 +725,8 @@ export default function Home() {
         onClose={() => setSettingsOpen(false)}
         settings={settings}
         onSettingsChange={handleSettingsChange}
+        onLoadSample={loadSample}
+        onClearAll={clearAll}
       />
     </main>
   );
