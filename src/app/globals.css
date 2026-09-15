@@ -1,32 +1,109 @@
 @import "tailwindcss";
 
-/* 深浅色由用户手动切换（顶栏按钮），不跟随系统偏好：
+/* 深浅色由用户手动切换（左下角浮动按钮），不跟随系统偏好：
    <html> 上的 .dark class 是唯一开关（ThemeToggle 写入，layout 内联脚本恢复）。 */
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* ── 设计令牌 ────────────────────────────────────────────────
+   主色为 Grammarly 式绿色；深色模式用墨绿黑底而非纯黑，避免荧光感。 */
 :root {
   color-scheme: light;
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f2f5f4;        /* 页面底：暖白灰，微偏绿 */
+  --foreground: #1a2420;
+  --surface: #ffffff;           /* 纸张 / 卡片 */
+  --surface-muted: #f7f9f8;     /* 侧栏 / 次级背景 */
+  --border: #dfe7e3;
+  --border-strong: #c9d4cf;
+  --text-muted: #5f6f68;
+  --text-faint: #93a29b;
+  --brand: #0da678;             /* 主操作绿 */
+  --brand-hover: #0b9069;
+  --brand-soft: #e3f4ee;        /* 浅绿底（选中态等） */
+  --brand-ring: #a8dcc9;
 }
 
 .dark {
   color-scheme: dark;
-  --background: #0a0a0a;
-  --foreground: #ededed;
+  --background: #0e1311;        /* 墨绿黑 */
+  --foreground: #e3eae6;
+  --surface: #171d1a;
+  --surface-muted: #131916;
+  --border: #2a332f;
+  --border-strong: #3a453f;
+  --text-muted: #8fa098;
+  --text-faint: #5f6f68;
+  --brand: #2cc493;
+  --brand-hover: #3fd6a5;
+  --brand-soft: rgb(44 196 147 / 0.12);
+  --brand-ring: rgb(44 196 147 / 0.35);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-text-muted: var(--text-muted);
+  --color-text-faint: var(--text-faint);
+  --color-brand: var(--brand);
+  --color-brand-hover: var(--brand-hover);
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-ring: var(--brand-ring);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+}
+
+html {
+  /* 主题切换时全局颜色平滑过渡 */
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+/* 主题切换时所有带颜色属性的元素跟随过渡（仅颜色类，不含布局） */
+.theme-fade,
+.theme-fade * {
+  transition:
+    background-color 0.3s ease,
+    border-color 0.3s ease,
+    color 0.3s ease,
+    box-shadow 0.3s ease;
+}
+
+/* ── 模态框进入动画 ───────────────────────────────────────── */
+@keyframes modal-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes modal-pop-in {
+  from { opacity: 0; transform: scale(0.96) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+.animate-modal-fade {
+  animation: modal-fade-in 0.18s ease-out;
+}
+.animate-modal-pop {
+  animation: modal-pop-in 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* 列表条目淡入（筛选切换 / 审阅结果到达） */
+@keyframes item-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-item-in {
+  animation: item-fade-in 0.25s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { transition: none; }
+  .animate-modal-fade, .animate-modal-pop, .animate-item-in { animation: none; }
 }
 
 /* ── 审阅建议的编辑器标记（阶段 2）──────────────────────────────
@@ -36,10 +113,10 @@ body {
 .rev-underline {
   cursor: pointer;
   text-decoration-line: underline;
-  text-decoration-thickness: 2px;
-  text-underline-offset: 3px;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 4px;
   border-radius: 2px;
-  transition: background-color 0.12s ease;
+  transition: background-color 0.15s ease;
 }
 .rev-underline:hover {
   background-color: rgb(0 0 0 / 0.06);
@@ -79,6 +156,7 @@ body {
   box-shadow: inset 3px 0 0 0 #f59e0b; /* 琥珀色竖线 */
   padding-left: 0.5rem;
   border-radius: 2px;
+  transition: background-color 0.15s ease;
 }
 .rev-block-marker:hover {
   background-color: rgb(245 158 11 / 0.06);
@@ -87,13 +165,29 @@ body {
   background-color: rgb(245 158 11 / 0.1);
 }
 
-/* 选中态：正文标记与侧栏卡片双向高亮 */
+/* 选中态：正文标记与侧栏卡片双向高亮（品牌绿） */
 .rev-selected.rev-underline {
-  background-color: rgb(37 99 235 / 0.16);
-  outline: 2px solid rgb(37 99 235 / 0.5);
+  background-color: rgb(13 166 120 / 0.14);
+  outline: 2px solid rgb(13 166 120 / 0.45);
   outline-offset: 1px;
+}
+.dark .rev-selected.rev-underline {
+  background-color: rgb(44 196 147 / 0.18);
+  outline-color: rgb(44 196 147 / 0.5);
 }
 .rev-selected.rev-block-marker {
   background-color: rgb(245 158 11 / 0.14);
   box-shadow: inset 4px 0 0 0 #d97706;
+}
+
+/* ── 编辑器纸张排版 ───────────────────────────────────────── */
+.ProseMirror {
+  font-size: 1rem;
+  line-height: 1.8;
+}
+.ProseMirror p {
+  margin: 0 0 0.9em;
+}
+.ProseMirror p:last-child {
+  margin-bottom: 0;
 }

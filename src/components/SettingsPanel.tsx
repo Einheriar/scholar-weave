@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { buttonClass } from "@/components/ui/button";
 import {
-  loadSettings,
   saveSettings,
   DEFAULT_SETTINGS,
   REASONING_EFFORT_OPTIONS,
@@ -37,14 +37,19 @@ export function SettingsPanel({
   const [tab, setTab] = useState<Tab>("model");
   const [draft, setDraft] = useState<UserSettings>(settings);
   const [saved, setSaved] = useState(false);
-
-  // Sync draft when settings change externally or panel opens
-  useEffect(() => {
+  // 面板每次打开时重置 draft：用“上次同步的 settings”做渲染期比对，
+  // 只在引用变化时 setState（React 推荐的 derived-state-from-props 模式）
+  const [prevSynced, setPrevSynced] = useState<{ open: boolean; settings: UserSettings }>({
+    open,
+    settings,
+  });
+  if (open !== prevSynced.open || settings !== prevSynced.settings) {
+    setPrevSynced({ open, settings });
     if (open) {
       setDraft(settings);
       setSaved(false);
     }
-  }, [open, settings]);
+  }
 
   // Close on Escape
   useEffect(() => {
@@ -84,35 +89,42 @@ export function SettingsPanel({
   if (!open) return null;
 
   const inputCls =
-    "w-full rounded-md border border-neutral-300 bg-transparent px-3 py-2 text-sm focus:border-blue-400 focus:outline-none dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-200";
+    "w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground shadow-sm transition-colors focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand-ring placeholder:text-text-faint";
   const labelCls =
-    "block text-xs font-medium text-neutral-500 dark:text-neutral-400 mb-1.5";
+    "block text-xs font-medium text-text-muted mb-1.5";
+
+  const tabs = [
+    { key: "model", label: "模型" },
+    { key: "review", label: "审阅" },
+    { key: "data", label: "数据" },
+  ] as const;
+  const activeIndex = tabs.findIndex((t) => t.key === tab);
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4"
+      className="animate-modal-fade fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4 backdrop-blur-[2px]"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
       <div
-        className="flex max-h-[85vh] w-full max-w-2xl flex-col rounded-2xl border border-neutral-300 bg-white shadow-2xl dark:border-neutral-700 dark:bg-neutral-900"
+        className="animate-modal-pop flex max-h-[85vh] w-full max-w-2xl flex-col rounded-2xl border border-border bg-surface shadow-2xl"
         role="dialog"
         aria-modal="true"
         aria-labelledby="settings-title"
       >
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-neutral-200 px-6 py-4 dark:border-neutral-700">
+        <div className="flex items-center justify-between border-b border-border px-6 py-4">
           <h2
             id="settings-title"
-            className="text-lg font-semibold text-neutral-800 dark:text-neutral-200"
+            className="text-lg font-semibold tracking-tight text-foreground"
           >
             设置
           </h2>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg p-1.5 text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-600 dark:hover:bg-neutral-800"
+            className="rounded-lg p-1.5 text-text-faint transition-colors hover:bg-surface-muted hover:text-foreground"
             aria-label="关闭设置"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
@@ -122,28 +134,27 @@ export function SettingsPanel({
           </button>
         </div>
 
-        {/* Tabs */}
-        <div className="flex border-b border-neutral-200 dark:border-neutral-700">
-          {(
-            [
-              { key: "model", label: "模型" },
-              { key: "review", label: "审阅" },
-              { key: "data", label: "数据" },
-            ] as const
-          ).map(({ key, label }) => (
+        {/* Tabs：激活指示条跟随滑动 */}
+        <div className="relative flex border-b border-border">
+          {tabs.map(({ key, label }) => (
             <button
               key={key}
               type="button"
               onClick={() => setTab(key)}
-              className={`flex-1 px-4 py-3 text-sm font-medium transition-colors ${
+              className={`flex-1 px-4 py-3 text-sm font-medium transition-colors duration-150 ${
                 tab === key
-                  ? "border-b-2 border-blue-500 text-blue-600 dark:text-blue-400"
-                  : "text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-300"
+                  ? "text-brand"
+                  : "text-text-muted hover:text-foreground"
               }`}
             >
               {label}
             </button>
           ))}
+          <span
+            aria-hidden
+            className="absolute bottom-0 h-0.5 w-1/3 bg-brand transition-transform duration-200 ease-out"
+            style={{ transform: `translateX(${activeIndex * 100}%)` }}
+          />
         </div>
 
         {/* Body */}
@@ -160,7 +171,7 @@ export function SettingsPanel({
                   className={inputCls}
                   autoComplete="off"
                 />
-                <p className="mt-1.5 text-xs text-neutral-400">
+                <p className="mt-1.5 text-xs text-text-faint">
                   你的 OpenAI 兼容 API 密钥，仅保存在此浏览器本地。
                 </p>
               </div>
@@ -199,7 +210,7 @@ export function SettingsPanel({
                     </option>
                   ))}
                 </select>
-                <p className="mt-1.5 text-xs text-neutral-400">
+                <p className="mt-1.5 text-xs text-text-faint">
                   控制模型在回复前的思考深度。档位越高，分析越深入，但响应越慢。
                 </p>
               </div>
@@ -217,7 +228,7 @@ export function SettingsPanel({
                   placeholder="例如：学术、正式、简洁"
                   className={inputCls}
                 />
-                <p className="mt-1.5 text-xs text-neutral-400">
+                <p className="mt-1.5 text-xs text-text-faint">
                   描述期望的写作风格，供审阅时参考。
                 </p>
               </div>
@@ -230,7 +241,7 @@ export function SettingsPanel({
                   placeholder="例如：SIT, IDT, social category"
                   className={inputCls}
                 />
-                <p className="mt-1.5 text-xs text-neutral-400">
+                <p className="mt-1.5 text-xs text-text-faint">
                   逗号分隔的术语，审阅时必须逐字保留、不得修改。
                 </p>
               </div>
@@ -243,7 +254,7 @@ export function SettingsPanel({
                   rows={8}
                   className={inputCls + " resize-y font-mono"}
                 />
-                <p className="mt-1.5 text-xs text-neutral-400">
+                <p className="mt-1.5 text-xs text-text-faint">
                   追加到系统提示末尾。JSON 输出协议和锚点规则已锁定，无法被覆盖。
                 </p>
               </div>
@@ -254,7 +265,7 @@ export function SettingsPanel({
             <div className="space-y-5">
               <div>
                 <label className={labelCls}>示例数据</label>
-                <p className="mb-2 text-xs text-neutral-400">
+                <p className="mb-2 text-xs text-text-faint">
                   加载内置的示例论文和审阅建议，用于演示界面效果（不会调用 LLM）。
                 </p>
                 <button
@@ -263,14 +274,14 @@ export function SettingsPanel({
                     onLoadSample?.();
                     onClose();
                   }}
-                  className="rounded-md border border-neutral-300 px-4 py-2 text-sm font-medium text-neutral-600 transition-colors hover:bg-neutral-100 dark:border-neutral-600 dark:text-neutral-300 dark:hover:bg-neutral-800"
+                  className={buttonClass("secondary", "md")}
                 >
                   载入样例
                 </button>
               </div>
               <div>
                 <label className={labelCls}>本地数据</label>
-                <p className="mb-2 text-xs text-neutral-400">
+                <p className="mb-2 text-xs text-text-faint">
                   清除浏览器本地保存的草稿，并将编辑器重置为示例文档。此操作不可撤销。
                 </p>
                 <button
@@ -279,7 +290,7 @@ export function SettingsPanel({
                     onClearAll?.();
                     onClose();
                   }}
-                  className="rounded-md border border-red-300 px-4 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950/40"
+                  className={buttonClass("danger", "md")}
                 >
                   清空数据
                 </button>
@@ -289,31 +300,31 @@ export function SettingsPanel({
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between border-t border-neutral-200 px-6 py-4 dark:border-neutral-700">
+        <div className="flex items-center justify-between border-t border-border px-6 py-4">
           <button
             type="button"
             onClick={handleReset}
-            className="text-sm text-neutral-400 transition-colors hover:text-neutral-600 dark:hover:text-neutral-300"
+            className="rounded-md px-2 py-1 text-sm text-text-faint transition-colors hover:bg-surface-muted hover:text-foreground"
           >
             恢复默认
           </button>
           <div className="flex items-center gap-3">
             {saved && (
-              <span className="text-sm text-green-600 dark:text-green-400">
+              <span className="animate-item-in text-sm text-emerald-600 dark:text-emerald-400">
                 已保存！
               </span>
             )}
             <button
               type="button"
               onClick={onClose}
-              className="rounded-md border border-neutral-300 px-4 py-2 text-sm font-medium text-neutral-600 transition-colors hover:bg-neutral-100 dark:border-neutral-600 dark:text-neutral-300 dark:hover:bg-neutral-800"
+              className={buttonClass("secondary", "md")}
             >
               取消
             </button>
             <button
               type="button"
               onClick={handleSave}
-              className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+              className={buttonClass("primary", "md")}
             >
               保存
             </button>

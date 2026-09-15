@@ -113,7 +113,7 @@ export const DocumentEditor = forwardRef<
     editorProps: {
       attributes: {
         class:
-          "prose max-w-none focus:outline-none min-h-[60vh] p-4 leading-relaxed",
+          "prose max-w-none focus:outline-none min-h-[60vh] px-8 py-7 sm:px-10 sm:py-9 leading-relaxed",
         "aria-label": "文档编辑器",
       },
     },
@@ -220,7 +220,9 @@ export const DocumentEditor = forwardRef<
   }));
 
   return (
-    <div className="rounded-lg border border-neutral-300 bg-white shadow-sm dark:border-neutral-700 dark:bg-neutral-900">
+    /* 纸张式编辑器：白卡片浮在页面底色上，内边距在编辑器本体上，
+       让文本选区/光标留边一致（PLAN 布局美化） */
+    <div className="rounded-2xl border border-border bg-surface shadow-sm transition-shadow duration-200 focus-within:shadow-md">
       <EditorContent editor={editor} />
     </div>
   );

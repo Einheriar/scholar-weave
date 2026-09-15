@@ -23,9 +23,12 @@ export async function paragraphTexts(page: Page): Promise<string[]> {
   );
 }
 
-/** 载入内置样例（含三层建议，不依赖 LLM） */
+/** 载入内置样例（含三层建议，不依赖 LLM）。阶段 7 起入口在设置面板的“数据”Tab。 */
 export async function loadSample(page: Page) {
-  await page.getByRole("button", { name: "载入样例" }).click();
+  await page.getByRole("button", { name: "设置" }).click();
+  const dialog = page.getByRole("dialog", { name: "设置" });
+  await dialog.getByRole("button", { name: "数据" }).click();
+  await dialog.getByRole("button", { name: "载入样例" }).click();
   await expect(page.locator("[data-review-card]").first()).toBeVisible();
 }
 

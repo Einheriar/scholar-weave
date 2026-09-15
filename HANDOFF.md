@@ -26,7 +26,7 @@
 5. **API Key 只在服务端环境变量**（`.env.local`，已被 git 忽略），绝不进前端代码或日志。
 6. **防注入**：文档内容在 prompt 里被包裹为不可信数据，系统提示规定不执行其中指令；输出仍过 Zod + 业务校验。
 
-## 当前进度：阶段 0–6 全部完成 + 界面优化
+## 当前进度：阶段 0–6 全部完成 + 界面优化 + 界面美化
 
 按 PLAN 第 14 节的阶段。已完成并**各自 commit**：
 
@@ -40,8 +40,28 @@
 | 5 上下文聊天 | ✅ | `/api/chat`、`/api/change-set`、ContextChat、按意见生成修改集 |
 | 6 产品化整理 | ✅ | Playwright E2E、键盘快捷键、无障碍收尾、README 部署说明 |
 | 7 界面优化 | ✅ | 主题切换按钮（左下角浮动 SVG）、设置面板（中央模态）、数据 Tab |
+| 8 界面美化 | ✅ | Grammarly 式绿色主调设计令牌、纸张式编辑器、胶囊筛选器、对话气泡、全局过渡动画 |
 
-**质量基线（阶段 6 完成时）：65 个 Vitest 用例 + 15 个 Playwright 用例全过；`lint` / `typecheck` / `build` 全通过。**
+**质量基线（阶段 8 完成时）：65 个 Vitest 用例 + 15 个 Playwright 用例全过；`lint`（0 问题）/ `typecheck` / `build` 全通过。**
+
+### 阶段 8：界面美化（已完成）
+
+1. **设计令牌**（`src/app/globals.css`）：Grammarly 式绿色主色（浅 `#0da678` / 深 `#2cc493`），页面底色暖白灰 `#f2f5f4`、深色墨绿黑 `#0e1311`（非纯黑，避免荧光感）。令牌：`surface`/`surface-muted`/`border`/`text-muted`/`text-faint`/`brand`/`brand-soft`/`brand-ring`，全部经 `@theme inline` 映射为 Tailwind 颜色类。
+2. **统一按钮**（`src/components/ui/button.tsx`）：`buttonClass(variant, size)` 工厂，primary（绿底）/secondary（白底灰框）/danger（红）/ghost 四级，统一 `rounded-lg`、focus ring、`active:scale-[0.98]`。
+3. **纸张式编辑器**：`DocumentEditor` 白色圆角卡片浮在页面底色上，内边距加大到 `px-8 py-7`，行高 1.8（`.ProseMirror` 排版规则）。
+4. **侧栏**：范围筛选从下拉改为胶囊按钮组（全部/全文/段落/局部 + 计数徽标，选中绿底）；卡片选中态改为品牌绿描边 + 浅绿底；badge 全部 pill 化。
+5. **对话气泡**：用户绿底右对齐（`rounded-br-sm`）、AI 浅灰左对齐（`rounded-bl-sm`），“正在思考”加三点跳动动画。
+6. **设置面板**：模态淡入 + 面板弹入动画（`animate-modal-fade/pop`），Tab 激活指示条随选中滑动（`translateX` 过渡），输入框 focus 绿色 ring。
+7. **过渡动画**：`body.theme-fade` 让主题切换时全局颜色 300ms 平滑过渡；列表条目/状态条 `animate-item-in` 淡入上移；全部尊重 `prefers-reduced-motion`。
+8. **顺手修复**：
+   - SettingsPanel 基线上的两个 lint 问题（未使用的 import、effect 内同步 setState → 改为渲染期 derived-state 模式）。
+   - E2E `loadSample` helper 过时（阶段 7 把“载入样例”移进设置面板后测试没跟上，基线 8 个用例失败）——改为走 设置→数据 Tab→载入样例 流程，15 个用例恢复全绿。
+
+**美化时的注意点（保留 HANDOFF 约束）：**
+1. **保持功能不变** — 所有按钮、输入框、Tab 的功能和 aria-label 不要改
+2. **保持数据结构不变** — localStorage key、Zod schema、API 路由不变
+3. **保持可访问性** — 已有的 aria-label、role、键盘导航不要破坏
+4. **深色模式适配** — 所有新样式都要有 dark: 变体（令牌已内置双套值，优先用语义令牌类如 `bg-surface`/`text-text-muted` 而非手写 neutral 色）
 
 ### 阶段 7：界面优化（已完成）
 
@@ -67,14 +87,9 @@
    - API 路由优先使用请求体里的用户配置，fallback 到 `.env.local`
    - DeepSeek `reasoning_effort` 参数透传
 
-### 下一步：界面美化
+### 界面美化（阶段 8 已完成）
 
-用户计划换 agent 进行界面美化。当前界面已功能完整，但视觉设计较朴素（默认 Tailwind 样式）。建议美化方向：
-- 整体配色方案（可考虑更现代的学术/专业风格）
-- 按钮、卡片、输入框的圆角、阴影、过渡效果
-- 字体选择（标题、正文、代码的层次区分）
-- 间距和布局微调
-- 深色模式的色彩优化
+上方“当前进度”表的阶段 8 记录了完整美化内容：绿色设计令牌、纸张式编辑器、胶囊筛选器、对话气泡、全局过渡动画，以及顺手修复的 lint/E2E 基线问题。
 
 常用命令：
 ```bash
@@ -175,17 +190,19 @@ tests/e2e/                      # 15 个 Playwright 用例（config 在根目录
 
 ```
 请先读 PLAN.md 和 HANDOFF.md，了解项目目标与当前进度。这是一个 Next.js 16 + Tiptap 3 的
-AI 文档审阅工具，阶段 0-6 已全部完成，阶段 7（界面优化）刚完成，包括主题切换按钮、
-设置面板、用户配置支持。65 个 Vitest 用例与 15 个 Playwright 用例全过。
+AI 文档审阅工具，阶段 0-7 已全部完成，阶段 8（界面美化）刚完成：绿色设计令牌、
+纸张式编辑器、胶囊筛选器、对话气泡、全局过渡动画。65 个 Vitest 用例与 15 个 Playwright 用例全过。
 修改前先跑 npm run test 与 npm run test:e2e 确认基线是绿的；每完成一项跑
 npm run typecheck / lint / test，并按阶段 commit。不要扩张到非 MVP 范围。
 ```
 
-## 给界面美化 agent 的提示
+## 给后续界面工作的提示
 
-当前界面功能完整但视觉较朴素。美化时请注意：
+界面已完成 Grammarly 式美化（阶段 8）。继续迭代时请注意：
 1. **保持功能不变** — 所有按钮、输入框、Tab 的功能和 aria-label 不要改
 2. **保持数据结构不变** — localStorage key、Zod schema、API 路由不变
 3. **保持可访问性** — 已有的 aria-label、role、键盘导航不要破坏
-4. **深色模式适配** — 所有新样式都要有 dark: 变体
-5. **建议方向** — 配色方案、圆角/阴影、字体层次、间距优化
+4. **用语义令牌** — 颜色优先用 `bg-surface`/`bg-brand`/`text-text-muted`/`border-border` 等
+   （globals.css 的 @theme 映射，自带深浅双套值），不要再手写 neutral/blue 色值
+5. **动画** — 复用 `animate-item-in`/`animate-modal-fade`/`animate-modal-pop`，
+   并保证 `prefers-reduced-motion` 下可用

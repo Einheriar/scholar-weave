@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeSet, ConcreteEdit, DocumentState } from "@/lib/review-schema";
 import { prepareChangeSet } from "@/lib/changeset";
+import { buttonClass } from "@/components/ui/button";
 
 export type ChangeSetPreviewProps = {
   changeSet: ChangeSet;
@@ -65,7 +66,7 @@ export function ChangeSetPreview({
   return (
     <div
       ref={panelRef}
-      className="rounded-lg border border-blue-300 bg-blue-50/60 p-3 text-sm dark:border-blue-800 dark:bg-blue-950/30"
+      className="animate-item-in rounded-2xl border border-brand-ring bg-brand-soft/60 p-4 text-sm shadow-sm"
       role="dialog"
       aria-labelledby="changeset-preview-title"
       onKeyDown={(e) => {
@@ -75,35 +76,35 @@ export function ChangeSetPreview({
         }
       }}
     >
-      <div className="mb-2">
-        <h3 id="changeset-preview-title" className="font-semibold text-neutral-800 dark:text-neutral-200">
+      <div className="mb-3">
+        <h3 id="changeset-preview-title" className="font-semibold tracking-tight text-foreground">
           修改集预览
         </h3>
-        <p className="mt-0.5 text-xs text-neutral-600 dark:text-neutral-400">{changeSet.summary}</p>
+        <p className="mt-0.5 text-xs text-text-muted">{changeSet.summary}</p>
       </div>
 
-      <ul className="mb-2 max-h-64 space-y-1.5 overflow-y-auto">
+      <ul className="mb-3 max-h-64 space-y-2 overflow-y-auto">
         {applicable.map((r) => (
           <li
             key={r.edit.id}
-            className="flex items-start gap-2 rounded-md border border-neutral-200 bg-white p-2 dark:border-neutral-800 dark:bg-neutral-900"
+            className="flex items-start gap-2 rounded-xl border border-border bg-surface p-2.5 shadow-sm transition-colors"
           >
             <input
               type="checkbox"
               checked={checked.has(r.edit.id)}
               onChange={() => toggle(r.edit.id)}
-              className="mt-1"
+              className="mt-1 accent-[#0da678]"
               aria-label={`选择修改：${r.edit.explanation || r.edit.original}`}
             />
             <div className="min-w-0 flex-1 text-xs">
-              <div className="break-all text-red-700 line-through dark:text-red-400">
+              <div className="break-all text-red-700 line-through decoration-red-400/60 dark:text-red-400">
                 {r.edit.original}
               </div>
-              <div className="break-all font-medium text-green-700 dark:text-green-400">
+              <div className="break-all font-medium text-emerald-700 dark:text-emerald-400">
                 {r.edit.replacement}
               </div>
               {r.edit.explanation && (
-                <div className="mt-0.5 text-neutral-500 dark:text-neutral-400">{r.edit.explanation}</div>
+                <div className="mt-0.5 text-text-faint">{r.edit.explanation}</div>
               )}
             </div>
           </li>
@@ -111,7 +112,7 @@ export function ChangeSetPreview({
       </ul>
 
       {rejected.size > 0 && (
-        <div className="mb-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
+        <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300">
           <p className="mb-1 font-medium">以下 {rejected.size} 条无法应用：</p>
           <ul className="space-y-0.5">
             {[...rejected.entries()].map(([id, reason]) => (
@@ -131,7 +132,7 @@ export function ChangeSetPreview({
           type="button"
           disabled={selectedIds.length === 0}
           onClick={() => onAccept(selectedIds)}
-          className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-40"
+          className={buttonClass("primary", "xs")}
         >
           接受选中（{selectedIds.length}）
         </button>
@@ -139,14 +140,14 @@ export function ChangeSetPreview({
           type="button"
           disabled={applicableIds.length === 0}
           onClick={() => onAccept(applicableIds)}
-          className="rounded-md border border-blue-300 px-3 py-1.5 text-xs text-blue-700 hover:bg-blue-100 disabled:opacity-40 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-900/40"
+          className={buttonClass("secondary", "xs")}
         >
           全部接受（{applicableIds.length}）
         </button>
         <button
           type="button"
           onClick={onDiscard}
-          className="ml-auto rounded-md border border-neutral-300 px-3 py-1.5 text-xs text-neutral-600 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+          className={buttonClass("secondary", "xs") + " ml-auto"}
         >
           放弃
         </button>

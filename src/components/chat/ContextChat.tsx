@@ -6,6 +6,7 @@ import type {
   ChatContext,
   ReviewItem,
 } from "@/lib/review-schema";
+import { buttonClass } from "@/components/ui/button";
 
 export type ChatTurn = {
   role: "user" | "assistant";
@@ -58,18 +59,18 @@ export function ContextChat({
 
   return (
     <section
-      className="flex flex-col rounded-lg border border-neutral-300 bg-white dark:border-neutral-700 dark:bg-neutral-900"
+      className="flex flex-col rounded-2xl border border-border bg-surface shadow-sm"
       aria-label="上下文对话"
     >
-      <div className="flex items-center justify-between border-b border-neutral-200 px-3 py-1.5 text-xs dark:border-neutral-800">
-        <span className="text-neutral-500 dark:text-neutral-400">
-          当前上下文：<span className="font-medium text-neutral-700 dark:text-neutral-300">{contextLabel}</span>
+      <div className="flex items-center justify-between border-b border-border px-4 py-2 text-xs">
+        <span className="text-text-muted">
+          当前上下文：<span className="font-medium text-foreground">{contextLabel}</span>
         </span>
         {turns.length > 0 && (
           <button
             type="button"
             onClick={onClear}
-            className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300"
+            className="rounded-md px-1.5 py-0.5 text-text-faint transition-colors hover:bg-surface-muted hover:text-foreground"
           >
             清空对话
           </button>
@@ -79,24 +80,29 @@ export function ContextChat({
       {turns.length > 0 && (
         <div
           ref={listRef}
-          className="max-h-56 space-y-2 overflow-y-auto px-3 py-2"
+          className="max-h-56 space-y-2.5 overflow-y-auto px-3.5 py-3"
         >
           {turns.map((t, i) => (
             <div
               key={i}
               className={
-                "rounded-md px-2.5 py-1.5 text-sm " +
+                "animate-item-in px-3 py-2 text-sm shadow-sm " +
                 (t.role === "user"
-                  ? "ml-8 bg-blue-600 text-white"
-                  : "mr-8 bg-neutral-100 text-neutral-800 dark:bg-neutral-800 dark:text-neutral-200")
+                  ? "ml-10 rounded-2xl rounded-br-sm bg-brand text-white dark:text-neutral-950"
+                  : "mr-10 rounded-2xl rounded-bl-sm bg-surface-muted text-foreground")
               }
             >
-              <p className="whitespace-pre-wrap break-words">{t.content}</p>
+              <p className="whitespace-pre-wrap break-words leading-relaxed">{t.content}</p>
               {t.changeSet && (
                 <button
                   type="button"
                   onClick={() => onPreviewChangeSet(t.changeSet!)}
-                  className="mt-1 rounded border border-blue-300 bg-white px-2 py-0.5 text-xs text-blue-700 hover:bg-blue-50 dark:border-blue-700 dark:bg-neutral-900 dark:text-blue-300 dark:hover:bg-blue-950/40"
+                  className={
+                    "mt-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors " +
+                    (t.role === "user"
+                      ? "border-white/40 text-white hover:bg-white/15 dark:text-neutral-950"
+                      : "border-brand-ring bg-surface text-brand hover:bg-brand-soft")
+                  }
                 >
                   预览修改（{t.changeSet.edits.length} 处）
                 </button>
@@ -104,14 +110,19 @@ export function ContextChat({
             </div>
           ))}
           {busy && (
-            <p className="mr-8 rounded-md bg-neutral-100 px-2.5 py-1.5 text-sm text-neutral-400 dark:bg-neutral-800">
+            <p className="animate-item-in mr-10 flex items-center gap-2 rounded-2xl rounded-bl-sm bg-surface-muted px-3 py-2 text-sm text-text-faint">
+              <span className="inline-flex gap-1" aria-hidden>
+                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-text-faint [animation-delay:-0.3s]" />
+                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-text-faint [animation-delay:-0.15s]" />
+                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-text-faint" />
+              </span>
               正在思考…
             </p>
           )}
         </div>
       )}
 
-      <div className="flex items-end gap-2 border-t border-neutral-200 p-2 dark:border-neutral-800">
+      <div className="flex items-end gap-2 border-t border-border p-2.5">
         <textarea
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
@@ -123,14 +134,14 @@ export function ContextChat({
           }}
           placeholder={`针对${contextLabel}询问 LLM……（Enter 发送，Shift+Enter 换行）`}
           rows={2}
-          className="flex-1 resize-none rounded-md border border-neutral-300 bg-transparent px-2 py-1.5 text-sm focus:border-blue-400 focus:outline-none dark:border-neutral-700"
+          className="flex-1 resize-none rounded-xl border border-border bg-transparent px-3 py-2 text-sm transition-colors focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand-ring"
           aria-label="对话输入框"
         />
         <button
           type="button"
           onClick={submit}
           disabled={busy || !draft.trim()}
-          className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40"
+          className={buttonClass("primary", "md")}
         >
           发送
         </button>

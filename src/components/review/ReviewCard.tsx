@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReviewItem } from "@/lib/review-schema";
+import { buttonClass } from "@/components/ui/button";
 import {
   CATEGORY_META,
   KIND_LABEL,
@@ -49,22 +50,22 @@ export function ReviewCard({
   const revertible = item.status === "accepted" || item.status === "rejected";
 
   return (
-    <li>
+    <li className="animate-item-in">
       <article
         data-review-card={item.id}
         aria-current={selected ? "true" : undefined}
         className={
-          "cursor-pointer rounded-lg border p-3 text-sm shadow-sm transition-colors " +
+          "cursor-pointer rounded-xl border p-3.5 text-sm shadow-sm transition-all duration-200 " +
           (selected
-            ? "border-blue-400 bg-blue-50 ring-1 ring-blue-300 dark:bg-blue-950/40 dark:ring-blue-700"
-            : "border-neutral-200 bg-white hover:border-neutral-300 dark:border-neutral-800 dark:bg-neutral-900 dark:hover:border-neutral-700") +
+            ? "border-brand bg-brand-soft shadow-md ring-1 ring-brand-ring"
+            : "border-border bg-surface hover:-translate-y-px hover:border-border-strong hover:shadow-md") +
           (item.status === "stale" ? " opacity-60" : "")
         }
         onClick={() => onSelect(item.id)}
       >
         {/* 头部：类型 / 类别 / 严重度 / 状态 */}
         <div className="mb-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-          <span className="rounded bg-neutral-800 px-1.5 py-0.5 font-medium text-white dark:bg-neutral-700">
+          <span className="rounded-full bg-foreground/85 px-2 py-0.5 font-medium text-background">
             {KIND_LABEL[item.kind]}
           </span>
           <span className={`flex items-center gap-1 ${cat.textClass}`}>
@@ -73,32 +74,32 @@ export function ReviewCard({
           </span>
           <span className={sev.className}>{sev.label}</span>
           <span
-            className={`ml-auto rounded px-1.5 py-0.5 ${st.className}`}
+            className={`ml-auto rounded-full px-2 py-0.5 ${st.className}`}
             aria-label={`状态：${st.label}`}
           >
             {st.label}
           </span>
         </div>
 
-        <h4 className="mb-1 font-medium text-neutral-900 dark:text-neutral-100">{item.title}</h4>
-        <p className="mb-2 leading-relaxed text-neutral-600 dark:text-neutral-400">
+        <h4 className="mb-1 font-medium tracking-tight text-foreground">{item.title}</h4>
+        <p className="mb-2.5 leading-relaxed text-text-muted">
           {item.explanation}
         </p>
 
         {/* edit：展示 原文 → 替换 */}
         {item.kind === "edit" && item.replacement !== undefined && (
-          <div className="mb-2 space-y-1 rounded-md bg-neutral-50 p-2 text-xs dark:bg-neutral-800/60">
+          <div className="mb-2.5 space-y-1.5 rounded-lg bg-surface-muted p-2.5 text-xs">
             {item.scope.type === "range" && (
               <div className="flex gap-1.5">
-                <span className="shrink-0 text-neutral-400">原文</span>
-                <span className="break-all text-red-700 line-through dark:text-red-400">
+                <span className="shrink-0 text-text-faint">原文</span>
+                <span className="break-all text-red-700 line-through decoration-red-400/60 dark:text-red-400">
                   {item.scope.original}
                 </span>
               </div>
             )}
             <div className="flex gap-1.5">
-              <span className="shrink-0 text-neutral-400">改为</span>
-              <span className="break-all font-medium text-green-700 dark:text-green-400">
+              <span className="shrink-0 text-text-faint">改为</span>
+              <span className="break-all font-medium text-emerald-700 dark:text-emerald-400">
                 {item.replacement}
               </span>
             </div>
@@ -111,7 +112,7 @@ export function ReviewCard({
             <>
               <button
                 type="button"
-                className="rounded-md bg-blue-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-blue-700"
+                className={buttonClass("primary", "xs")}
                 onClick={(e) => {
                   e.stopPropagation();
                   onAccept(item.id);
@@ -121,7 +122,7 @@ export function ReviewCard({
               </button>
               <button
                 type="button"
-                className="rounded-md border border-neutral-300 px-2.5 py-1 text-xs text-neutral-600 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+                className={buttonClass("secondary", "xs")}
                 onClick={(e) => {
                   e.stopPropagation();
                   onReject(item.id);
@@ -136,7 +137,7 @@ export function ReviewCard({
             <>
               <button
                 type="button"
-                className="rounded-md border border-neutral-300 px-2.5 py-1 text-xs text-neutral-600 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+                className={buttonClass("secondary", "xs")}
                 onClick={(e) => {
                   e.stopPropagation();
                   onChat?.(item.id);
@@ -147,7 +148,7 @@ export function ReviewCard({
               <button
                 type="button"
                 disabled={applyingOpinion}
-                className="rounded-md border border-blue-300 px-2.5 py-1 text-xs text-blue-700 hover:bg-blue-50 disabled:opacity-40 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-950/40"
+                className={buttonClass("primary", "xs")}
                 onClick={(e) => {
                   e.stopPropagation();
                   onApplyOpinion?.(item.id);
@@ -161,7 +162,7 @@ export function ReviewCard({
           {revertible && (
             <button
               type="button"
-              className="rounded-md border border-neutral-300 px-2.5 py-1 text-xs text-neutral-600 hover:bg-neutral-100"
+              className={buttonClass("secondary", "xs")}
               onClick={(e) => {
                 e.stopPropagation();
                 onRevert(item.id);

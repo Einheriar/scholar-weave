@@ -27,6 +27,7 @@ export type ReviewSidebarProps = {
 /**
  * 审阅侧栏（PLAN 6.1 / 6.3）。
  * 按范围分三区（全文 / 段落 / 局部），并支持按 范围/类型/类别/状态 筛选。
+ * 范围筛选用胶囊按钮组（Grammarly 式一键切换），其余维度用下拉。
  */
 export function ReviewSidebar({
   items,
@@ -70,7 +71,13 @@ export function ReviewSidebar({
 
   const counts = useMemo(() => {
     const open = items.filter((i) => i.status === "open").length;
-    return { total: items.length, open };
+    const byScopeCount: Record<ScopeType | "all", number> = {
+      all: items.length,
+      document: items.filter((i) => i.scope.type === "document").length,
+      block: items.filter((i) => i.scope.type === "block").length,
+      range: items.filter((i) => i.scope.type === "range").length,
+    };
+    return { total: items.length, open, byScopeCount };
   }, [items]);
 
   const sections: Array<{ scope: ScopeType; title: string; empty: string }> = [
@@ -79,32 +86,59 @@ export function ReviewSidebar({
     { scope: "range", title: "具体修改", empty: "暂无局部建议" },
   ];
 
+  const scopeTabs: Array<{ key: ScopeType | "all"; label: string }> = [
+    { key: "all", label: "全部" },
+    { key: "document", label: "全文" },
+    { key: "block", label: "段落" },
+    { key: "range", label: "局部" },
+  ];
+
   return (
     <aside
-      className="flex h-full w-full flex-col overflow-hidden rounded-lg border border-neutral-300 bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900"
+      className="flex h-full w-full flex-col overflow-hidden rounded-2xl border border-border bg-surface-muted shadow-sm"
       aria-label="审阅建议侧栏"
     >
-      <div className="border-b border-neutral-200 px-3 py-2 dark:border-neutral-800">
+      <div className="border-b border-border px-4 pb-3 pt-4">
         <div className="flex items-baseline justify-between">
-          <h2 className="text-sm font-semibold text-neutral-800 dark:text-neutral-200">审阅建议</h2>
-          <span className="text-xs text-neutral-500 dark:text-neutral-400">
+          <h2 className="text-sm font-semibold tracking-tight text-foreground">审阅建议</h2>
+          <span className="rounded-full bg-brand-soft px-2.5 py-0.5 text-xs font-medium text-brand">
             {counts.open} 待处理 / 共 {counts.total}
           </span>
         </div>
 
-        {/* 筛选器 */}
-        <div className="mt-2 grid grid-cols-2 gap-1.5 text-xs">
-          <FilterSelect
-            label="范围"
-            value={scopeFilter}
-            onChange={(v) => setScopeFilter(v as ScopeType | "all")}
-            options={[
-              ["all", "全部范围"],
-              ["document", "全文"],
-              ["block", "段落"],
-              ["range", "局部"],
-            ]}
-          />
+        {/* 范围筛选：胶囊按钮组 */}
+        <div className="mt-3 flex gap-1 rounded-xl bg-surface p-1 shadow-sm" role="group" aria-label="按范围筛选">
+          {scopeTabs.map(({ key, label }) => {
+            const active = scopeFilter === key;
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setScopeFilter(key)}
+                aria-pressed={active}
+                className={
+                  "flex flex-1 items-center justify-center gap-1 rounded-lg px-2 py-1.5 text-xs font-medium transition-all duration-150 " +
+                  (active
+                    ? "bg-brand text-white shadow-sm dark:text-neutral-950"
+                    : "text-text-muted hover:bg-surface-muted hover:text-foreground")
+                }
+              >
+                {label}
+                <span
+                  className={
+                    "rounded-full px-1 text-[10px] leading-4 " +
+                    (active ? "bg-white/25 dark:bg-black/15" : "bg-surface-muted text-text-faint")
+                  }
+                >
+                  {counts.byScopeCount[key]}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* 其余维度筛选 */}
+        <div className="mt-2 grid grid-cols-3 gap-1.5 text-xs">
           <FilterSelect
             label="类型"
             value={kindFilter}
@@ -140,9 +174,9 @@ export function ReviewSidebar({
         </div>
       </div>
 
-      <div className="flex-1 space-y-4 overflow-y-auto p-3">
+      <div className="flex-1 space-y-5 overflow-y-auto p-3">
         {filtered.length === 0 && (
-          <p className="py-8 text-center text-sm text-neutral-400">
+          <p className="py-10 text-center text-sm text-text-faint">
             没有符合筛选条件的建议
           </p>
         )}
@@ -153,17 +187,17 @@ export function ReviewSidebar({
           const excluded = scopeFilter !== "all" && scopeFilter !== scope;
           return (
             <section key={scope} aria-label={title}>
-              <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
-                <span className="inline-block h-2 w-2 rounded-full bg-neutral-300 dark:bg-neutral-600" aria-hidden />
+              <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-text-faint">
+                <span className="inline-block h-2 w-2 rounded-full bg-border-strong" aria-hidden />
                 {SCOPE_LABEL[scope]} · {title}
-                <span className="text-neutral-400">({list.length})</span>
+                <span className="font-normal">({list.length})</span>
               </h3>
               {list.length === 0 ? (
-                <p className="text-xs text-neutral-400">
+                <p className="text-xs text-text-faint">
                   {excluded ? "（当前筛选不含此范围）" : empty}
                 </p>
               ) : (
-                <ul className="space-y-2">
+                <ul className="space-y-2.5">
                   {list.map((item) => (
                     <ReviewCard
                       key={item.id}
@@ -200,12 +234,12 @@ function FilterSelect({
   options: Array<readonly [string, string]>;
 }) {
   return (
-    <label className="flex items-center gap-1">
-      <span className="text-neutral-500">{label}</span>
+    <label className="flex min-w-0 flex-col gap-1">
+      <span className="text-text-faint">{label}</span>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded border border-neutral-300 bg-white px-1 py-0.5 text-xs focus:border-blue-400 focus:outline-none dark:border-neutral-700 dark:bg-neutral-900"
+        className="w-full min-w-0 truncate rounded-lg border border-border bg-surface px-1.5 py-1 text-xs shadow-sm transition-colors focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand-ring"
         aria-label={`筛选${label}`}
       >
         {options.map(([v, l]) => (
