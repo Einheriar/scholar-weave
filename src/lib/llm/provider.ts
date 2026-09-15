@@ -17,7 +17,10 @@ export type GenerateOptions = {
   temperature?: number;
   maxTokens?: number;
   signal?: AbortSignal;
-  /** DeepSeek-style reasoning effort（minimal/low/medium/high/xhigh/max/ultra） */
+  /**
+   * 思考档位抽象：auto/off/low/high/max（见 src/lib/settings.ts）。
+   * auto 不传参；off 会转为 enable_thinking=false（DeepSeek 风格端点）。
+   */
   reasoningEffort?: string;
 };
 

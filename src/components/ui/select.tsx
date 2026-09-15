@@ -1,14 +1,22 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 /**
  * 自定义下拉选择器：原生 <select> 的展开面板由系统渲染、无法定制样式，
- * 这里用按钮 + 绝对定位面板实现，风格与应用设计令牌一致（圆角、绿色选中态）。
+ * 这里用按钮 + 浮层面板实现，风格与应用设计令牌一致（圆角、绿色选中态）。
  * 支持：点击外部关闭、Esc 关闭、上下方向键 + Enter 选择。
+ *
+ * 面板通过 portal 挂到 body 并用 fixed 定位：设置面板的正文是 overflow-y-auto
+ * 的滚动容器，绝对定位的面板会被它裁掉（底部的「思考档位」尤其明显），
+ * 因此脱离文档流，并且下方空间不足时自动向上翻转。
  */
 
 export type SelectOption = { value: string; label: string };
+
+const GAP = 4;
+const PANEL_MAX_H = 240;
 
 export function Select({
   value,
@@ -27,8 +35,14 @@ export function Select({
 }) {
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
+  const [rect, setRect] = useState<{
+    left: number;
+    width: number;
+    top?: number;
+    bottom?: number;
+  } | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
-  const listRef = useRef<HTMLUListElement>(null);
+  const panelRef = useRef<HTMLUListElement>(null);
 
   const current = options.find((o) => o.value === value);
 
@@ -41,17 +55,52 @@ export function Select({
     }
   }
 
-  // 点击外部关闭
+  /** 按触发按钮的位置算出浮层坐标，下方放不下就往上翻 */
+  const updatePosition = useCallback(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - r.bottom - GAP;
+    const spaceAbove = r.top - GAP;
+    const flipUp = spaceBelow < PANEL_MAX_H && spaceAbove > spaceBelow;
+    setRect({
+      left: r.left,
+      width: r.width,
+      ...(flipUp
+        ? { bottom: window.innerHeight - r.top + GAP }
+        : { top: r.bottom + GAP }),
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    updatePosition();
+  }, [open, updatePosition]);
+
+  // 点击外部关闭（面板已 portal 出去，两个 ref 都要判断）
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (e: PointerEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+      const target = e.target as Node;
+      if (rootRef.current?.contains(target)) return;
+      if (panelRef.current?.contains(target)) return;
+      setOpen(false);
     };
     document.addEventListener("pointerdown", onPointerDown);
     return () => document.removeEventListener("pointerdown", onPointerDown);
   }, [open]);
+
+  // 滚动/缩放时跟随（面板 fixed 定位，不跟随就会与按钮错位）
+  useEffect(() => {
+    if (!open) return;
+    const onReflow = () => updatePosition();
+    window.addEventListener("scroll", onReflow, true);
+    window.addEventListener("resize", onReflow);
+    return () => {
+      window.removeEventListener("scroll", onReflow, true);
+      window.removeEventListener("resize", onReflow);
+    };
+  }, [open, updatePosition]);
 
   const commit = (v: string) => {
     onChange(v);
@@ -114,42 +163,52 @@ export function Select({
         </svg>
       </button>
 
-      {open && (
-        <ul
-          ref={listRef}
-          role="listbox"
-          aria-label={ariaLabel}
-          className="animate-item-in absolute left-0 top-full z-50 mt-1 max-h-60 min-w-full overflow-y-auto rounded-xl border border-border bg-surface p-1 shadow-lg"
-        >
-          {options.map((opt, i) => {
-            const selected = opt.value === value;
-            return (
-              <li key={opt.value} role="option" aria-selected={selected}>
-                <button
-                  type="button"
-                  onClick={() => commit(opt.value)}
-                  onMouseEnter={() => setActiveIndex(i)}
-                  className={
-                    `flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left transition-colors ${size === "sm" ? "text-xs" : "text-sm"} ` +
-                    (selected
-                      ? "bg-brand-soft font-medium text-brand"
-                      : i === activeIndex
-                        ? "bg-surface-muted text-foreground"
-                        : "text-foreground")
-                  }
-                >
-                  <span className="truncate">{opt.label}</span>
-                  {selected && (
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                      <path d="M20 6 9 17l-5-5" />
-                    </svg>
-                  )}
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      )}
+      {open &&
+        rect &&
+        createPortal(
+          <ul
+            ref={panelRef}
+            role="listbox"
+            aria-label={ariaLabel}
+            style={{
+              left: rect.left,
+              width: rect.width,
+              maxHeight: PANEL_MAX_H,
+              ...(rect.top !== undefined ? { top: rect.top } : {}),
+              ...(rect.bottom !== undefined ? { bottom: rect.bottom } : {}),
+            }}
+            className="animate-item-in fixed z-[200] overflow-y-auto rounded-xl border border-border bg-surface p-1 shadow-lg"
+          >
+            {options.map((opt, i) => {
+              const selected = opt.value === value;
+              return (
+                <li key={opt.value} role="option" aria-selected={selected}>
+                  <button
+                    type="button"
+                    onClick={() => commit(opt.value)}
+                    onMouseEnter={() => setActiveIndex(i)}
+                    className={
+                      `flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left transition-colors ${size === "sm" ? "text-xs" : "text-sm"} ` +
+                      (selected
+                        ? "bg-brand-soft font-medium text-brand"
+                        : i === activeIndex
+                          ? "bg-surface-muted text-foreground"
+                          : "text-foreground")
+                    }
+                  >
+                    <span className="truncate">{opt.label}</span>
+                    {selected && (
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <path d="M20 6 9 17l-5-5" />
+                      </svg>
+                    )}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>,
+          document.body,
+        )}
     </div>
   );
 }

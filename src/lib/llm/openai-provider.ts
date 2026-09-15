@@ -1,4 +1,5 @@
 import type { ChatMessage, GenerateOptions, LLMProvider, ProviderConfig } from "./provider";
+import { resolveThinkingParam } from "./thinking";
 
 /**
  * OpenAI 兼容协议的 provider（DeepSeek、OpenAI、及其他兼容端点通用）。
@@ -28,8 +29,12 @@ export class OpenAIProvider implements LLMProvider {
     };
     if (options.maxTokens !== undefined) body.max_tokens = options.maxTokens;
     if (options.jsonMode) body.response_format = { type: "json_object" };
-    // DeepSeek reasoning effort: minimal/low/medium/high/xhigh/max/ultra
-    if (options.reasoningEffort) body.reasoning_effort = options.reasoningEffort;
+    // 思考档位（映射规则见 resolveThinkingParam）：auto 不传参；off 传
+    // enable_thinking=false（DeepSeek 风格端点）；不支持的端点会返回 400，
+    // 把错误暴露给用户而不是静默忽略。
+    const thinking = resolveThinkingParam(options.reasoningEffort);
+    if (typeof thinking === "string") body.reasoning_effort = thinking;
+    else if (thinking) body.enable_thinking = thinking.enable_thinking;
 
     let res: Response;
     try {

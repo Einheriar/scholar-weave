@@ -41,8 +41,31 @@
 | 6 产品化整理 | ✅ | Playwright E2E、键盘快捷键、无障碍收尾、README 部署说明 |
 | 7 界面优化 | ✅ | 主题切换按钮（左下角浮动 SVG）、设置面板（中央模态）、数据 Tab |
 | 8 界面美化 | ✅ | Grammarly 式绿色主调设计令牌、纸张式编辑器、胶囊筛选器、对话气泡、全局过渡动画 |
+| 9 档位四档化 + 配置预设 | ✅ | 思考档位改 auto/off/low/high/max、模型配置可命名预设、修掉下拉被模态裁切 |
 
-**质量基线（阶段 8 完成时）：65 个 Vitest 用例 + 15 个 Playwright 用例全过；`lint`（0 问题）/ `typecheck` / `build` 全通过。**
+**质量基线（阶段 9 完成时）：85 个 Vitest 用例（12 文件）+ 15 个 Playwright 用例全过；`lint`（0 问题）/ `typecheck` / `build` 全通过。**
+
+### 阶段 9：思考档位四档化 + 模型配置预设（已完成）
+
+1. **思考档位砍成 4 档 + 关**（`src/lib/settings.ts`）：原 7 档（minimal/low/medium/high/xhigh/max/ultra）太多，改为
+   `auto`（默认，不传参交给模型）/ `off`（不思考）/ `low` / `high` / `max`。old 7 档值迁移时统一落到 `auto`。
+2. **协议层映射独立**（`src/lib/llm/thinking.ts`）：`resolveThinkingParam()` 把档位翻译成请求参数，服务端 provider 与前端共用，
+   不再放在浏览器侧的 settings.ts 里。`auto` 不传参；`off` 传 `enable_thinking: false`（DeepSeek 风格端点）；
+   `low/high/max` 作为 `reasoning_effort` 原样透传。**有意不做按模型能力的 clamp 映射表**：端点不支持就让 400 暴露给用户，
+   比静默降级好。
+3. **模型配置改成可命名预设**（`src/lib/settings.ts` + SettingsPanel 模型 Tab）：每个预设各自保存 apiKey/baseURL/model/档位，
+   `activeId` 指向当前生效的。切换预设不再互相覆盖 Key（旧痛点是只有一份扁平配置，换提供商再切回来 Key 就丢了）。
+   支持新建 / 重命名 / 删除（只剩 1 条时删除按钮 disabled）。默认预设：`默认配置` / DeepSeek 端点 / deepseek-chat / auto。
+4. **旧数据自动迁移**：localStorage key 不变（`supergrammarly-settings`），读到旧扁平格式 `{apiKey,baseURL,model,reasoningEffort}`
+   会包成单条预设并保留原值；`activeId` 非法兜底第一条；损坏 JSON 回落到 DEFAULT_SETTINGS。**用户升级不丢 Key。**
+5. **API 请求体协议不变**：仍发扁平 `llmConfig {apiKey, baseURL?, model?, reasoningEffort}`，Zod schema 未动，
+   服务端路由不需要任何改动。
+6. **顺手修复：下拉被模态裁切**（`src/components/ui/select.tsx`）：自定义 Select 原来用绝对定位，在设置面板这个
+   `overflow-y-auto` 滚动容器里会被裁掉——底部的「思考档位」5 个选项只能看到 1 个（实测 1000px 视口下仍被裁 132px）。
+   改为 portal 挂到 body + `fixed` 定位，下方空间不足自动向上翻转，滚动/缩放时跟随。所有 4 处 Select 都已验证。
+
+**测试**：新增 `tests/settings.test.ts`（迁移/预设/请求体 8 个）与 `tests/thinking.test.ts`（档位映射 + provider 请求体 12 个）。
+
 
 ### 阶段 8：界面美化（已完成）
 
@@ -77,7 +100,7 @@
 
 3. **设置面板** ✅（`src/components/SettingsPanel.tsx`）
    - 中央模态窗口，支持 Esc 关闭、点击遮罩关闭、Cancel 按钮
-   - **模型 Tab**：API Key、Base URL、Model、思考档位（minimal/low/medium/high/xhigh/max/ultra）
+   - **模型 Tab**：API Key、Base URL、Model、思考档位（阶段 7 时为 minimal/low/medium/high/xhigh/max/ultra，阶段 9 已改为 auto/off/low/high/max）
    - **审阅 Tab**：写作风格、保留术语、自定义指令（追加到系统提示末尾）
    - **数据 Tab**：载入样例、清空数据（从主界面移入）
    - 全部中文界面，localStorage 持久化
@@ -85,7 +108,7 @@
 4. **用户配置支持** ✅
    - `src/lib/settings.ts` — 用户设置类型定义 + localStorage 读写
    - API 路由优先使用请求体里的用户配置，fallback 到 `.env.local`
-   - DeepSeek `reasoning_effort` 参数透传
+   - DeepSeek `reasoning_effort` 参数透传（阶段 9 起 `off` 档改传 `enable_thinking: false`，映射见 `src/lib/llm/thinking.ts`）
 
 ### 界面美化（阶段 8 已完成）
 
@@ -144,7 +167,7 @@ npm run build      # 生产构建
 
 ### ⚠️ 安全注意：用户配置的 API Key 以明文存储在 localStorage
 
-设置面板允许用户在前端配置自己的 API Key / Base URL / Model / 思考档位（`src/lib/settings.ts`，持久化到 `localStorage["supergrammarly-settings"]`）。
+设置面板允许用户在前端配置自己的 API Key / Base URL / Model / 思考档位（`src/lib/settings.ts`，持久化到 `localStorage["supergrammarly-settings"]`）。**阶段 9 起配置按「命名预设」组织**：用户可能同一提供商有多个 Key，每条预设各自保存 Key/地址/模型/档位，切换预设不会互相覆盖。
 
 **当前状态（本地项目，可接受）：**
 - Key 明文存在浏览器 localStorage，任何能打开 DevTools 的人都能看到。
@@ -172,7 +195,8 @@ src/lib/revisions.ts            # 稳定 block ID + revision/checksum
 src/lib/anchoring.ts            # 锚点定位（不信坐标，locateInText/locateRange）
 src/lib/changeset.ts            # ChangeSet 预处理/重叠剔除/批量应用/撤销快照
 src/lib/sample-data.ts          # 阶段 2 假数据（deception 引言 + 10 条建议）
-src/lib/settings.ts             # 用户设置类型 + localStorage 持久化
+src/lib/settings.ts             # 用户设置（LLM 命名预设 + 审阅偏好）+ localStorage 持久化 + 旧格式迁移
+src/lib/llm/thinking.ts         # 思考档位 → 请求参数映射（服务端与前端共用）
 src/lib/storage/documents.ts    # Dexie 持久化（含 clearAllDocuments）
 src/lib/llm/                    # provider adapter、prompts（审阅+对话）、wire schema、server-helpers
 src/components/editor/          # DocumentEditor、BlockIdExtension、ReviewDecorationExtension
@@ -182,7 +206,7 @@ src/components/ThemeToggle.tsx  # 主题切换按钮（左下角浮动）
 src/components/SettingsPanel.tsx # 设置面板（中央模态，模型/审阅/数据三个 Tab）
 src/app/api/{review,chat,change-set}/route.ts
 src/app/page.tsx                # 主界面，所有状态与接线都在这里
-tests/                          # 65 个 Vitest 用例（单元 + 编辑器集成 + API mock）
+tests/                          # 85 个 Vitest 用例（单元 + 编辑器集成 + API mock），12 个文件
 tests/e2e/                      # 15 个 Playwright 用例（config 在根目录 playwright.config.ts）
 ```
 
@@ -190,8 +214,9 @@ tests/e2e/                      # 15 个 Playwright 用例（config 在根目录
 
 ```
 请先读 PLAN.md 和 HANDOFF.md，了解项目目标与当前进度。这是一个 Next.js 16 + Tiptap 3 的
-AI 文档审阅工具，阶段 0-7 已全部完成，阶段 8（界面美化）刚完成：绿色设计令牌、
-纸张式编辑器、胶囊筛选器、对话气泡、全局过渡动画。65 个 Vitest 用例与 15 个 Playwright 用例全过。
+AI 文档审阅工具，阶段 0-8 已全部完成，阶段 9（思考档位四档化 + 模型配置预设）刚完成：
+档位改为 auto/off/low/high/max，LLM 配置按命名预设组织（切换不丢 Key），并修掉了
+设置面板里下拉被模态裁切的问题。85 个 Vitest 用例与 15 个 Playwright 用例全过。
 修改前先跑 npm run test 与 npm run test:e2e 确认基线是绿的；每完成一项跑
 npm run typecheck / lint / test，并按阶段 commit。不要扩张到非 MVP 范围。
 ```

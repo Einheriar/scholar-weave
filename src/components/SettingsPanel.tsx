@@ -7,6 +7,9 @@ import {
   saveSettings,
   DEFAULT_SETTINGS,
   REASONING_EFFORT_OPTIONS,
+  createPreset,
+  getActivePreset,
+  type LLMPreset,
   type UserSettings,
   type ReasoningEffort,
 } from "@/lib/settings";
@@ -62,12 +65,35 @@ export function SettingsPanel({
     return () => document.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
-  const updateLLM = useCallback(
-    (patch: Partial<UserSettings["llm"]>) => {
-      setDraft((d) => ({ ...d, llm: { ...d.llm, ...patch } }));
-    },
-    [],
-  );
+  const updateActivePreset = useCallback((patch: Partial<LLMPreset>) => {
+    setDraft((d) => ({
+      ...d,
+      llm: {
+        ...d.llm,
+        presets: d.llm.presets.map((p) =>
+          p.id === d.llm.activeId ? { ...p, ...patch } : p,
+        ),
+      },
+    }));
+  }, []);
+
+  const handleAddPreset = useCallback(() => {
+    setDraft((d) => {
+      const preset = createPreset(`配置 ${d.llm.presets.length + 1}`);
+      return {
+        ...d,
+        llm: { activeId: preset.id, presets: [...d.llm.presets, preset] },
+      };
+    });
+  }, []);
+
+  const handleDeletePreset = useCallback(() => {
+    setDraft((d) => {
+      if (d.llm.presets.length <= 1) return d;
+      const presets = d.llm.presets.filter((p) => p.id !== d.llm.activeId);
+      return { ...d, llm: { activeId: presets[0].id, presets } };
+    });
+  }, []);
 
   const updateReview = useCallback(
     (patch: Partial<UserSettings["review"]>) => {
@@ -100,6 +126,7 @@ export function SettingsPanel({
     { key: "data", label: "数据" },
   ] as const;
   const activeIndex = tabs.findIndex((t) => t.key === tab);
+  const activePreset = getActivePreset(draft);
 
   return (
     <div
@@ -162,12 +189,67 @@ export function SettingsPanel({
         <div className="flex-1 overflow-y-auto px-6 py-5">
           {tab === "model" && (
             <div className="space-y-5">
+              {/* 配置预设：切换只改 activeId，各预设的 Key/模型各自保留 */}
+              <div className="rounded-xl border border-border bg-surface-muted/50 p-3.5">
+                <div className="flex items-end gap-2">
+                  <div className="min-w-0 flex-1">
+                    <label className={labelCls}>当前配置</label>
+                    <Select
+                      value={draft.llm.activeId}
+                      onChange={(id) =>
+                        setDraft((d) => ({
+                          ...d,
+                          llm: { ...d.llm, activeId: id },
+                        }))
+                      }
+                      options={draft.llm.presets.map((p) => ({
+                        value: p.id,
+                        label: p.name,
+                      }))}
+                      ariaLabel="当前配置"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleAddPreset}
+                    className={buttonClass("secondary", "md") + " shrink-0"}
+                  >
+                    + 新建
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDeletePreset}
+                    disabled={draft.llm.presets.length <= 1}
+                    className={buttonClass("danger", "md") + " shrink-0"}
+                  >
+                    删除
+                  </button>
+                </div>
+                <div className="mt-3">
+                  <label className={labelCls}>配置名称</label>
+                  <input
+                    type="text"
+                    value={activePreset.name}
+                    onChange={(e) =>
+                      updateActivePreset({ name: e.target.value })
+                    }
+                    placeholder="例如：DeepSeek 主力号"
+                    className={inputCls}
+                  />
+                  <p className="mt-1.5 text-xs text-text-faint">
+                    预设会记住各自的 Key / 地址 / 模型，切换不会互相覆盖。
+                  </p>
+                </div>
+              </div>
+
               <div>
                 <label className={labelCls}>API Key</label>
                 <input
                   type="password"
-                  value={draft.llm.apiKey}
-                  onChange={(e) => updateLLM({ apiKey: e.target.value })}
+                  value={activePreset.apiKey}
+                  onChange={(e) =>
+                    updateActivePreset({ apiKey: e.target.value })
+                  }
                   placeholder="sk-..."
                   className={inputCls}
                   autoComplete="off"
@@ -180,8 +262,10 @@ export function SettingsPanel({
                 <label className={labelCls}>Base URL</label>
                 <input
                   type="text"
-                  value={draft.llm.baseURL}
-                  onChange={(e) => updateLLM({ baseURL: e.target.value })}
+                  value={activePreset.baseURL}
+                  onChange={(e) =>
+                    updateActivePreset({ baseURL: e.target.value })
+                  }
                   placeholder="https://api.deepseek.com"
                   className={inputCls}
                 />
@@ -190,8 +274,10 @@ export function SettingsPanel({
                 <label className={labelCls}>模型</label>
                 <input
                   type="text"
-                  value={draft.llm.model}
-                  onChange={(e) => updateLLM({ model: e.target.value })}
+                  value={activePreset.model}
+                  onChange={(e) =>
+                    updateActivePreset({ model: e.target.value })
+                  }
                   placeholder="deepseek-chat"
                   className={inputCls}
                 />
@@ -199,9 +285,11 @@ export function SettingsPanel({
               <div>
                 <label className={labelCls}>思考档位</label>
                 <Select
-                  value={draft.llm.reasoningEffort}
+                  value={activePreset.reasoningEffort}
                   onChange={(v) =>
-                    updateLLM({ reasoningEffort: v as ReasoningEffort })
+                    updateActivePreset({
+                      reasoningEffort: v as ReasoningEffort,
+                    })
                   }
                   options={REASONING_EFFORT_OPTIONS.map((opt) => ({
                     value: opt.value,
@@ -210,7 +298,7 @@ export function SettingsPanel({
                   ariaLabel="思考档位"
                 />
                 <p className="mt-1.5 text-xs text-text-faint">
-                  控制模型在回复前的思考深度。档位越高，分析越深入，但响应越慢。
+                  控制模型在回复前的思考深度。「默认」不传参交给模型；「不思考」会请求关闭思考（不支持的提供商会报错）。
                 </p>
               </div>
             </div>

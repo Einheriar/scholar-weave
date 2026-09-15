@@ -1,10 +1,46 @@
-# 阶段 9 交接：思考档位四档化 + 模型配置预设（工作进行中）
+# 阶段 9 交接：思考档位四档化 + 模型配置预设（**已完成**）
 
 > 写于 2026-09-15。**接手前必读**：本工作未提交，直接在工作区里继续。
+> 2026-09-15 已由接手 agent 完成并验证（见下）。
 
-## 当前状态
+## 完成状态：✅ 已完成并验证
 
-工作区有 5 个未提交文件，**代码已完成且静态验证全绿，但缺浏览器实测和 E2E 复跑**：
+原计划的 6 步全部做完，验证结果：
+
+```
+npm run typecheck   # ✓ 0 error
+npm run lint        # ✓ 0 problems
+npm run test        # ✓ 85 passed（12 文件；settings.test.ts 8 个 + thinking.test.ts 12 个）
+npm run test:e2e    # ✓ 15 passed
+npm run build       # ✓ 生产构建通过
+```
+
+浏览器实测（Playwright + 系统 Chrome，深浅色各一遍）全部通过：
+- 迁移实测：写入旧扁平格式（Key=`sk-legacy-*`、`reasoningEffort: "xhigh"`）→ 刷新后 Key 保留、档位回落「默认」✓
+- 预设新建 / 改名 / 切换 / 删除 / 落盘 / 刷新回读 ✓
+- **切换预设不互相覆盖 Key**（切回来 Key 还在）✓
+- 草稿语义：删除预设后点「取消」不落盘、点「保存」才生效 ✓
+- 只剩 1 条预设时删除按钮 disabled ✓
+- 档位下拉 5 项齐全，深浅色配色正常 ✓
+
+### 接手时额外做的两件事（原交接文件未涵盖）
+
+1. **去掉重复实现**（原文件提到「可选择统一过去或删除它」）：把 `resolveThinkingParam()` 从
+   `src/lib/settings.ts` **移到新文件 `src/lib/llm/thinking.ts`**，provider 改为调用它，不再内联 if-else。
+   移动的原因是分层：`settings.ts` 是浏览器侧 localStorage 模块，服务端 provider import 它并不合适；
+   映射属于协议层，服务端与前端共用。参数类型放宽为 `string | undefined`（服务端拿到的值来自请求体，
+   可能不是已知枚举，未知值原样透传给端点）。
+2. **修掉一个真实 UI bug**：自定义 `Select`（`src/components/ui/select.tsx`）原来用绝对定位，
+   在设置面板这个 `overflow-y-auto` 容器里会被裁掉——底部的「思考档位」5 个选项实测只能看到 1 个
+   （1280×720 下 170px 的面板只露出 38px，被裁 132px；视口加高到 1000px 仍被裁 132px）。改为 portal 挂 body + fixed 定位 +
+   下方空间不足自动上翻 + 滚动/缩放跟随。4 处 Select（设置面板 2 处、顶栏审阅模式、侧栏 3 个筛选）
+   全部复验通过。此 bug 在阶段 9 之前就存在（纯设置面板也溢出），不是预设容器引入的。
+
+## 原始交接内容（保留备查）
+
+### 当时的工作区状态
+
+工作区有 5 个未提交文件：
 
 ```
  M src/lib/settings.ts              # 重写：四档档位 + 预设结构 + 旧数据迁移
@@ -54,6 +90,8 @@ type UserSettings = {
 
 `resolveThinkingParam()` 辅助函数已写好并测了，但 provider 里目前是内联 if-else，没用它（等价逻辑）。接手 agent 可选择统一过去或删除它，别留两处不一致的实现。
 
+> **接手完成**：已统一——`resolveThinkingParam()` 移到 `src/lib/llm/thinking.ts`，provider 调用它，内联 if-else 已删除。
+
 ### UI（SettingsPanel 模型 Tab）
 
 顶部新增一个 `bg-surface-muted/50` 的圆角容器：
@@ -64,40 +102,41 @@ type UserSettings = {
 
 **注意**：删除预设和新建预设是草稿态操作，点「取消」不生效、点「保存」才落盘，这点与其他字段一致。
 
-## 接手后要做的事（按顺序）
+## 接手后要做的事（按顺序）— 全部已完成 ✅
 
-1. `git diff` 看全部改动，对照本文件确认理解一致
-2. `npm run test:e2e` —— 预期全过（设置面板相关 E2E 只有「载入样例」走数据 Tab，模型 Tab 结构变化不影响它），如果挂了就修
-3. **浏览器实测**（dev server 已在 http://localhost:3000 跑着，PID 6480）：
-   - 打开设置 → 模型 Tab：预设容器渲染正常、新建/删除/改名/切换都工作
-   - 档位下拉是 5 项（默认/不思考/Low/High/Max）
-   - **迁移实测**：在旧 commit（HEAD）的页面上存一份配置（填个 Key 保存），切回工作区代码刷新，确认 Key 还在、档位变「默认」
-   - 深浅色模式各看一眼
-4. `npm run build` 确认生产构建过
-5. commit，建议信息：`feat: 思考档位四档化（auto/off/low/high/max）+ 模型配置预设`（5 个文件一起提）
-6. 更新本 HANDOFF.md 的主文件部分（测试数 65 → 76 等，见下）
+1. ✅ `git diff` 复核全部改动，与本文件确认一致
+2. ✅ `npm run test:e2e` —— 15 passed（模型 Tab 结构变化不影响 E2E）
+3. ✅ **浏览器实测**（Playwright + 系统 Chrome）：
+   - 预设容器渲染正常、新建/重命名/切换/删除都工作
+   - 档位下拉 5 项齐全（默认/不思考/Low/High/Max）
+   - **迁移实测**：写入旧扁平格式（Key + `xhigh`）→ 刷新后 Key 还在、档位变「默认」
+   - 深浅色模式各截图确认
+   - 额外发现并修复：下拉被模态裁切（见上「接手时额外做的两件事」）
+4. ✅ `npm run build` 生产构建通过
+5. ✅ commit：`feat: 思考档位四档化（auto/off/low/high/max）+ 模型配置预设`
+6. ✅ 已同步更新主 HANDOFF.md，并把本文件状态改为「已完成」
 
-## 主 HANDOFF.md 需要同步更新的点
+## 主 HANDOFF.md 已同步的点
 
-本文件是独立交接文档，但项目主 HANDOFF.md（仓库根目录，阶段 8 结尾）有几处已过时：
-
-- 「65 个 Vitest 用例」→ 76 个（新增 tests/settings.test.ts 11 个）
-- 「用户配置支持」一节提到的思考档位描述（minimal/low/medium/high/xhigh/max/ultra）→ 改为 auto/off/low/high/max
-- 如果接手 agent 验证无误并 commit 后，可以把本文件的「当前状态」一节改为「已完成」并记录 commit hash
+- 「65 个 Vitest 用例」→ **85 个**（12 文件：settings.test.ts 8 + thinking.test.ts 12 + 原有）
+- 「用户配置支持」的思考档位描述（minimal/low/medium/high/xhigh/max/ultra）→ auto/off/low/high/max
+- 新增「阶段 9」小节，记录档位四档化 / 预设 / 迁移 / 下拉裁切修复
+- 关键文件地图补上 `src/lib/llm/thinking.ts`
+- 「给接手 agent 的启动指令」更新到阶段 9
 
 ## 没做的需求（用户问过，但明确不属于本次）
 
 - **代理问题**：用户问 Zero Omega 这类代理是否自动接管。答案：不需要做任何事——LLM 请求由 Next.js 服务端 fetch 发出，不经过浏览器；浏览器代理插件只影响用户访问页面本身。服务端要走代理得设 `HTTPS_PROXY` 环境变量（Node 原生 fetch 不自动读，需要 undici 的 EnvHttpProxyAgent 之类）。用户听后没要求实现，搁置。
 - **按模型能力的档位 clamp 映射表**：见上「off 档的请求行为」，有意不做。
 
-## 质量基线（接手时确认）
+## 质量基线（交付时实测）
 
 ```
 npm run typecheck   # 0 error
 npm run lint        # 0 problems
-npm run test        # 76 passed（11 文件）
-npm run test:e2e    # 应 15 passed（接手 agent 需复跑确认）
-npm run build       # 接手 agent 需跑一次
+npm run test        # 85 passed（12 文件）
+npm run test:e2e    # 15 passed
+npm run build       # 通过
 ```
 
 ## 安全约束（沿袭，必须遵守）
