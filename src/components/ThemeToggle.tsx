@@ -60,10 +60,47 @@ export function ThemeToggle() {
       type="button"
       onClick={toggle}
       aria-pressed={dark}
+      aria-label={dark ? "切换到浅色模式" : "切换到深色模式"}
       title={dark ? "切换到浅色模式" : "切换到深色模式"}
-      className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm text-neutral-600 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+      className="fixed bottom-16 left-4 z-50 flex h-10 w-10 items-center justify-center rounded-full border border-neutral-300 bg-white/90 shadow-md backdrop-blur-sm transition-colors hover:bg-neutral-100 dark:border-neutral-600 dark:bg-neutral-800/90 dark:hover:bg-neutral-700"
     >
-      {dark ? "切换浅色" : "切换深色"}
+      {dark ? (
+        <svg
+          width="20"
+          height="20"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="text-neutral-300"
+        >
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+        </svg>
+      ) : (
+        <svg
+          width="20"
+          height="20"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="text-neutral-600"
+        >
+          <circle cx="12" cy="12" r="4" />
+          <path d="M12 2v2" />
+          <path d="M12 20v2" />
+          <path d="m4.93 4.93 1.41 1.41" />
+          <path d="m17.66 17.66 1.41 1.41" />
+          <path d="M2 12h2" />
+          <path d="M20 12h2" />
+          <path d="m6.34 17.66-1.41 1.41" />
+          <path d="m19.07 4.93-1.41 1.41" />
+        </svg>
+      )}
     </button>
   );
 }

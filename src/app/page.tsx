@@ -578,8 +578,6 @@ export default function Home() {
           载入样例
         </button>
 
-        <ThemeToggle />
-
         <div className="ml-auto flex items-center gap-3 text-xs text-neutral-400">
           <span>{openCount} 条待处理</span>
           <span role="status">
@@ -685,6 +683,8 @@ export default function Home() {
           供应商（当前为 DeepSeek）用于生成结果；草稿仅保存在本浏览器本地，不会上传到本服务之外的服务器。
         </p>
       </footer>
+
+      <ThemeToggle />
     </main>
   );
 }

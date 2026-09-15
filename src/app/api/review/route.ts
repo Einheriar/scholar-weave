@@ -110,9 +110,19 @@ export async function POST(request: Request) {
 
   // 解析 + Zod 校验模型输出
   let llmJson: unknown;
+  const extracted = extractJson(content);
+  if (process.env.DEBUG_REVIEW === "1") {
+    console.log("[review] raw content length:", content.length);
+    console.log("[review] raw head:", content.slice(0, 500));
+    console.log("[review] extracted head:", extracted.slice(0, 500));
+  }
   try {
-    llmJson = JSON.parse(extractJson(content));
-  } catch {
+    llmJson = JSON.parse(extracted);
+  } catch (e) {
+    if (process.env.DEBUG_REVIEW === "1") {
+      console.log("[review] JSON parse error:", e);
+      console.log("[review] extracted full:", extracted.slice(0, 2000));
+    }
     return err(502, "llm_bad_json", "LLM 未返回合法 JSON。");
   }
   const llmParsed = LLMReviewResponseSchema.safeParse(llmJson);
