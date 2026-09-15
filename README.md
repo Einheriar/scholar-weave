@@ -84,15 +84,25 @@ dist/
 - **Windows**：双击 `dist\start.cmd`（或在该目录执行 `node start.mjs`）
 - **Linux / macOS**：`./dist/start.sh`（或 `node dist/start.mjs`）
 
-默认跑在 3000 端口，改端口用 `PORT=3200 node start.mjs`。关掉窗口即停止服务。草稿存在浏览器本地，换端口或换浏览器不会丢，但不同浏览器之间互不可见。
+关掉窗口即停止服务。草稿存在浏览器本地，换端口或换浏览器不会丢，但不同浏览器之间互不可见。
+
+### 排错
+
+| 现象 | 原因与处理 |
+|------|-----------|
+| 提示“需要 Node.js 20.9 或更高版本” | Next 16 的最低要求。装 LTS 版 Node 后重试。 |
+| 提示“端口 3000 已被占用” | 已有服务在跑，或别的程序占了。换端口：Windows `set PORT=3200 && node start.mjs`，Linux/macOS `PORT=3200 node start.mjs`，然后访问 http://localhost:3200 |
+| Windows 双击后窗口一闪而过 | 多半是没装 Node 或没加进 PATH。脚本会检查并提示；若仍一闪而过，就在该目录开 PowerShell 执行 `node start.mjs` 看完整报错。 |
+| 提示“未能自动打开浏览器” | 只是自动打开失败，服务已跑起来，手动访问提示里的地址即可。 |
+| 界面能打开但审阅报错 | 检查 `dist/app/.env.local` 是否存在、密钥是否正确。 |
+
+改端口的另一种方式：直接编辑 `start.mjs` 里 `const port = Number(process.env.PORT || 3000)` 的默认值。
 
 ### 关于在 Windows 上使用
 
-有两条路，按你的偏好选：
+流程：把项目源码拷到 Windows → 装好 Node.js（20.9+，[下载](https://nodejs.org/)，安装包默认会把 node 加进 PATH）→ 在项目目录执行 `npm install` → `npm run package:app`。之后日常双击 `dist\start.cmd` 即可，不需要再碰 npm，也不需要联网装依赖。
 
-1. **在 Windows 上打包（推荐）**：把项目源码拷到 Windows，装好 Node.js（20.9+，[下载](https://nodejs.org/)），在该目录执行 `npm install` 然后 `npm run package:app`。之后双击 `dist\start.cmd` 即可，日常不用再装 Node 依赖，只需要这台机器保持装了 Node。
-
-2. **把本机（Linux）打好的包直接拷过去**：**不行**。打包产物里带平台专属的原生二进制（图片优化用的 `sharp`，Linux 版是 `@img/sharp-linux-x64`），在 Windows 上无法加载。必须换到 Windows 重新打一次。
+**注意：把本机（Linux）打好的包直接拷到 Windows 是用不了的。** 打包产物里带平台专属的原生二进制（图片优化用的 `sharp`，Linux 版是 `@img/sharp-linux-x64`），在 Windows 上无法加载。必须换到 Windows 重新打一次。
 
 如果连 Node 也不想在 Windows 上装，可以给产物再套一层 Node 单文件运行时（`node --experimental-sea-config` 打包或 `pkg`），把 `node.exe` 和 `app/` 放一起，让启动器调用自带的 `node.exe`。这属于额外的分发工作量，本项目没有预置。
 
