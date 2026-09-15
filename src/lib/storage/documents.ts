@@ -61,3 +61,8 @@ export async function loadLatestDocument(): Promise<
 export async function deleteDocument(id: string): Promise<void> {
   await getDB().documents.delete(id);
 }
+
+/** 清空所有本地保存的文档（阶段 6：清空数据） */
+export async function clearAllDocuments(): Promise<void> {
+  await getDB().documents.clear();
+}

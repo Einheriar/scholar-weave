@@ -18,6 +18,12 @@ export type ReviewCardProps = {
   onReject: (id: string) => void;
   /** 撤销该建议的接受/忽略，回到 open */
   onRevert: (id: string) => void;
+  /** 围绕该建议继续对话（opinion/edit 均可用，阶段 5） */
+  onChat?: (id: string) => void;
+  /** 按此意见生成修改集（opinion 用，阶段 5） */
+  onApplyOpinion?: (id: string) => void;
+  /** 是否正在为该建议生成修改集 */
+  applyingOpinion?: boolean;
 };
 
 /**
@@ -32,6 +38,9 @@ export function ReviewCard({
   onAccept,
   onReject,
   onRevert,
+  onChat,
+  onApplyOpinion,
+  applyingOpinion = false,
 }: ReviewCardProps) {
   const cat = CATEGORY_META[item.category];
   const sev = SEVERITY_META[item.severity];
@@ -128,18 +137,23 @@ export function ReviewCard({
               <button
                 type="button"
                 className="rounded-md border border-neutral-300 px-2.5 py-1 text-xs text-neutral-600 hover:bg-neutral-100"
-                title="阶段 5 接入对话"
-                onClick={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onChat?.(item.id);
+                }}
               >
                 继续询问
               </button>
               <button
                 type="button"
-                className="rounded-md border border-neutral-300 px-2.5 py-1 text-xs text-neutral-600 hover:bg-neutral-100"
-                title="阶段 5 接入：将意见转为修改集"
-                onClick={(e) => e.stopPropagation()}
+                disabled={applyingOpinion}
+                className="rounded-md border border-blue-300 px-2.5 py-1 text-xs text-blue-700 hover:bg-blue-50 disabled:opacity-40"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onApplyOpinion?.(item.id);
+                }}
               >
-                按此意见修改
+                {applyingOpinion ? "生成中…" : "按此意见修改"}
               </button>
             </>
           )}

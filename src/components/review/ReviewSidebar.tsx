@@ -19,6 +19,9 @@ export type ReviewSidebarProps = {
   onAccept: (id: string) => void;
   onReject: (id: string) => void;
   onRevert: (id: string) => void;
+  onChat?: (id: string) => void;
+  onApplyOpinion?: (id: string) => void;
+  applyingOpinionId?: string | null;
 };
 
 /**
@@ -32,6 +35,9 @@ export function ReviewSidebar({
   onAccept,
   onReject,
   onRevert,
+  onChat,
+  onApplyOpinion,
+  applyingOpinionId = null,
 }: ReviewSidebarProps) {
   const [scopeFilter, setScopeFilter] = useState<ScopeType | "all">("all");
   const [kindFilter, setKindFilter] = useState<Kind | "all">("all");
@@ -164,6 +170,9 @@ export function ReviewSidebar({
                       onAccept={onAccept}
                       onReject={onReject}
                       onRevert={onRevert}
+                      onChat={onChat}
+                      onApplyOpinion={onApplyOpinion}
+                      applyingOpinion={applyingOpinionId === item.id}
                     />
                   ))}
                 </ul>

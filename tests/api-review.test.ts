@@ -237,7 +237,10 @@ describe("POST /api/review", () => {
   it("保留术语要求体现在 prompt 中（防 LLM 改动，重点场景 9）", async () => {
     const payload = { documentSummary: "…", items: [] };
     const gen = vi.fn(
-      async (_messages: Array<{ content: string }>) => JSON.stringify(payload),
+      async (messages: Array<{ content: string }>) => {
+        void messages;
+        return JSON.stringify(payload);
+      },
     );
     vi.spyOn(providerMod, "getProviderFromEnv").mockReturnValue({
       name: "mock",
