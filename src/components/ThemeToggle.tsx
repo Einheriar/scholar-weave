@@ -62,7 +62,7 @@ export function ThemeToggle() {
       aria-pressed={dark}
       aria-label={dark ? "切换到浅色模式" : "切换到深色模式"}
       title={dark ? "切换到浅色模式" : "切换到深色模式"}
-      className="fixed bottom-16 left-4 z-50 flex h-10 w-10 items-center justify-center rounded-full border border-border bg-surface/90 shadow-md backdrop-blur-sm transition-all duration-150 hover:bg-surface-muted hover:shadow-lg"
+      className="fixed bottom-4 left-4 z-50 flex h-10 w-10 items-center justify-center rounded-full border border-border bg-surface/90 shadow-md backdrop-blur-sm transition-all duration-150 hover:bg-surface-muted hover:shadow-lg"
     >
       {dark ? (
         <svg

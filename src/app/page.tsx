@@ -7,7 +7,8 @@ import {
 } from "@/components/editor/DocumentEditor";
 import { ReviewSidebar } from "@/components/review/ReviewSidebar";
 import { ChangeSetPreview } from "@/components/review/ChangeSetPreview";
-import { ContextChat, type ChatTurn } from "@/components/chat/ContextChat";
+import { ContextChat } from "@/components/chat/ContextChat";
+import { ChatHistory, ChatHistoryToggle } from "@/components/chat/ChatHistory";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { SettingsPanel } from "@/components/SettingsPanel";
 import { buttonClass } from "@/components/ui/button";
@@ -20,6 +21,8 @@ import {
 import type {
   ChangeSet,
   ChatContext,
+  ChatTurn,
+  Conversation,
   DocumentState,
   ReviewItem,
 } from "@/lib/review-schema";
@@ -27,11 +30,23 @@ import type { ReviewMode } from "@/lib/llm/review-llm-schema";
 import { buildSampleDocument, buildSampleReview } from "@/lib/sample-data";
 import { canLocateScope } from "@/lib/anchoring";
 import { computeChangeSetApplication } from "@/lib/changeset";
+import { APP_VERSION } from "@/lib/version";
+import {
+  deriveConversationTitle,
+  newConversationId,
+  upsertConversation,
+} from "@/lib/chat-history";
 import {
   clearAllDocuments,
   loadLatestDocument,
   saveDocument,
 } from "@/lib/storage/documents";
+import {
+  clearAllConversations,
+  deleteConversation as deleteStoredConversation,
+  listConversations,
+  saveConversation,
+} from "@/lib/storage/conversations";
 
 type ReviewUiState =
   | { phase: "idle" }
@@ -66,6 +81,16 @@ export default function Home() {
   /** 供屏幕阅读器播报的状态文本（定位、快捷键等） */
   const [announce, setAnnounce] = useState("");
 
+  // 对话历史（左侧列表）
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [activeConvId, setActiveConvId] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  /**
+   * 当前对话上次落库后的对象。只用来取 createdAt（覆盖时不重置）与判断
+   * 「回复回来时用户是否还停在这条对话上」——在事件回调/异步里写，不在渲染期写。
+   */
+  const activeConvRef = useRef<Conversation | null>(null);
+
   // 设置面板
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settings, setSettings] = useState<UserSettings>(loadSettings);
@@ -79,14 +104,25 @@ export default function Home() {
   const abortRef = useRef<AbortController | null>(null);
   const chatAbortRef = useRef<AbortController | null>(null);
 
-  // ── 启动：恢复最近草稿，否则载入样例 ──
+  // ── 启动：恢复最近草稿与最近一条对话，否则载入样例 ──
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const restored = await loadLatestDocument();
+      const [restored, stored] = await Promise.all([
+        loadLatestDocument(),
+        listConversations(),
+      ]);
       if (cancelled) return;
       const base = restored ?? buildSampleDocument().doc;
       setDoc(base);
+      setConversations(stored);
+      // 与 ChatGPT 一致：进来就接着上次那条对话说
+      const latest = stored[0];
+      if (latest) {
+        activeConvRef.current = latest;
+        setActiveConvId(latest.id);
+        setChatTurns(latest.turns);
+      }
     })();
     return () => {
       cancelled = true;
@@ -115,6 +151,80 @@ export default function Home() {
     }, 500);
     return () => clearTimeout(t);
   }, [doc, saveState]);
+
+  // ── 对话历史：落库与切换 ──
+  /**
+   * 把某条对话的轮次写进本地历史（不存在则新建），并同步左侧列表。
+   * createdAt 只在新建时取当前时间，覆盖已有对话不重置。
+   */
+  const persistConversation = useCallback(
+    async (id: string, turns: ChatTurn[]) => {
+      if (!doc) return;
+      const previous = activeConvRef.current;
+      const now = new Date().toISOString();
+      const conversation: Conversation = {
+        id,
+        title: deriveConversationTitle(turns),
+        turns,
+        documentId: doc.id,
+        createdAt: previous?.id === id ? previous.createdAt : now,
+        updatedAt: now,
+      };
+      // 先更新内存（列表立即反映，后续判断也拿得到），再落库
+      activeConvRef.current = conversation;
+      setConversations((list) => upsertConversation(list, conversation));
+      await saveConversation(conversation);
+    },
+    [doc],
+  );
+
+  const handleSelectConversation = useCallback(
+    (id: string) => {
+      const conv = conversations.find((c) => c.id === id);
+      if (!conv) return;
+      activeConvRef.current = conv;
+      setActiveConvId(id);
+      setChatTurns(conv.turns);
+      setChatError(null);
+      setActiveChangeSet(null);
+      // 窄屏从抽屉里选完就收起；宽屏左栏常驻，这个 state 本来也不生效
+      setHistoryOpen(false);
+      setAnnounce(`已打开对话：${conv.title}。`);
+    },
+    [conversations],
+  );
+
+  /** 开新对话：只清空界面，已保存的那条留在左侧列表里，随时能点回来 */
+  const handleNewConversation = useCallback(() => {
+    activeConvRef.current = null;
+    setActiveConvId(null);
+    setChatTurns([]);
+    setChatError(null);
+    setActiveChangeSet(null);
+    setHistoryOpen(false);
+    setAnnounce("已开始新对话。");
+  }, []);
+
+  const handleDeleteConversation = useCallback(
+    async (id: string) => {
+      const target = conversations.find((c) => c.id === id);
+      if (
+        target &&
+        !window.confirm(`删除对话「${target.title}」？此操作不可撤销。`)
+      ) {
+        return;
+      }
+      await deleteStoredConversation(id);
+      setConversations((list) => list.filter((c) => c.id !== id));
+      if (activeConvId === id) {
+        activeConvRef.current = null;
+        setActiveConvId(null);
+        setChatTurns([]);
+      }
+      setAnnounce("已删除对话记录。");
+    },
+    [conversations, activeConvId],
+  );
 
   // ── 审阅 ──
   const runReview = useCallback(async () => {
@@ -310,11 +420,23 @@ export default function Home() {
       if (!doc) return;
       const ctx = chatContext;
       const blocks = packBlocks(ctx);
+      // 发给模型的历史只有当前这条对话的最近 8 轮，不含其他对话、也不含正文全文
       const history = chatTurns
         .map((t) => ({ role: t.role, content: t.content }))
         .slice(-8);
 
-      setChatTurns((ts) => [...ts, { role: "user", content: message }]);
+      // 新对话在这里才分配 id：只发过消息的对话才进历史，列表里不会堆空条目
+      const convId = activeConvId ?? newConversationId();
+      if (activeConvId === null) setActiveConvId(convId);
+
+      const withUser: ChatTurn[] = [
+        ...chatTurns,
+        { role: "user", content: message },
+      ];
+      setChatTurns(withUser);
+      // 用户消息先落库：左侧列表立刻出现这条对话（标题取自首条消息）
+      void persistConversation(convId, withUser);
+
       setChatBusy(true);
       setChatError(null);
       chatAbortRef.current?.abort();
@@ -349,16 +471,20 @@ export default function Home() {
         if (!res.ok) {
           throw new Error(data?.error?.message ?? `对话失败（HTTP ${res.status}）`);
         }
-        if (data.type === "answer_with_changes" && data.changeSet) {
-          setChatTurns((ts) => [
-            ...ts,
-            { role: "assistant", content: data.answer, changeSet: data.changeSet },
-          ]);
-        } else {
-          setChatTurns((ts) => [
-            ...ts,
-            { role: "assistant", content: data.answer ?? "" },
-          ]);
+        const reply: ChatTurn =
+          data.type === "answer_with_changes" && data.changeSet
+            ? {
+                role: "assistant",
+                content: data.answer,
+                changeSet: data.changeSet,
+              }
+            : { role: "assistant", content: data.answer ?? "" };
+        const withReply = [...withUser, reply];
+        // 等回复期间用户可能切走了：始终写回这条对话自己的记录，
+        // 但只有还停在这条上才动界面，否则会把别人的轮次贴到当前对话里。
+        void persistConversation(convId, withReply);
+        if (activeConvRef.current?.id === convId) {
+          setChatTurns(withReply);
         }
       } catch (e) {
         if (e instanceof Error && e.name === "AbortError") {
@@ -370,7 +496,15 @@ export default function Home() {
         setChatBusy(false);
       }
     },
-    [doc, chatContext, chatTurns, contextReview, packBlocks],
+    [
+      doc,
+      chatContext,
+      chatTurns,
+      contextReview,
+      packBlocks,
+      activeConvId,
+      persistConversation,
+    ],
   );
 
   // ── 按意见生成修改集（opinion → ChangeSet）──
@@ -469,11 +603,14 @@ export default function Home() {
     if (!window.confirm("确定要清空本地保存的草稿与数据吗？当前编辑器内容也会被重置。")) {
       return;
     }
-    await clearAllDocuments();
+    await Promise.all([clearAllDocuments(), clearAllConversations()]);
     const { doc: d } = buildSampleDocument();
     setDoc(d);
     setReviews([]);
     setChatTurns([]);
+    setConversations([]);
+    activeConvRef.current = null;
+    setActiveConvId(null);
     setActiveChangeSet(null);
     setSelectedId(null);
     setReviewUi({ phase: "idle" });
@@ -541,6 +678,11 @@ export default function Home() {
     <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-6 py-6">
       {/* 顶栏 */}
       <header className="mb-5 flex flex-wrap items-center gap-3">
+        {/* 窄屏才出现的「三条横线」：拉出左侧历史记录抽屉（宽屏有常驻左栏） */}
+        <ChatHistoryToggle
+          open={historyOpen}
+          onClick={() => setHistoryOpen((v) => !v)}
+        />
         <input
           value={doc.title}
           onChange={(e) => setDoc({ ...doc, title: e.target.value })}
@@ -622,72 +764,99 @@ export default function Home() {
         </p>
       )}
 
-      {/* 主体：编辑器 + 侧栏 */}
-      <div className="grid flex-1 grid-cols-1 gap-6 lg:grid-cols-[1fr_360px]">
-        <div className="flex min-w-0 flex-col gap-4">
-          <DocumentEditor
-            ref={editorRef}
-            document={doc}
-            onDocumentChange={handleDocChange}
-            reviewItems={reviews}
-            selectedReviewId={selectedId}
-            onSelectReview={handleBodySelect}
-            onSelectionChange={setSelection}
-          />
+      {/*
+        三栏行：历史记录（xl 起常驻） | 编辑器+对话 | 审阅侧栏。
+        外层用 items-start，让左栏的 sticky 贴合行首；历史栏自带 shrink-0，
+        所以 1fr 的中间列不会因它而失稳。
+      */}
+      <div className="flex flex-1 items-start gap-6">
+        <ChatHistory
+          conversations={conversations}
+          activeId={activeConvId}
+          onSelect={handleSelectConversation}
+          onNew={handleNewConversation}
+          onDelete={handleDeleteConversation}
+          open={historyOpen}
+          onOpenChange={setHistoryOpen}
+        />
 
-          {/* 修改集预览（对话或按意见生成时弹出） */}
-          {activeChangeSet && (
-            <ChangeSetPreview
-              changeSet={activeChangeSet}
+        <div className="grid min-w-0 flex-1 grid-cols-1 items-start gap-6 lg:grid-cols-[1fr_360px]">
+          <div className="flex min-w-0 flex-col gap-4">
+            <DocumentEditor
+              ref={editorRef}
               document={doc}
-              onAccept={acceptChangeSet}
-              onDiscard={discardChangeSet}
+              onDocumentChange={handleDocChange}
+              reviewItems={reviews}
+              selectedReviewId={selectedId}
+              onSelectReview={handleBodySelect}
+              onSelectionChange={setSelection}
             />
-          )}
 
-          {/* 上下文对话 */}
-          {chatError && (
-            <p className="animate-item-in rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300" role="alert">
-              {chatError}
-            </p>
-          )}
-          <ContextChat
-            context={chatContext}
-            contextReview={contextReview}
-            turns={chatTurns}
-            busy={chatBusy}
-            onSend={sendChat}
-            onPreviewChangeSet={(cs) => setActiveChangeSet(cs)}
-            onClear={() => setChatTurns([])}
-          />
-        </div>
+            {/* 修改集预览（对话或按意见生成时弹出） */}
+            {activeChangeSet && (
+              <ChangeSetPreview
+                changeSet={activeChangeSet}
+                document={doc}
+                onAccept={acceptChangeSet}
+                onDiscard={discardChangeSet}
+              />
+            )}
 
-        <div className="min-h-[60vh] lg:min-h-0">
-          <ReviewSidebar
-            items={reviews}
-            selectedId={selectedId}
-            onSelect={handleSelect}
-            onAccept={handleAccept}
-            onReject={handleReject}
-            onRevert={handleRevert}
-            onChat={handleSelect}
-            onApplyOpinion={applyOpinion}
-            applyingOpinionId={applyingOpinionId}
-          />
+            {/* 上下文对话 */}
+            {chatError && (
+              <p className="animate-item-in rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300" role="alert">
+                {chatError}
+              </p>
+            )}
+            <ContextChat
+              context={chatContext}
+              contextReview={contextReview}
+              turns={chatTurns}
+              busy={chatBusy}
+              onSend={sendChat}
+              onPreviewChangeSet={(cs) => setActiveChangeSet(cs)}
+              onNewChat={handleNewConversation}
+            />
+          </div>
+
+          <div className="min-h-[60vh] lg:min-h-0">
+            <ReviewSidebar
+              items={reviews}
+              selectedId={selectedId}
+              onSelect={handleSelect}
+              onAccept={handleAccept}
+              onReject={handleReject}
+              onRevert={handleRevert}
+              onChat={handleSelect}
+              onApplyOpinion={applyOpinion}
+              applyingOpinionId={applyingOpinionId}
+            />
+          </div>
         </div>
       </div>
 
-      <footer className="mt-4 space-y-1 text-xs text-text-faint">
+      {/*
+        左下角常驻两个 fixed 浮动按钮（设置 bottom-16、主题切换 bottom-4，均 left-4，
+        占视口 x=16..56 这条竖带）。页脚是文档最后的内容，滚到底时正落在这一带里，
+        所以页脚整体让出左侧（pl-12 → 与按钮留 16px 间隙）。按钮常年占位，这个让位也
+        就常年有效，不要改成只在某个断点生效——中宽视口（768–1360px）内容区贴左，
+        恰恰是最容易撞上的区间。
+      */}
+      <footer className="mt-4 space-y-1 pl-12 text-xs text-text-faint">
         {/* 屏幕阅读器播报：定位、快捷键与审阅结果 */}
         <p className="sr-only" role="status" aria-live="polite">
           {announce}
         </p>
-        <p>
-          revision {doc.revision} · {doc.blocks.length} 段
+        <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="rounded-full border border-border px-2 py-0.5 font-mono text-[11px] text-text-muted">
+            {APP_VERSION}
+          </span>
+          <span>{doc.blocks.length} 段</span>
         </p>
         <p>
-          隐私说明：点击“开始审阅”或“发送”后，相关文档内容会发送至所配置的 LLM
-          供应商（当前为 DeepSeek）用于生成结果；草稿仅保存在本浏览器本地，不会上传到本服务之外的服务器。
+          隐私说明：点击“开始审阅”或“发送”后，相关文档内容会发送至当前配置的 LLM
+          供应商（在设置面板中选择；未配置时使用服务端默认配置）用于生成结果。文档草稿与你在设置里填写的
+          API Key 都只保存在本浏览器本地，不会上传到本服务之外的服务器。
         </p>
       </footer>
 
@@ -697,7 +866,7 @@ export default function Home() {
         onClick={() => setSettingsOpen((v) => !v)}
         aria-label="设置"
         title="设置"
-        className="fixed bottom-28 left-4 z-50 flex h-10 w-10 items-center justify-center rounded-full border border-border bg-surface/90 shadow-md backdrop-blur-sm transition-all duration-150 hover:bg-surface-muted hover:shadow-lg"
+        className="fixed bottom-16 left-4 z-50 flex h-10 w-10 items-center justify-center rounded-full border border-border bg-surface/90 shadow-md backdrop-blur-sm transition-all duration-150 hover:bg-surface-muted hover:shadow-lg"
       >
         <svg
           width="20"

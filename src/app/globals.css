@@ -81,15 +81,42 @@ body {
   from { opacity: 0; }
   to { opacity: 1; }
 }
+@keyframes modal-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
 @keyframes modal-pop-in {
   from { opacity: 0; transform: scale(0.96) translateY(8px); }
   to { opacity: 1; transform: scale(1) translateY(0); }
 }
 .animate-modal-fade {
-  animation: modal-fade-in 0.18s ease-out;
+  animation: modal-fade-in 0.18s ease-out both;
 }
 .animate-modal-pop {
-  animation: modal-pop-in 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: modal-pop-in 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* 窄屏历史抽屉：从左侧滑入/滑出（240px 满屏高的面板，不用居中式 pop）。
+   退出动画配合 ChatHistory 的 closing 状态延迟卸载播放。
+   注意退出动画必须带 forwards/fill：动画播完到 React 响应 onAnimationEnd 真正卸载
+   之间至少有一帧，没有 fill 的话元素样式会回落到自然位置（translateX(0) / opacity 1），
+   表现就是"收进去之后闪一下才消失"。进入动画同理用 both 防首帧闪烁。 */
+@keyframes drawer-slide-in {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+@keyframes drawer-slide-out {
+  from { transform: translateX(0); }
+  to { transform: translateX(-100%); }
+}
+.animate-drawer-in {
+  animation: drawer-slide-in 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.animate-drawer-out {
+  animation: drawer-slide-out 0.18s ease-in forwards;
+}
+.animate-modal-fade-out {
+  animation: modal-fade-out 0.18s ease-in forwards;
 }
 
 /* 列表条目淡入（筛选切换 / 审阅结果到达） */
@@ -103,7 +130,8 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   html { transition: none; }
-  .animate-modal-fade, .animate-modal-pop, .animate-item-in { animation: none; }
+  .animate-modal-fade, .animate-modal-pop, .animate-item-in,
+  .animate-drawer-in, .animate-drawer-out, .animate-modal-fade-out { animation: none; }
 }
 
 /* ── 审阅建议的编辑器标记（阶段 2）──────────────────────────────

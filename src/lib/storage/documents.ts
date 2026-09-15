@@ -1,35 +1,16 @@
-import Dexie, { type Table } from "dexie";
+import { getDB } from "./db";
 import {
   DocumentStateSchema,
   type DocumentState,
 } from "../review-schema";
 
 /**
- * IndexedDB 本地持久化（PLAN 5.1：本地保存当前草稿、设置和最近一次审阅结果）。
- * 阶段 1 先实现草稿文档的存取；审阅结果与设置的表结构预留到后续阶段。
+ * 草稿文档的本地持久化（PLAN 5.1）。
+ * 写入前用 schema 校验，读出时也校验：损坏数据直接丢弃，不带进编辑器。
+ * 只保留最近一份草稿（同一主键上 put 覆盖），不做版本历史。
  */
 
-class SuperGrammarlyDB extends Dexie {
-  documents!: Table<DocumentState, string>;
-
-  constructor() {
-    super("super-grammarly");
-    this.version(1).stores({
-      // 只索引主键和查询字段，blocks 正文不入索引
-      documents: "id, updatedAt",
-    });
-  }
-}
-
-let db: SuperGrammarlyDB | null = null;
-
-function getDB(): SuperGrammarlyDB {
-  if (!db) db = new SuperGrammarlyDB();
-  return db;
-}
-
 export async function saveDocument(doc: DocumentState): Promise<void> {
-  // 写入前用 schema 校验，避免把损坏的状态持久化
   const parsed = DocumentStateSchema.parse(doc);
   await getDB().documents.put(parsed);
 }
@@ -39,7 +20,6 @@ export async function loadDocument(
 ): Promise<DocumentState | undefined> {
   const row = await getDB().documents.get(id);
   if (!row) return undefined;
-  // 读出时校验，损坏数据直接丢弃而不是带进编辑器
   const result = DocumentStateSchema.safeParse(row);
   return result.success ? result.data : undefined;
 }

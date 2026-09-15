@@ -135,3 +135,30 @@ export const ChatContextSchema = z.object({
   selectedText: z.string().optional(),
 });
 export type ChatContext = z.infer<typeof ChatContextSchema>;
+
+/**
+ * 一轮对话（用户提问或模型回复）。
+ * assistant 轮可以挂一个修改集，点击可重新打开预览——正文不会被隐式修改，
+ * 修改集里定位不到的条目由 ChangeSetPreview 在渲染时判定为不可应用。
+ */
+export const ChatTurnSchema = z.object({
+  role: z.enum(["user", "assistant"]),
+  content: z.string(),
+  changeSet: ChangeSetSchema.optional(),
+});
+export type ChatTurn = z.infer<typeof ChatTurnSchema>;
+
+/**
+ * 一条对话记录（左侧历史记录列表里的一行）。
+ * turns 是全部轮次；updatedAt 驱动列表排序，title 由首条用户消息派生。
+ */
+export const ConversationSchema = z.object({
+  id: z.string().min(1),
+  title: z.string(),
+  turns: z.array(ChatTurnSchema),
+  /** 对话产生时所在的文档 id，仅作记录，列表不按它过滤 */
+  documentId: z.string().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type Conversation = z.infer<typeof ConversationSchema>;

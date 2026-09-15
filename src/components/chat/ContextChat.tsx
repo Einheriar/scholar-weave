@@ -4,16 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import type {
   ChangeSet,
   ChatContext,
+  ChatTurn,
   ReviewItem,
 } from "@/lib/review-schema";
 import { buttonClass } from "@/components/ui/button";
-
-export type ChatTurn = {
-  role: "user" | "assistant";
-  content: string;
-  /** assistant 回复若带修改集，这里挂其 id，点击可打开预览 */
-  changeSet?: ChangeSet;
-};
 
 export type ContextChatProps = {
   context: ChatContext;
@@ -24,7 +18,8 @@ export type ContextChatProps = {
   onSend: (message: string) => void;
   /** 打开某条回复附带的修改集预览 */
   onPreviewChangeSet: (changeSet: ChangeSet) => void;
-  onClear: () => void;
+  /** 开一条新对话（当前对话已自动存进左侧历史，不会被丢掉） */
+  onNewChat: () => void;
 };
 
 /**
@@ -39,7 +34,7 @@ export function ContextChat({
   busy,
   onSend,
   onPreviewChangeSet,
-  onClear,
+  onNewChat,
 }: ContextChatProps) {
   const [draft, setDraft] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
@@ -69,10 +64,10 @@ export function ContextChat({
         {turns.length > 0 && (
           <button
             type="button"
-            onClick={onClear}
+            onClick={onNewChat}
             className="rounded-md px-1.5 py-0.5 text-text-faint transition-colors hover:bg-surface-muted hover:text-foreground"
           >
-            清空对话
+            新对话
           </button>
         )}
       </div>
