@@ -155,19 +155,42 @@ export default function Home() {
     });
   }, []);
 
-  const handleAccept = useCallback((id: string) => {
-    setReviews((rs) => {
-      const item = rs.find((r) => r.id === id);
-      if (!item || item.status !== "open") return rs;
-      if (item.kind === "edit") {
-        const ok = editorRef.current?.applyEdit(item);
-        if (!ok) return rs;
+  // 接受某条 edit 前的文本快照（撤销时还原正文用）：reviewId → (blockId → 原文)
+  const acceptSnapshotRef = useRef<Map<string, Map<string, string>>>(new Map());
+
+  const handleAccept = useCallback(
+    (id: string) => {
+      if (!doc) return;
+      const item = reviews.find((r) => r.id === id);
+      if (!item || item.status !== "open" || item.kind !== "edit") {
+        // opinion 无文本改动，仅标记
+        if (item && item.status === "open" && item.kind === "opinion") {
+          setReviews((rs) =>
+            rs.map((r) =>
+              r.id === id ? { ...r, status: "accepted" as const } : r,
+            ),
+          );
+        }
+        return;
       }
-      return rs.map((r) =>
-        r.id === id ? { ...r, status: "accepted" as const } : r,
+      const blockId =
+        item.scope.type === "range" || item.scope.type === "block"
+          ? item.scope.blockId
+          : null;
+      const before = blockId
+        ? doc.blocks.find((b) => b.id === blockId)?.text
+        : undefined;
+      const ok = editorRef.current?.applyEdit(item);
+      if (!ok || !blockId || before === undefined) return;
+      acceptSnapshotRef.current.set(id, new Map([[blockId, before]]));
+      setReviews((rs) =>
+        rs.map((r) =>
+          r.id === id ? { ...r, status: "accepted" as const } : r,
+        ),
       );
-    });
-  }, []);
+    },
+    [doc, reviews],
+  );
 
   const handleReject = useCallback((id: string) => {
     setReviews((rs) =>
@@ -180,6 +203,12 @@ export default function Home() {
   }, []);
 
   const handleRevert = useCallback((id: string) => {
+    // 若该建议接受时改过正文，先还原（PLAN 5.1 撤销）
+    const snapshot = acceptSnapshotRef.current.get(id);
+    if (snapshot) {
+      editorRef.current?.revertBlockTexts(snapshot);
+      acceptSnapshotRef.current.delete(id);
+    }
     setReviews((rs) =>
       rs.map((r) =>
         r.id === id && (r.status === "accepted" || r.status === "rejected")
