@@ -421,8 +421,8 @@ export default function Home() {
   const acceptSnapshotRef = useRef<Map<string, Map<string, string>>>(new Map());
 
   const handleAccept = useCallback(
-    (id: string) => {
-      if (!doc) return;
+    (id: string): boolean => {
+      if (!doc) return false;
       const item = reviews.find((r) => r.id === id);
       if (!item || item.status !== "open" || item.kind !== "edit") {
         // opinion 无文本改动，仅标记
@@ -432,8 +432,9 @@ export default function Home() {
               r.id === id ? { ...r, status: "accepted" as const } : r,
             ),
           );
+          return true;
         }
-        return;
+        return false;
       }
       const blockId =
         item.scope.type === "range" || item.scope.type === "block"
@@ -443,13 +444,14 @@ export default function Home() {
         ? doc.blocks.find((b) => b.id === blockId)?.text
         : undefined;
       const ok = editorRef.current?.applyEdit(item);
-      if (!ok || !blockId || before === undefined) return;
+      if (!ok || !blockId || before === undefined) return false;
       acceptSnapshotRef.current.set(id, new Map([[blockId, before]]));
       setReviews((rs) =>
         rs.map((r) =>
           r.id === id ? { ...r, status: "accepted" as const } : r,
         ),
       );
+      return true;
     },
     [doc, reviews],
   );

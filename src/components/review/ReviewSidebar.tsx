@@ -17,7 +17,7 @@ export type ReviewSidebarProps = {
   items: ReviewItem[];
   selectedId: string | null;
   onSelect: (id: string) => void;
-  onAccept: (id: string) => void;
+  onAccept: (id: string) => boolean;
   onReject: (id: string) => void;
   onRevert: (id: string) => void;
   onChat?: (id: string) => void;

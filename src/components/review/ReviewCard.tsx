@@ -1,5 +1,6 @@
 "use client";
 
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReviewItem } from "@/lib/review-schema";
 import { buttonClass } from "@/components/ui/button";
 import { renderMiniMarkdown } from "@/lib/mini-markdown";
@@ -14,8 +15,8 @@ export type ReviewCardProps = {
   item: ReviewItem;
   selected: boolean;
   onSelect: (id: string) => void;
-  /** 接受一条可执行修改（仅 edit 且 open） */
-  onAccept: (id: string) => void;
+  /** 接受一条可执行修改（仅 edit 且 open）。返回 false 表示应用失败（锚点丢失等），调用方应回滚动画 */
+  onAccept: (id: string) => boolean;
   /** 忽略 */
   onReject: (id: string) => void;
   /** 撤销该建议的接受/忽略，回到 open */
@@ -30,8 +31,13 @@ export type ReviewCardProps = {
 
 /**
  * 单条建议卡片（PLAN 6.2）。
- * opinion：主要操作是“继续询问”和“按此意见修改”（阶段 2 暂以占位按钮呈现，阶段 5 接入对话）。
- * edit：显示原文/替换内容/理由，以及“接受”“忽略”。
+ * opinion：主要操作是"继续询问"和"按此意见修改"（阶段 2 暂以占位按钮呈现，阶段 5 接入对话）。
+ * edit：显示原文/替换内容/理由，以及"接受""忽略"。
+ *
+ * 「接受」动画（2026-09-16 反馈修订）：
+ *   accepting 态 → 覆盖全卡的勾号过场（模糊化背景内容）→ 散去 → 高度收起（grid-template-rows 0fr）
+ *   → 终态 = 三行（头部 + 标题 + 按钮），视觉弱化（bg-surface-muted opacity-75）。
+ *   交互锁定到收起完成（onCollapseDone），期间不响应点击。
  */
 export function ReviewCard({
   item,
@@ -46,12 +52,73 @@ export function ReviewCard({
 }: ReviewCardProps) {
   const cat = CATEGORY_META[item.category];
   const sev = SEVERITY_META[item.severity];
-  const st = STATUS_META[item.status];
   const actionable = item.kind === "edit" && item.status === "open";
-  const revertible = item.status === "accepted" || item.status === "rejected";
-  // 已忽略 / 已过期是「不再待处理」的终态，视觉上要弱化：
-  // 背景用更浅偏灰的 surface-muted（区别于正常卡的白/绿），边框也更淡。
-  const inactive = item.status === "rejected" || item.status === "stale";
+
+  // ===== accepting 状态机 =====
+  // collapsed 本地 state 驱动收起 class：勾号散去后 setCollapsed(true) → CSS 动画触发
+  // 收起完成后（300ms）调 onAccept 提交真实状态 + 解锁交互
+  // 刷新后 item.status 已是 accepted → 用 derived-state 同步 collapsed=true（不播动画）
+  // 用户撤销 → item.status 翻回 open → derived-state 同步 collapsed=false（展开）
+  const [accepting, setAccepting] = useState(false);
+  const [checkState, setCheckState] = useState<"hidden" | "in" | "out">("hidden");
+  // 初次挂载时如果已是 accepted（刷新场景），直接收起（不播动画）
+  const [collapsed, setCollapsed] = useState(() => item.status === "accepted");
+  const checkTimerRef = useRef<number | null>(null);
+  const collapseTimerRef = useRef<number | null>(null);
+
+  // 卸载时清 pending 定时器（防止内存泄漏）
+  useEffect(() => () => {
+    if (checkTimerRef.current) clearTimeout(checkTimerRef.current);
+    if (collapseTimerRef.current) clearTimeout(collapseTimerRef.current);
+  }, []);
+
+  const handleAccept = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (accepting) return;
+      setAccepting(true);
+      setCheckState("in");
+      // 勾号动画 500ms，散去 200ms，共 700ms
+      checkTimerRef.current = window.setTimeout(() => {
+        setCheckState("out");
+        // 散去后再触发高度收起
+        collapseTimerRef.current = window.setTimeout(() => {
+          setCollapsed(true);
+          const ok = onAccept(item.id);
+          window.setTimeout(() => {
+            setAccepting(false);
+            setCheckState("hidden");
+            // applyEdit 失败（锚点丢失等）：回滚收起，卡片恢复展开
+            if (!ok) setCollapsed(false);
+          }, 300);
+        }, 200);
+      }, 500);
+    },
+    [accepting, item.id, onAccept],
+  );
+
+  // derived-state：item.status 变化时同步 collapsed
+  // 初次挂载时如果 item.status 已是 accepted（刷新场景），直接初始化 collapsed=true
+  const [prevStatus, setPrevStatus] = useState(item.status);
+  if (prevStatus !== item.status) {
+    setPrevStatus(item.status);
+    if (item.status === "accepted") {
+      if (!collapsed) setCollapsed(true);
+    }
+    if (item.status === "open") {
+      if (collapsed) setCollapsed(false);
+      if (accepting) setAccepting(false);
+      if (checkState !== "hidden") setCheckState("hidden");
+    }
+  }
+
+  // 视觉状态：collapsed（收起完成后）→ 用 accepted 视觉（灰底弱化）
+  // accepting 期间（勾号过场）保持原视觉，不收起不变灰
+  const visualStatus = collapsed ? "accepted" : item.status;
+  const visualSt = STATUS_META[visualStatus];
+  // accepted / rejected / stale 都算「终态弱化」：灰底 + opacity-75
+  const visualInactive = visualStatus !== "open";
+  const visualRevertible = visualStatus === "accepted" || visualStatus === "rejected";
 
   return (
     <li className="animate-item-in">
@@ -59,8 +126,8 @@ export function ReviewCard({
         data-review-card={item.id}
         aria-current={selected ? "true" : undefined}
         className={
-          "cursor-pointer rounded-xl border p-3.5 text-sm shadow-sm transition-all duration-200 " +
-          (inactive
+          "relative cursor-pointer rounded-xl border p-3.5 text-sm shadow-sm transition-all duration-200 " +
+          (visualInactive
             // 终态卡：浅灰底 + 淡边框；选中时边框加深（border-foreground/40）
             // 让「选中了」仍然明确，不因弱化而看不清
             ? "bg-surface-muted opacity-75 " +
@@ -71,8 +138,42 @@ export function ReviewCard({
               ? "border-brand bg-brand-soft shadow-md ring-1 ring-brand-ring"
               : "border-border bg-surface hover:-translate-y-px hover:border-border-strong hover:shadow-md")
         }
-        onClick={() => onSelect(item.id)}
+        onClick={() => {
+          if (accepting) return;
+          onSelect(item.id);
+        }}
       >
+        {/* accepting 覆盖层：勾号过场，背景内容模糊化 */}
+        {checkState !== "hidden" && (
+          <div
+            className="absolute inset-0 z-10 flex items-center justify-center rounded-xl"
+            style={{
+              background: "color-mix(in srgb, var(--surface) 82%, transparent)",
+              backdropFilter: "blur(4px)",
+              WebkitBackdropFilter: "blur(4px)",
+            }}
+          >
+            <span
+              className="t-success-check"
+              data-state={checkState}
+              aria-hidden="true"
+              style={{ width: 48, height: 48 }}
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="var(--brand)"
+                strokeWidth={2.5}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                style={{ width: "100%", height: "100%" }}
+              >
+                <path d="M4.5 12.5l5 5L19.5 7" />
+              </svg>
+            </span>
+          </div>
+        )}
+
         {/* 头部：类型 / 类别 / 严重度 / 状态 */}
         <div className="mb-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
           <span className="rounded-full bg-foreground/85 px-2 py-0.5 font-medium text-background">
@@ -84,49 +185,57 @@ export function ReviewCard({
           </span>
           <span className={sev.className}>{sev.label}</span>
           <span
-            className={`ml-auto rounded-full px-2 py-0.5 ${st.className}`}
-            aria-label={`状态：${st.label}`}
+            className={`ml-auto rounded-full px-2 py-0.5 ${visualSt.className}`}
+            aria-label={`状态：${visualSt.label}`}
           >
-            {st.label}
+            {visualSt.label}
           </span>
         </div>
 
         <h4 className="mb-1 font-medium tracking-tight text-foreground">{item.title}</h4>
-        <div className="mb-2.5 text-sm leading-relaxed text-text-muted">
-          {renderMiniMarkdown(item.explanation)}
-        </div>
 
-        {/* edit：展示 原文 → 替换（终态卡底色已是灰，内层框换成 surface 避免融掉） */}
-        {item.kind === "edit" && item.replacement !== undefined && (
-          <div className={`mb-2.5 space-y-1.5 rounded-lg p-2.5 text-xs ${inactive ? "bg-surface" : "bg-surface-muted"}`}>
-            {item.scope.type === "range" && (
-              <div className="flex gap-1.5">
-                <span className="shrink-0 text-text-faint">原文</span>
-                <span className="break-all text-red-700 line-through decoration-red-400/60 dark:text-red-400">
-                  {item.scope.original}
-                </span>
+        {/* 可收起区：解释段 + 原文/改为框。收起后卡片只剩 头部 + 标题 + 按钮（三行）。 */}
+        <div
+          className={
+            "review-card-collapsible" +
+            (collapsed ? " collapsed" : "")
+          }
+        >
+          <div>
+            <div className="mb-2.5 text-sm leading-relaxed text-text-muted">
+              {renderMiniMarkdown(item.explanation)}
+            </div>
+
+            {/* edit：展示 原文 → 替换（终态卡底色已是灰，内层框换成 surface 避免融掉） */}
+            {item.kind === "edit" && item.replacement !== undefined && (
+              <div className={`mb-2.5 space-y-1.5 rounded-lg p-2.5 text-xs ${visualInactive ? "bg-surface" : "bg-surface-muted"}`}>
+                {item.scope.type === "range" && (
+                  <div className="flex gap-1.5">
+                    <span className="shrink-0 text-text-faint">原文</span>
+                    <span className="break-all text-red-700 line-through decoration-red-400/60 dark:text-red-400">
+                      {item.scope.original}
+                    </span>
+                  </div>
+                )}
+                <div className="flex gap-1.5">
+                  <span className="shrink-0 text-text-faint">改为</span>
+                  <span className="break-all font-medium text-emerald-700 dark:text-emerald-400">
+                    {item.replacement}
+                  </span>
+                </div>
               </div>
             )}
-            <div className="flex gap-1.5">
-              <span className="shrink-0 text-text-faint">改为</span>
-              <span className="break-all font-medium text-emerald-700 dark:text-emerald-400">
-                {item.replacement}
-              </span>
-            </div>
           </div>
-        )}
+        </div>
 
-        {/* 操作区 */}
+        {/* 操作区：不收起，「撤销」一直可点 */}
         <div className="flex items-center gap-2">
-          {actionable && (
+          {actionable && !accepting && (
             <>
               <button
                 type="button"
                 className={buttonClass("primary", "xs")}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onAccept(item.id);
-                }}
+                onClick={handleAccept}
               >
                 接受
               </button>
@@ -143,7 +252,7 @@ export function ReviewCard({
             </>
           )}
 
-          {item.kind === "opinion" && item.status === "open" && (
+          {item.kind === "opinion" && item.status === "open" && !accepting && (
             <>
               <button
                 type="button"
@@ -169,7 +278,7 @@ export function ReviewCard({
             </>
           )}
 
-          {revertible && (
+          {visualRevertible && (
             <button
               type="button"
               className={buttonClass("secondary", "xs")}
@@ -182,7 +291,7 @@ export function ReviewCard({
             </button>
           )}
 
-          {item.status === "stale" && (
+          {visualStatus === "stale" && (
             <span className="text-xs text-amber-600 dark:text-amber-400">
               原文已变化，无法定位
             </span>
