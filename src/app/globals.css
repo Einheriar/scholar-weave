@@ -177,10 +177,12 @@ body {
   animation: item-fade-in 0.25s ease-out;
 }
 
-/* 聊天节点时间线抽屉：从聊天区顶部向上抽出（translateY 正值 → 0） */
+/* 聊天节点时间线抽屉：从聊天区顶部向上抽出（translateY 正值 → 0）。
+   有意不做 opacity 淡入——半透明阶段会让抽屉 border 和正文透叠成一条横线，
+   只保留位移滑入。 */
 @keyframes timeline-rise-in {
-  from { opacity: 0; transform: translateY(12px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { transform: translateY(12px); }
+  to { transform: translateY(0); }
 }
 .animate-timeline-rise {
   animation: timeline-rise-in 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
