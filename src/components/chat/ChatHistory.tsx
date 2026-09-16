@@ -135,12 +135,13 @@ export function ChatHistory({
             role="dialog"
             aria-modal="true"
             aria-label="历史记录"
+            // pl-4 与 HistoryList 的 pl-14 配套：标题行让位顶栏汉堡（叉叉），列表行正常缩进
             onAnimationEnd={(e) => {
               // 退出动画（滑出/淡出）播完才真正卸载；进入动画结束时 closing 还是 false，不受影响
               if (closing && e.target === e.currentTarget) endClosing();
             }}
             className={
-              "absolute inset-y-0 left-0 flex w-60 max-w-[85vw] flex-col overflow-y-auto border-r border-border bg-surface pb-28 shadow-2xl " +
+              "absolute inset-y-0 left-0 flex w-60 max-w-[85vw] flex-col overflow-y-auto border-r border-border bg-surface pb-28 pl-4 shadow-2xl " +
               (closing ? "animate-drawer-out" : "animate-drawer-in")
             }
           >
@@ -150,14 +151,8 @@ export function ChatHistory({
               onSelect={onSelect}
               onNew={onNew}
               onDelete={onDelete}
+              variant="drawer"
             />
-            <button
-              type="button"
-              onClick={handleClose}
-              className={buttonClass("secondary", "sm") + " mx-3 mb-3"}
-            >
-              关闭
-            </button>
           </div>
         </div>
       )}
@@ -171,21 +166,42 @@ function HistoryList({
   onSelect,
   onNew,
   onDelete,
-}: HistoryListProps) {
+  variant = "sidebar",
+}: HistoryListProps & { variant?: "sidebar" | "drawer" }) {
+  const drawer = variant === "drawer";
   return (
     <>
-      <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-border bg-surface px-3 py-2">
-        <h2 className="text-xs font-semibold tracking-tight text-text-muted">
-          历史记录
-        </h2>
-        <button
-          type="button"
-          onClick={onNew}
-          className={buttonClass("secondary", "xs")}
-        >
-          新文章
-        </button>
-      </div>
+      {drawer ? (
+        // 抽屉形态：升级成真正的面板标题。左侧 pl-14 让出顶栏汉堡按钮（40px + 左缘 16px），
+        // 打开时按钮原地换成叉叉，「叉叉 + 标题」逐像素连成一行。pt-[30px] + h-10 让标题
+        // 与顶栏内垂直居中的按钮中线对齐（实测按钮 top=24/中线 44，h2 行高 28 需 top=30）。
+        // 数值与顶栏布局绑定，改顶栏要重测（同 AGENTS.md 左栏 100vh-8rem 的约定级别）。
+        <div className="flex flex-col gap-3 px-4 pb-3 pl-14 pt-[30px]">
+          <h2 className="text-lg font-semibold tracking-tight text-foreground">
+            历史记录
+          </h2>
+          <button
+            type="button"
+            onClick={onNew}
+            className={buttonClass("secondary", "sm") + " w-full"}
+          >
+            新文章
+          </button>
+        </div>
+      ) : (
+        <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-border bg-surface px-3 py-2">
+          <h2 className="text-xs font-semibold tracking-tight text-text-muted">
+            历史记录
+          </h2>
+          <button
+            type="button"
+            onClick={onNew}
+            className={buttonClass("secondary", "xs")}
+          >
+            新文章
+          </button>
+        </div>
+      )}
 
       <ul className="space-y-1 p-2">
         {projects.length === 0 && (
@@ -253,7 +269,8 @@ function HistoryList({
   );
 }
 
-/** 顶栏的「三条横线」按钮：窄屏拉出历史抽屉（宽屏由常驻左栏替代，故 xl:hidden） */
+/** 顶栏的历史抽屉开关：窄屏拉出/收起抽屉（宽屏由常驻左栏替代，故 xl:hidden）。
+ *  打开时同一位置原地换成叉叉（内部双 SVG 叠格切换），配冷却期防抖双击。 */
 export function ChatHistoryToggle({
   open,
   onClick,
@@ -261,29 +278,60 @@ export function ChatHistoryToggle({
   open: boolean;
   onClick: () => void;
 }) {
+  // 冷却：点击后 750ms 内（抽屉动画 250ms + 500ms）忽略同位置再次点击。
+  // 既防抖双击，也顺带挡住「关闭动画中途又点开」的边界；reduced-motion 下没有动画，
+  // 只剩 500ms。CSS 只禁用 transition，冷却要在 JS 层做。
+  const cooldownRef = useRef(0);
+  const handleClick = () => {
+    const now = Date.now();
+    if (now - cooldownRef.current < 750) return;
+    cooldownRef.current = now;
+    onClick();
+  };
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={handleClick}
       aria-label="历史记录"
       aria-expanded={open}
       title="历史记录"
-      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-text-muted transition-colors hover:bg-surface-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring xl:hidden"
+      // z-100：抽屉遮罩 z-90 会盖住顶栏，不提升的话打开后叉叉被压在遮罩下点不到
+      className="relative z-[100] flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-text-muted transition-colors hover:bg-surface-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring xl:hidden"
     >
-      <svg
-        width="18"
-        height="18"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        aria-hidden
-      >
-        <line x1="4" y1="7" x2="20" y2="7" />
-        <line x1="4" y1="12" x2="20" y2="12" />
-        <line x1="4" y1="17" x2="20" y2="17" />
-      </svg>
+      {/* 双图标同位叠格：data-state 切换（transitions.dev Icon swap 思路，见 globals.css） */}
+      <span className="t-icon-swap" data-state={open ? "b" : "a"}>
+        <svg
+          className="t-icon"
+          data-icon="a"
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          aria-hidden
+        >
+          <line x1="4" y1="7" x2="20" y2="7" />
+          <line x1="4" y1="12" x2="20" y2="12" />
+          <line x1="4" y1="17" x2="20" y2="17" />
+        </svg>
+        <svg
+          className="t-icon"
+          data-icon="b"
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          aria-hidden
+        >
+          <line x1="6" y1="6" x2="18" y2="18" />
+          <line x1="6" y1="18" x2="18" y2="6" />
+        </svg>
+      </span>
     </button>
   );
 }
