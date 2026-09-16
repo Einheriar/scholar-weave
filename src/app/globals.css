@@ -66,6 +66,42 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+/* ── 全局滚动条 ──────────────────────────────────────────────
+   细窄半透明，悬停加深；颜色用语义令牌，深浅色自适应。
+   Chrome/Edge/Safari 用 ::-webkit-scrollbar，Firefox 用 scrollbar-*。
+   半透明滑块会叠在内容上，正文长文滚动时有轻微透色，属可接受的取舍。 */
+:root {
+  /* 滑块基底：text-faint 半透明；悬停：text-muted 加深 */
+  --scrollbar-thumb: color-mix(in srgb, var(--text-faint) 45%, transparent);
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--text-muted) 75%, transparent);
+}
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+/* Chrome / Edge / Safari */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+/* 去掉角落那块白底 */
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 /* 主题切换时所有带颜色属性的元素跟随过渡（仅颜色类，不含布局） */
 .theme-fade,
 .theme-fade * {

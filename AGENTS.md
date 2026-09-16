@@ -104,6 +104,7 @@ tests/e2e/                      # Playwright 用例（helpers.ts 里是 mock 与
 6. **动画** — 复用 `animate-item-in` / `animate-modal-fade` / `animate-modal-pop`，并保证 `prefers-reduced-motion` 下可用
 7. **遮罩点击关闭** — 模态框/抽屉"点外部收起"的写法要判断 `e.target === e.currentTarget`（面板是遮罩子元素），照 `src/components/SettingsPanel.tsx:134` 抄。只认"点遮罩空白处"，别用 `document` 上的全局点击，那样在面板内拖动松手会误关。
 8. **本项目没有动画库**，动效一律手写 CSS keyframes（`globals.css`）。由此有一条固定约束：**退出动画必须延迟卸载**——`{open && ...}` 这类条件渲染会在关闭瞬间卸载节点，淡出/滑出根本没机会播放。做法是加一个「closing」状态在动画期间继续渲染，`onAnimationEnd` 后再真正移除。另外新加的 keyframes 必须同时登记到 `globals.css` 的 `prefers-reduced-motion` 覆盖名单里，漏了的话，明明开了「减少动态效果」的用户反而还会看到动画。
+9. **滚动条全局自定义过**（`globals.css`）：细窄（8px）半透明滑块，悬停加深；滑块色用 `color-mix(in srgb, var(--text-faint) 45%, transparent)`、悬停用 `--text-muted`，深浅色自适应。Chrome/Edge/Safari 走 `::-webkit-scrollbar`，Firefox 走 `scrollbar-width: thin` + `scrollbar-color`。新增可滚区域不用单独配，全局生效。**注意**：半透明滑块会叠在内容上，长文滚动有轻微透色，是有意的取舍；别改回不透明的粗条。
 
 ## 左侧对话历史（ChatGPT 式）
 
@@ -178,9 +179,16 @@ tests/e2e/                      # Playwright 用例（helpers.ts 里是 mock 与
 16. **「自定义指令」等支持 markdown 的输入框要做成「双层」：聚焦显示源文本，失焦渲染成富文本，底层存储与发送的始终是源文本。** 实现方式（`SettingsPanel.tsx`）：textarea 和覆盖在其上的 `<div role="presentation">` 渲染层互斥显示——聚焦时 textarea 可见（`font-mono` 等宽），失焦时渲染层可见、textarea `invisible`（不能 `hidden`/`display:none`，否则占位消失布局跳动）。渲染层用 `onMouseDown e.preventDefault()` + 手动 `focus()` 切回编辑态。渲染器用 `src/lib/mini-markdown.tsx`（受限 markdown：标题/列表/加粗/斜体/行内代码，不引第三方库）。
 17. **提示词系统的中英语言是分离的：解释永远中文，replacement 跟文档语言。** 用户场景只有两种（中文文档 / 英文文档），解释都读中文。`buildSystemPrompt` / `buildChatMessages` / `buildChangeSetMessages` 里 `explanationLanguage` 固定中文，`language` 字段只决定 replacement 写成中文还是英文。page.tsx 里 `language: "en"` 是三处写死的，不要把它当 bug 改掉。
 18. **浏览器代理插件（Zero Omega / SwitchyOmega）对 LLM 请求无效**——LLM 请求是服务端 `fetch`，不经过浏览器。服务端代理有两条路：(1) 用户在设置面板按预设配（`LLMPreset.proxy`，HTTP/SOCKS5 均可），经 `settingsToRequestBody` → `llmConfig.proxy` → `OpenAIProvider` 的 `undici.ProxyAgent`；(2) 服务端环境变量 `SOCKS5_PROXY` / `HTTPS_PROXY` / `HTTP_PROXY`（`getProviderFromEnv` 自动读）。两条路互斥，用户配置优先。
+19. **`scrollIntoView` 的 options 里没有 `top` 字段**——`ScrollIntoViewOptions` 只有 `behavior`/`block`/`inline`，写 `top` 会被浏览器**静默忽略**（不报错）。要把元素对齐到容器内某个精确位置，直接设滚动容器的 `scrollTop`（如 `scroller.scrollTop += delta`），不要往 `scrollIntoView` 里塞自定义坐标。
+20. **sticky 元素要「钉住 + 内部滚动」必须用 `h-` 定高，不能用 `max-h-`**——grid/flex 子项默认 `align-items: stretch`，`max-h` 只约束元素自身、约束不了子元素被内容撑高。`max-h-[calc(100vh-3rem)]` 配 `h-full` 的 aside 会被 2900px 的建议列表撑满，内部 `overflow-y-auto` 根本不滚动，表现是「视口下方的卡片永远点不到」（E2E 报 `element is outside of the viewport`，因为 Playwright 滚 window 时 sticky 卡片不动）。改成 `h-[calc(100vh-3rem)]` 后 aside 被限高、内部容器才真正滚动。排查这类「元素可见但点不到」先量 `getBoundingClientRect()` 对比容器高度，别先怀疑测试框架。
 
 ## 有意为之的取舍（不要当 bug 改掉）
 
+- **`stale` 是可逆的**：`handleDocChange` 每次文档变化对建议做**双向**锚点校验——`open` 定位失败标 `stale`，`stale` 若能重新定位（用户撤销/改回原文）就恢复 `open`。只碰 `open`/`stale` 这一对，用户手动「忽略」的 `rejected` 不参与、不会被误恢复。撤销回原文后建议应回到「待处理」，这是设计行为，不是 bug。
+- **审阅模式默认「仅纠错」（`proofread`），不持久化**：`page.tsx` 写死默认值，刷新即回默认。记住用户上次选择是后续可选增强，目前不做。
+- **侧栏两段补空**：滚动容器首尾各一个 `h-[80vh] shrink-0` 的 `aria-hidden` spacer，让任意卡片都有足够垂直行程与任意高度的正文标记平齐（尤其靠顶/靠底的标记）。这不是多余空白，是对齐机制的行程储备，不要删。**空态（`filtered.length === 0`）不挂 spacer**，否则空态提示文字会被推到视口外。
+- **卡片对齐是「中心对中心」，且有上下界钳制**：正文标记是一条线、卡片是一个块，顶部对齐会让卡片重心偏下。`DocumentEditor` 的 `onSelect` 传标记**垂直中心**（`top + height/2`），`ReviewSidebar` 让卡片中心对齐到它。**但完整可见优先于中心对齐**：卡片顶不能高过侧栏可视区上沿、底不能低过下沿——句子靠顶/靠底时若中心对齐会切头/切尾，就降级为「卡片贴齐可视区边缘」，不再强行对齐中心。改对齐逻辑时这个「先保证完整可见」的钳制不要去掉。
+- **首尾补空用户滚不进去（滚动钳制）**：补空是给程序对齐用的行程，用户滚轮陷进整屏空白很难看。`ReviewSidebar` 有个 scroll 监听，把用户滚动钳制在「第一张卡片贴顶 / 最后一张贴底」的边界内（留白 20% 过渡，不死卡）；程序对齐用 `aligningRef` 标志跳过钳制，否则对齐永远到不了补空区。改对齐或补空逻辑时别把这两个机制拆散。
 - **不做按模型能力的档位 clamp 映射表**：思考档位（`auto`/`off`/`low`/`high`/`max`）里端点不支持的档位就直接让它 400 报错给用户，比静默降级更好。将来真要做映射表再加。
 - **批量接受 ChangeSet 依赖编辑器自带的 `Ctrl+Z`**，没有像单条那样提供「撤销本次修改」的独立按钮。PLAN 5.1 只要求单条可撤销。
 - **档位只保留 5 个（`auto`/`off`/`low`/`high`/`max`），不要再扩档**：`low/high/max` 是与 Kimi K3、DeepSeek 原生档位对齐的公约数。

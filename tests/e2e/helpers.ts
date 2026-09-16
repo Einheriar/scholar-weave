@@ -32,6 +32,20 @@ export async function loadSample(page: Page) {
   await expect(page.locator("[data-review-card]").first()).toBeVisible();
 }
 
+/**
+ * 把侧栏卡片滚进其滚动容器的可视区。
+ *
+ * 侧栏是 `position: sticky` + 内部 `overflow-y-auto`：Playwright 的
+ * `scrollIntoViewIfNeeded` 只会滚 window，而 sticky 元素不随 window 滚动移动，
+ * 导致视口下方的卡片永远报「element is outside of the viewport」（E2E 实测）。
+ * 显式对其滚动容器调用 scrollIntoView 才能命中。
+ */
+export async function scrollCardIntoView(page: Page, id: string) {
+  await page
+    .locator(`[data-review-card="${id}"]`)
+    .evaluate((el) => el.scrollIntoView({ block: "nearest" }));
+}
+
 /** 在请求体里按包含关系找到某段，返回其 blockId（找不到返回 undefined） */
 export function findBlock(
   blocks: Block[],

@@ -99,18 +99,41 @@
 
 ## 二、当前状态
 
-**大量未提交改动，无阻塞。** 最近一次提交是 `0cf37a6`（阶段 10 对话历史 + 抽屉动画）。
-之后做的所有改动都还在工作区，尚未提交：
+**侧栏交互改进 + 四个反馈问题已处理，E2E 23 个全绿，质量门禁全过。改动未提交，在工作区。**
 
-1. **受限 markdown 渲染器**（`src/lib/mini-markdown.tsx`）+ 15 个单测
-2. **自定义指令输入框双层渲染**（聚焦源文本 / 失焦 markdown 预览）
-3. **ReviewCard / ChangeSetPreview / ContextChat 的 explanation 走渲染器**
-4. **提示词系统更新**：polish/deep_review 写作原则、explanation 锁定中文、对话加重写意图
-5. **代理功能**：`LLMPreset.proxy`（HTTP/SOCKS5）、`undici.ProxyAgent`、`/api/test-connection`
-6. **设置面板布局调整**：去掉配置卡片、测试连接按钮（配置名称旁）、切换预设动画
-7. **默认自定义指令**（`DEFAULT_CUSTOM_PROMPT`）：软提示词（Core Writing Principles + Style Constraints），**原样英文**摘自用户指令，可编辑
+### 2.1 侧栏交互改进（已完成）
 
-**质量基线：** 124 个 Vitest 用例（16 文件）全过；`typecheck` / `lint`（0 问题）/ `build` 全通过。
+1. **0 意见分区隐藏**：无筛选时 0 意见的空分区整区隐藏，被筛选排除的空分区保留作 landmark。
+2. **双向定位 + 侧栏卡片对齐正文**：点正文标记 → 卡片滚动对齐到与标记齐平；点侧栏卡片 → 正文滚到对应范围并选中。坐标经 `anchorTop`（正文标记视口 top）传递。
+3. **sticky 侧栏**：`sticky top-6 h-[calc(100vh-3rem)]` 钉在视口顶部，内部独立滚动。
+4. **全文建议点击滚到总结横幅**。
+
+### 2.2 四个反馈问题（本轮处理）
+
+1. **发消息没留痕 → 实测无 bug**。发送后 IndexedDB 立刻写入、左侧列表立刻出现、回复后更新轮次、刷新后保留。功能正常。若再遇到，需具体操作顺序定位（可能是边界场景）。
+2. **改了又撤销仍「已过期」→ 已修**。`handleDocChange` 改双向校验：`stale` 若能重新定位（撤销/改回原文）恢复 `open`。实测改原文→已过期、撤销→恢复待处理。
+3. **审阅模式默认 → 改为「仅纠错」**（`page.tsx` `useState<ReviewMode>("proofread")`），不持久化。
+4. **滚到顶对不齐 → 已修（两段补空）**。侧栏滚动容器首尾各加 `h-[80vh] shrink-0` spacer，任意卡片都能与任意高度标记平齐。实测靠顶标记 delta 0 完全平齐。
+
+### 2.3 补空引入的回归（本轮修复）
+
+- **空态 spacer 把提示文字推到视口外 → 已修**：spacer 改为仅 `filtered.length > 0` 时渲染，0 建议/筛选为空时不挂，空态文字回到侧栏顶部、无多余滚动条。
+- **滚动条丑 → 全局自定义**：细窄（8px）半透明滑块，悬停加深，`color-mix` 配 `text-faint`/`text-muted` 令牌，深浅色自适应（`globals.css`）。
+
+### 2.3 关键改动文件
+
+- `src/app/page.tsx` — sticky `h-[calc(100vh-3rem)]`、stale 双向恢复、mode 默认 `proofread`、`anchorTop` state、`summaryRef`
+- `src/components/review/ReviewSidebar.tsx` — 分区隐藏、`anchorTop` prop、对齐 effect（设 `scrollRef.scrollTop`）、首尾 spacer（仅 `filtered.length > 0` 渲染）
+- `src/components/editor/DocumentEditor.tsx` — `getItemViewportTop()`、`onSelectReview` 带 `viewportTop`
+- `src/app/globals.css` — 全局半透明滚动条（`::-webkit-scrollbar` + `scrollbar-color`，`color-mix` 令牌）
+- `tests/e2e/helpers.ts` / `core-flow.spec.ts` — `scrollCardIntoView()`
+- `AGENTS.md` — 陷阱 19/20、取舍条目、界面约定第 9 条（滚动条）
+
+### 2.4 质量基线
+
+- `npm run typecheck` ✅ / `npm run lint` ✅ / `npm run test` ✅ 124 个 / `npm run test:e2e` ✅ 23 个
+- 浏览器实测：双向定位与对齐（delta 0）、stale 双向恢复、默认仅纠错、历史留痕，全部通过
+- 开发服务器在 :3000 运行中（`npm run dev`）
 
 > ⚠️ **工作区有未提交改动**。按 AGENTS.md 的「Git 操作」约定，
 > **commit / push 必须先获得用户明确同意**，不要自己提交。
@@ -133,31 +156,14 @@
 
 ## 四、下一步
 
-### 4.1 默认自定义指令不生效 —— 已修复 ✅
+### 4.1 提交
 
-**根因有两个，都已解决：**
-
-1. **`loadSettings` 迁移逻辑之前其实没写进文件**：旧数据 `review.customPrompt` 为空串时，
-   `{ ...DEFAULT_SETTINGS.review, ...parsed.review }` 展开会用空串覆盖默认值。
-   已在 `src/lib/settings.ts` 的 `loadSettings` 里补了 `if (!review.customPrompt) review.customPrompt = DEFAULT_CUSTOM_PROMPT;`，
-   并在 `tests/settings.test.ts` 加了两个守护用例（空串回填 / 缺 review 字段用默认）。
-2. **:3001 上跑的是旧进程**：之前 `npm run build` 后启动新 server 时端口被旧进程占用
-   （`EADDRINUSE`），新 server 没起来，浏览器一直在访问旧构建。
-   `taskkill` 掉旧进程重启后才拿到新 bundle。
-
-**验证结果**（生产构建 :3001，浏览器实测）：
-- 设置面板「审阅」Tab → 自定义指令 textarea 显示完整 679 字符默认软提示词（`# 写作风格` 开头）
-- 失焦后 overlay 正确渲染 markdown（检测到 `h1`/`strong`/`li` 元素）
-- 聚焦时 textarea 恢复编辑态
-
-### 4.2 其他待办
-
-无。接手后先跑一遍基线确认是绿的：`npm run test`（124 个）
-与 `npm run test:e2e`（23 个，自动起 dev server）。
+质量门禁已全绿（typecheck / lint / 124 单测 / 23 E2E），浏览器实测双向定位与对齐通过。
+按 AGENTS.md 规则向用户讲清改动并等 commit 授权。
 
 ## 五、接手建议
 
-1. 先跑一遍基线确认是绿的：`npm run test`（124 个）与 `npm run test:e2e`（23 个，自动起 dev server）。
+1. 先跑一遍基线确认现状：`npm run test`（124 个，应全过）与 `npm run test:e2e`（23 个，应 2 挂）。
 2. **动代码前读 [AGENTS.md](./AGENTS.md)**，尤其是「必须遵守的核心约束」「界面开发约定」
    「浮动按钮与页面底部布局」「已知陷阱」——里面记着这个项目已经踩过的 18 个坑，
    其中好几个是"看起来像 bug、其实是有意为之"的取舍。

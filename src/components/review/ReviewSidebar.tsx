@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   ReviewCategory,
   ReviewItem,
@@ -21,6 +21,8 @@ export type ReviewSidebarProps = {
   onReject: (id: string) => void;
   onRevert: (id: string) => void;
   onChat?: (id: string) => void;
+  /** 正文标记相对视口顶部的距离（正文→侧栏对齐用）；null 表示本次选中来自侧栏，只需滚进视野 */
+  anchorTop?: number | null;
   onApplyOpinion?: (id: string) => void;
   applyingOpinionId?: string | null;
 };
@@ -33,6 +35,7 @@ export type ReviewSidebarProps = {
 export function ReviewSidebar({
   items,
   selectedId,
+  anchorTop = null,
   onSelect,
   onAccept,
   onReject,
@@ -69,6 +72,88 @@ export function ReviewSidebar({
     for (const i of filtered) groups[i.scope.type].push(i);
     return groups;
   }, [filtered]);
+
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const topSpacerRef = useRef<HTMLDivElement | null>(null);
+  const bottomSpacerRef = useRef<HTMLDivElement | null>(null);
+  /** 程序对齐进行中（对齐要拉进首尾补空区，钳制 effect 据此跳过） */
+  const aligningRef = useRef(false);
+
+  // 选中变化时把卡片滚动到位。两种意图分开处理：
+  // - 正文→侧栏（anchorTop 有值）：直接设 scrollTop 把卡片对齐到与正文标记齐平，
+  //   不经过 scrollIntoView，避免它的 window 滚动修正把页面推跑
+  // - 侧栏→正文（anchorTop 为 null）：scrollIntoView 保底，确保卡片进入可视区
+  useEffect(() => {
+    if (!selectedId) return;
+    const scroller = scrollRef.current;
+    const card = scroller?.querySelector(`[data-review-card="${selectedId}"]`);
+    if (!(scroller instanceof HTMLElement) || !(card instanceof HTMLElement)) {
+      return;
+    }
+    if (anchorTop != null) {
+      // 中心对齐：卡片是一个块、正文标记是一条线，顶部对齐会让卡片重心偏下。
+      // anchorTop 是「标记垂直中心」相对视口顶部的距离（DocumentEditor 已算上半个行高）。
+      // 目标：让卡片垂直中心对齐到它——但前提是卡片完整可见。
+      const cardRect = card.getBoundingClientRect();
+      const scrollerRect = scroller.getBoundingClientRect();
+      // 理想卡片顶（相对视口）：中心对中心
+      let targetCardTop = anchorTop - cardRect.height / 2;
+      // 上界钳制：卡片顶不能高过侧栏可视区上沿（否则靠顶的句子会把卡片切头）。
+      // 一旦要切头，就降级为「顶部贴齐可视区上沿」，优先保证完整可见。
+      targetCardTop = Math.max(targetCardTop, scrollerRect.top);
+      // 下界钳制：卡片底不能低过可视区下沿（卡片很长时中心对齐会切到底）。
+      targetCardTop = Math.min(
+        targetCardTop,
+        scrollerRect.bottom - cardRect.height,
+      );
+      const delta = cardRect.top - targetCardTop;
+      // 对齐可能要把卡片拉进首尾补空区，用 aligningRef 告诉钳制 effect 别拦。
+      aligningRef.current = true;
+      scroller.scrollTop += delta;
+      // scroll 事件同步触发，复位放到下一拍，确保本次对齐不被钳制
+      requestAnimationFrame(() => {
+        aligningRef.current = false;
+      });
+    } else {
+      card.scrollIntoView({ block: "nearest" });
+    }
+    // 只在「选中了谁」或「正文标记位置」真正变化时对齐
+  }, [selectedId, anchorTop]);
+
+  // 用户滚动钳制：首尾 80vh 补空是给「程序对齐」用的行程储备，不该被用户滚轮
+  // 滚进去（会对着一大片纯空白）。监听滚动，一旦越界就拉回内容区边缘。
+  // aligningRef 为 true 时（程序对齐中）跳过，否则对齐永远到不了补空区。
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+    const clamp = () => {
+      if (aligningRef.current) return;
+      const top = topSpacerRef.current;
+      const bottom = bottomSpacerRef.current;
+      if (!top || !bottom) return; // 空态无补空，不钳制
+      const clientH = scroller.clientHeight;
+      const maxScroll = scroller.scrollHeight - clientH;
+      // 下界：顶部补空最多露出到「快贴边」——第一张卡片顶到容器顶即停。
+      // 允许稍微露出一点（避免完全卡死感），但绝不让整屏空白。
+      const minScroll = Math.max(0, top.offsetHeight - clientH * 0.2);
+      // 上界：底部补空同理，最后一张卡片贴容器底即停。
+      const maxAllowed = Math.min(
+        maxScroll,
+        scroller.scrollHeight - bottom.offsetHeight - clientH * 0.8,
+      );
+      if (scroller.scrollTop < minScroll) {
+        aligningRef.current = true;
+        scroller.scrollTop = minScroll;
+        requestAnimationFrame(() => { aligningRef.current = false; });
+      } else if (scroller.scrollTop > maxAllowed) {
+        aligningRef.current = true;
+        scroller.scrollTop = Math.max(minScroll, maxAllowed);
+        requestAnimationFrame(() => { aligningRef.current = false; });
+      }
+    };
+    scroller.addEventListener("scroll", clamp, { passive: true });
+    return () => scroller.removeEventListener("scroll", clamp);
+  }, [filtered.length]);
 
   const counts = useMemo(() => {
     const open = items.filter((i) => i.status === "open").length;
@@ -175,7 +260,19 @@ export function ReviewSidebar({
         </div>
       </div>
 
-      <div className="flex-1 space-y-5 overflow-y-auto p-3">
+      <div
+        ref={scrollRef}
+        className="flex-1 space-y-5 overflow-y-auto p-3"
+      >
+        {/*
+          顶部补空：让第一张卡片也能「往上顶」到与靠顶的正文标记齐平。
+          高度取侧栏可视高（约 100vh），flex-shrink-0 防止被压缩。
+          只撑滚动行程，无视觉内容，aria-hidden。
+          空态（无可视卡片）时不挂——否则提示文字会被推到视口外。
+        */}
+        {filtered.length > 0 && (
+          <div ref={topSpacerRef} aria-hidden className="h-[80vh] shrink-0" />
+        )}
         {filtered.length === 0 && (
           <p className="py-10 text-center text-sm text-text-faint">
             没有符合筛选条件的建议
@@ -186,6 +283,9 @@ export function ReviewSidebar({
           // 三个范围区始终作为 landmark 存在（无障碍分组导航）；
           // 被范围筛选排除时显示为空区，而不是整块移除。
           const excluded = scopeFilter !== "all" && scopeFilter !== scope;
+          // 无筛选时 0 意见的分区整区隐藏（「没有符合筛选条件的建议」已覆盖空态），
+          // 避免三个「暂无 ××」空段落刷屏；被筛选排除时仍保留空区作为 landmark。
+          if (!excluded && list.length === 0 && items.length > 0) return null;
           return (
             <section key={scope} aria-label={title}>
               <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-text-faint">
@@ -218,6 +318,10 @@ export function ReviewSidebar({
             </section>
           );
         })}
+        {/* 底部补空：让最后一张卡片能「往上拉」到与靠底的正文标记齐平。空态同样不挂 */}
+        {filtered.length > 0 && (
+          <div ref={bottomSpacerRef} aria-hidden className="h-[80vh] shrink-0" />
+        )}
       </div>
     </aside>
   );

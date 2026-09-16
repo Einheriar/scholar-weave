@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { gotoApp, loadSample, paragraphTexts } from "./helpers";
+import { gotoApp, loadSample, paragraphTexts, scrollCardIntoView } from "./helpers";
 
 /**
  * 核心交互流程（阶段 6 验收：核心流程在全新浏览器环境无需开发者干预即可完成）。
@@ -42,6 +42,8 @@ test.describe("核心流程：三层建议与定位", () => {
     await gotoApp(page);
     await loadSample(page);
 
+    // 侧栏是 sticky + 内部滚动容器，先显式滚进容器可视区再点（见 helpers.scrollCardIntoView）
+    await scrollCardIntoView(page, "review_edit_5");
     await card(page, "review_edit_5").click();
 
     // 卡片进入选中态
@@ -91,7 +93,8 @@ test.describe("核心流程：接受、撤销与复制", () => {
     expect(before[4]).toContain("may already been decided");
     expect(before[4]).not.toContain("may already have been decided");
 
-    // 接受
+    // 接受（先滚进侧栏可视区，sticky 容器内 Playwright 的自动滚动失效）
+    await scrollCardIntoView(page, "review_edit_1");
     await card(page, "review_edit_1")
       .getByRole("button", { name: "接受", exact: true })
       .click();
@@ -101,7 +104,8 @@ test.describe("核心流程：接受、撤销与复制", () => {
       .poll(async () => (await paragraphTexts(page))[4])
       .toContain("may already have been decided");
 
-    // 撤销（同一张卡片的“撤销”按钮）
+    // 撤销（同一张卡片的“撤销”按钮；接受后正文变化可能重排侧栏，重新滚进视野）
+    await scrollCardIntoView(page, "review_edit_1");
     await card(page, "review_edit_1")
       .getByRole("button", { name: "撤销", exact: true })
       .click();

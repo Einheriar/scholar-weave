@@ -27,6 +27,8 @@ import { locateRange } from "@/lib/anchoring";
 export type DocumentEditorHandle = {
   /** 把编辑器滚动并选中到某条建议对应的正文位置（侧栏→正文定位） */
   revealItem: (item: ReviewItem) => void;
+  /** 返回某条建议标记在视口中的纵向位置（相对 document），供侧栏对齐用 */
+  getItemViewportTop: (item: ReviewItem) => number | null;
   /** 应用一条可执行修改：替换其命中的文本范围（单条接受） */
   applyEdit: (item: ReviewItem) => boolean;
   /** 批量应用：把若干段落替换为新文本（ChangeSet 接受，阶段 4） */
@@ -42,8 +44,8 @@ export type DocumentEditorProps = {
   reviewItems?: ReviewItem[];
   /** 当前选中的建议 id（双向定位高亮） */
   selectedReviewId?: string | null;
-  /** 点击正文标记时回调（正文→侧栏定位） */
-  onSelectReview?: (id: string) => void;
+  /** 点击正文标记时回调（正文→侧栏定位），带标记的视口纵坐标供侧栏对齐 */
+  onSelectReview?: (id: string, viewportTop: number | null) => void;
   /** 选区变化回调：当前选中的（blockId, 文本），无选区时为 null（阶段 5 range 上下文） */
   onSelectionChange?: (sel: { blockId: string; text: string } | null) => void;
 };
@@ -73,6 +75,8 @@ export const DocumentEditor = forwardRef<
   const selectedRef = useRef<string | null>(selectedReviewId);
   const onSelectRef = useRef(onSelectReview);
   const onSelChangeRef = useRef(onSelectionChange);
+  /** 惰性持有 editor.view，供 extensions 闭包内访问 DOM（不进 deps，避免重建） */
+  const viewRef = useRef<Editor["view"] | null>(null);
   useEffect(() => {
     onChangeRef.current = onDocumentChange;
     docRef.current = document;
@@ -99,7 +103,23 @@ export const DocumentEditor = forwardRef<
         getConfig: (): ReviewDecorationConfig => ({
           items: reviewRef.current,
           selectedId: selectedRef.current,
-          onSelect: (id) => onSelectRef.current?.(id),
+          onSelect: (id) => {
+            const cb = onSelectRef.current;
+            if (!cb) return;
+            // 标记 span 的视口纵坐标，传「垂直中心」（top + 半高），
+            // 侧栏据此把卡片中心对齐到句子中心，而非顶部对顶部。
+            //（editor 实例经 viewRef 惰性获取，保持 extensions 的依赖封闭）
+            let center: number | null = null;
+            const root = viewRef.current?.dom;
+            const el = root?.querySelector(
+              `[data-review-id="${CSS.escape(id)}"]`,
+            );
+            if (el instanceof HTMLElement) {
+              const r = el.getBoundingClientRect();
+              center = r.top + r.height / 2;
+            }
+            cb(id, center);
+          },
         }),
       }),
     ],
@@ -171,6 +191,7 @@ export const DocumentEditor = forwardRef<
   // items / 选中项变化时触发 Decoration 重建（必须用同一个 PluginKey 作为 meta key）
   useEffect(() => {
     if (!editor) return;
+    viewRef.current = editor.view;
     const tr = editor.state.tr.setMeta(reviewDecorationKey, true);
     editor.view.dispatch(tr);
   }, [editor, reviewItems, selectedReviewId]);
@@ -199,6 +220,17 @@ export const DocumentEditor = forwardRef<
         .setTextSelection(to > from ? { from, to } : from)
         .scrollIntoView()
         .run();
+    },
+    getItemViewportTop(item) {
+      if (!editor) return null;
+      const pos = findItemPosition(editor, docRef.current, item);
+      if (pos == null) return null;
+      try {
+        const start = editor.view.coordsAtPos(pos.from);
+        return start.top;
+      } catch {
+        return null; // 位置越界等异常按无坐标处理
+      }
     },
     applyEdit(item) {
       if (!editor || item.kind !== "edit") return false;

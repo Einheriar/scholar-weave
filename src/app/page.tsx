@@ -67,7 +67,7 @@ export default function Home() {
   const [reviews, setReviews] = useState<ReviewItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
-  const [mode, setMode] = useState<ReviewMode>("deep_review");
+  const [mode, setMode] = useState<ReviewMode>("proofread");
   const [reviewUi, setReviewUi] = useState<ReviewUiState>({ phase: "idle" });
 
   // 对话与修改集
@@ -132,13 +132,19 @@ export default function Home() {
   const handleDocChange = useCallback((next: DocumentState) => {
     setDoc(next);
     setSaveState("saving");
-    // 文本变化后，无法定位的 open 建议标记过期（PLAN 10.3/10.4）
+    // 文本变化后双向校验锚点：open 定位失败标过期；stale 若因撤销/改回
+    // 重新可定位则恢复 open。只碰 open/stale 这一对——用户手动忽略的
+    // rejected 不参与，不会被误恢复（PLAN 10.3/10.4）
     setReviews((rs) =>
-      rs.map((r) =>
-        r.status === "open" && !canLocateScope(next, r.scope)
-          ? { ...r, status: "stale" as const }
-          : r,
-      ),
+      rs.map((r) => {
+        if (r.status === "open" && !canLocateScope(next, r.scope)) {
+          return { ...r, status: "stale" as const };
+        }
+        if (r.status === "stale" && canLocateScope(next, r.scope)) {
+          return { ...r, status: "open" as const };
+        }
+        return r;
+      }),
     );
   }, []);
 
@@ -278,8 +284,16 @@ export default function Home() {
   }, []);
 
   // ── 建议定位 / 状态 ──
+  // 正文标记相对视口顶部的距离（正文→侧栏对齐用），
+  // 由 handleBodySelectAnchor 以闭包捕获后交给侧栏做卡片对齐。
+  // 声明在 handleSelect 之前：后者点击侧栏卡片时要清掉 anchorTop。
+  const [anchorTop, setAnchorTop] = useState<number | null>(null);
+  const summaryRef = useRef<HTMLParagraphElement | null>(null);
+
   const handleSelect = useCallback(
     (id: string) => {
+      // 侧栏发起的选中不带正文锚点；清掉 anchorTop 防止侧栏误用上一轮的旧坐标
+      setAnchorTop(null);
       setSelectedId(id);
       const item = reviews.find((r) => r.id === id);
       if (!item) return;
@@ -288,6 +302,12 @@ export default function Home() {
         editorRef.current?.revealItem(item);
         setAnnounce(`已定位到建议：${item.title}`);
       } else {
+        // 全文建议选中时滚到「全文总结」横幅，便于对照阅读
+        //（不用 smooth：动画期间的持续位移会让「点击-定位」类 E2E 的稳定性检查超时）
+        summaryRef.current?.scrollIntoView({
+          behavior: "instant",
+          block: "nearest",
+        });
         setAnnounce(`已选中全文建议：${item.title}`);
       }
     },
@@ -302,6 +322,14 @@ export default function Home() {
       if (item) setAnnounce(`已选中正文中的建议：${item.title}`);
     },
     [reviews],
+  );
+
+  const handleBodySelectAnchor = useCallback(
+    (id: string, viewportTop: number | null) => {
+      setAnchorTop(viewportTop);
+      handleBodySelect(id);
+    },
+    [handleBodySelect, setAnchorTop],
   );
 
   // 接受某条 edit 前的文本快照（撤销时还原正文用）：reviewId → (blockId → 原文)
@@ -763,7 +791,10 @@ export default function Home() {
         </p>
       )}
       {reviewUi.phase === "done" && reviewUi.summary && (
-        <p className="animate-item-in mb-4 rounded-xl border border-border bg-surface px-4 py-2.5 text-sm text-text-muted shadow-sm">
+        <p
+          ref={summaryRef}
+          className="animate-item-in mb-4 rounded-xl border border-border bg-surface px-4 py-2.5 text-sm text-text-muted shadow-sm"
+        >
           <span className="font-medium text-foreground">全文总结：</span>
           {reviewUi.summary}
         </p>
@@ -793,7 +824,7 @@ export default function Home() {
               onDocumentChange={handleDocChange}
               reviewItems={reviews}
               selectedReviewId={selectedId}
-              onSelectReview={handleBodySelect}
+              onSelectReview={handleBodySelectAnchor}
               onSelectionChange={setSelection}
             />
 
@@ -824,10 +855,14 @@ export default function Home() {
             />
           </div>
 
-          <div className="min-h-[60vh] lg:min-h-0">
+          {/* sticky + 定高：侧栏独立于主区滚动，始终钉在视口顶部。
+              必须用 h- 而不是 max-h-：grid 子项默认 stretch，max-h 无法约束
+              子元素 aside 的内容高度，内部 overflow-y-auto 就不会真正滚动。 */}
+          <div className="sticky top-6 h-[calc(100vh-3rem)] min-h-[60vh] lg:min-h-0">
             <ReviewSidebar
               items={reviews}
               selectedId={selectedId}
+              anchorTop={anchorTop}
               onSelect={handleSelect}
               onAccept={handleAccept}
               onReject={handleReject}
