@@ -70,8 +70,30 @@ export function ContextChat({
   const [draft, setDraft] = useState("");
   const [timelineOpen, setTimelineOpen] = useState(false);
   // 抽屉常驻渲染：开之前是未挂载态，首次打开挂上播进入动画；
-  // 关闭动画播完由 NodeTimeline 的 onClosed 卸载，回到未挂载态
+  // 退出动画播完再卸载（详见 closing 推导）。
   const [timelineMounted, setTimelineMounted] = useState(false);
+  // 延迟卸载（约定 8/15）：closing 期间继续渲染，退出动画播完（onAnimationEnd）才卸载。
+  // 用「渲染期 derived state」推导 closing（同 ChatHistory.tsx:44-52 的写法，
+  // 避免在 effect 里同步 setState，触发 react-hooks/set-state-in-effect）。
+  const [prevTimelineOpen, setPrevTimelineOpen] = useState(false);
+  const [closingDone, setClosingDone] = useState(true);
+  const timelineClosing = !timelineOpen && !closingDone;
+  if (prevTimelineOpen !== timelineOpen) {
+    setPrevTimelineOpen(timelineOpen);
+    setClosingDone(timelineOpen); // 打开时收尾；关闭时进入 closing
+  }
+  // reduced-motion 下动画被 animation: none 关掉，onAnimationEnd 永远不来，
+  // 得在关的那一刻同步收尾，否则抽屉永远卸不掉（同 ChatHistory.tsx:76-81）。
+  const closeTimeline = () => {
+    if (
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      setClosingDone(true);
+      setTimelineMounted(false);
+    }
+    setTimelineOpen(false);
+  };
   const listRef = useRef<HTMLDivElement>(null);
   // 拖拽把手：记录起始高度与指针位置，pointermove 时差值调整
   const dragRef = useRef<{ startY: number; startHeight: number } | null>(null);
@@ -113,8 +135,9 @@ export function ContextChat({
     <section
       className={
         "relative flex flex-col border border-border bg-surface shadow-sm " +
-        // 时间线抽屉展开时它贴在聊天区上沿，顶部圆角让位给抽屉（视觉上连成一体）
-        (timelineOpen ? "rounded-b-2xl" : "rounded-2xl")
+        // 时间线抽屉展开时它贴在聊天区上沿，顶部圆角让位给抽屉（视觉上连成一体）。
+        // closing 期间抽屉还在，同样让位，免得收起动画播到一半上面先变圆角。
+        (timelineOpen || timelineClosing ? "rounded-b-2xl" : "rounded-2xl")
       }
       aria-label="上下文对话"
     >
@@ -128,9 +151,13 @@ export function ContextChat({
           <button
             type="button"
             onClick={() => {
-              // 首次打开才挂载抽屉（之后常驻播进/出动画，closing 播完才卸载）
-              setTimelineMounted(true);
-              setTimelineOpen((v) => !v);
+              // 首次打开才挂载抽屉；之后打开播进入动画、关闭走退出动画后卸载
+              if (timelineOpen) {
+                closeTimeline();
+              } else {
+                setTimelineMounted(true);
+                setTimelineOpen(true);
+              }
             }}
             aria-label="聊天节点历史"
             aria-expanded={timelineOpen}
@@ -192,51 +219,55 @@ export function ContextChat({
         </div>
       </div>
 
-      {/* 顶部拖拽把手：按住上/下拖调整聊天区高度（用户可控大小） */}
-      {!minimized && (
-        <button
-          type="button"
-          onPointerDown={(e) => {
-            dragRef.current = { startY: e.clientY, startHeight: panelHeight };
-            e.currentTarget.setPointerCapture?.(e.pointerId);
-          }}
-          aria-label="调整聊天区高度"
-          title="按住上下拖动，调整聊天区高度"
-          className="group flex w-full cursor-ns-resize touch-none items-center justify-center border-b border-border py-1 transition-colors hover:bg-surface-muted"
-        >
-          <span className="h-1 w-10 rounded-full bg-border-strong transition-colors group-hover:bg-text-faint" />
-        </button>
-      )}
+      {/* 身体：常驻渲染，用 grid-template-rows 0fr↔1fr 过渡做收起/展开高度动画。
+          minimized 时塌成 0 高（内容 overflow hidden 裁掉），展开时撑满。
+          把手、stale 提示、消息列表、输入框都常驻，靠行高压住而不是卸载——
+          否则高度没过渡可动画（条件卸载是瞬间的）。 */}
+      <div className={"chat-body" + (minimized ? " chat-body-min" : "")}>
+        <div>
+          {/* 顶部拖拽把手：按住上/下拖调整聊天区高度（用户可控大小） */}
+          <button
+            type="button"
+            onPointerDown={(e) => {
+              dragRef.current = { startY: e.clientY, startHeight: panelHeight };
+              e.currentTarget.setPointerCapture?.(e.pointerId);
+            }}
+            aria-label="调整聊天区高度"
+            title="按住上下拖动，调整聊天区高度"
+            className="group flex w-full cursor-ns-resize touch-none items-center justify-center border-b border-border py-1 transition-colors hover:bg-surface-muted"
+          >
+            <span className="h-1 w-10 rounded-full bg-border-strong transition-colors group-hover:bg-text-faint" />
+          </button>
 
-      {anchorStale && !minimized && (
-        <p className="mx-3.5 mt-3 rounded-lg bg-surface-muted px-3 py-2 text-xs text-text-muted">
-          原文已变更，以下为存档讨论
-        </p>
-      )}
+          {anchorStale && (
+            <p className="mx-3.5 mt-3 rounded-lg bg-surface-muted px-3 py-2 text-xs text-text-muted">
+              原文已变更，以下为存档讨论
+            </p>
+          )}
 
-      {!minimized && turns.length > 0 && (
-        <div
-          ref={listRef}
-          className="flex-1 space-y-2.5 overflow-y-auto px-3.5 py-3"
-          style={{ minHeight: 0, maxHeight: Math.max(120, panelHeight - 160) }}
-        >
-          {turns.map((t, i) => (
+          {turns.length > 0 && (
             <div
-              key={i}
-              data-turn-index={i}
-              className={
-                "animate-item-in px-3 py-2 text-sm shadow-sm " +
-                (t.role === "user"
-                  ? "ml-10 rounded-2xl rounded-br-sm bg-brand text-white dark:text-neutral-950"
-                  : "mr-10 rounded-2xl rounded-bl-sm bg-surface-muted text-foreground")
-              }
+              ref={listRef}
+              className="flex-1 space-y-2.5 overflow-y-auto px-3.5 py-3"
+              style={{ minHeight: 0, maxHeight: Math.max(120, panelHeight - 160) }}
             >
-              <div className="break-words leading-relaxed">
-                {renderMiniMarkdown(t.content)}
-              </div>
-              {t.changeSet && (
-                <button
-                  type="button"
+              {turns.map((t, i) => (
+                <div
+                  key={i}
+                  data-turn-index={i}
+                  className={
+                    "animate-item-in px-3 py-2 text-sm shadow-sm " +
+                    (t.role === "user"
+                      ? "ml-10 rounded-2xl rounded-br-sm bg-brand text-white dark:text-neutral-950"
+                      : "mr-10 rounded-2xl rounded-bl-sm bg-surface-muted text-foreground")
+                  }
+                >
+                  <div className="break-words leading-relaxed">
+                    {renderMiniMarkdown(t.content)}
+                  </div>
+                  {t.changeSet && (
+                    <button
+                      type="button"
                   onClick={() => onPreviewChangeSet(t.changeSet!)}
                   className={
                     "mt-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors " +
@@ -260,54 +291,57 @@ export function ContextChat({
               正在思考…
             </p>
           )}
+            </div>
+          )}
+
+          <div className="flex items-end gap-2 border-t border-border p-2.5">
+            <textarea
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  submit();
+                }
+              }}
+              placeholder={
+                sendDisabled
+                  ? "先选中正文中的词/段落，或选中一条建议，再提问…"
+                  : `针对${contextLabel}询问 LLM……（Enter 发送，Shift+Enter 换行）`
+              }
+              rows={2}
+              className="flex-1 resize-none rounded-xl border border-border bg-transparent px-3 py-2 text-sm transition-colors focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand-ring"
+              aria-label="对话输入框"
+            />
+            <button
+              type="button"
+              onClick={submit}
+              disabled={busy || !draft.trim() || sendDisabled}
+              title={sendDisabled ? "请先选中正文或一条建议" : undefined}
+              className={buttonClass("primary", "md")}
+            >
+              发送
+            </button>
+          </div>
         </div>
-      )}
-
-      {!minimized && (
-      <div className="flex items-end gap-2 border-t border-border p-2.5">
-        <textarea
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              submit();
-            }
-          }}
-          placeholder={
-            sendDisabled
-              ? "先选中正文中的词/段落，或选中一条建议，再提问…"
-              : `针对${contextLabel}询问 LLM……（Enter 发送，Shift+Enter 换行）`
-          }
-          rows={2}
-          className="flex-1 resize-none rounded-xl border border-border bg-transparent px-3 py-2 text-sm transition-colors focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand-ring"
-          aria-label="对话输入框"
-        />
-        <button
-          type="button"
-          onClick={submit}
-          disabled={busy || !draft.trim() || sendDisabled}
-          title={sendDisabled ? "请先选中正文或一条建议" : undefined}
-          className={buttonClass("primary", "md")}
-        >
-          发送
-        </button>
       </div>
-      )}
 
-      {/* 常驻渲染：抽屉靠 open/closing 播进/出动画，closing 播完由 onClosed 卸载 */}
+      {/* 常驻渲染：抽屉换 closing 关键帧播退出动画，播完由 onClosingEnd 卸载 */}
       {timelineMounted && (
         <NodeTimeline
           nodes={nodes}
           activeNodeId={activeNode?.id ?? null}
-          open={timelineOpen}
-          onClosed={() => setTimelineMounted(false)}
+          closing={timelineClosing}
+          onClosingEnd={() => {
+            setClosingDone(true);
+            setTimelineMounted(false);
+          }}
           onJump={(nodeId, turnIndex) => {
-            setTimelineOpen(false);
+            closeTimeline();
             onJumpToTurn(nodeId, turnIndex);
           }}
           onDeleteNode={onDeleteNode}
-          onClose={() => setTimelineOpen(false)}
+          onClose={closeTimeline}
         />
       )}
     </section>

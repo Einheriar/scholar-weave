@@ -11,8 +11,11 @@ export type ChangeSetPreviewProps = {
   document: DocumentState;
   /** 接受选中的修改（参数为被选中的 edit id 列表） */
   onAccept: (editIds: string[]) => void;
-  /** 放弃整个修改集 */
+  /** 放弃整个修改集（触发关闭动画，播完由 onClosed 卸载） */
   onDiscard: () => void;
+  /** 显隐：常驻渲染，靠 className 播进/出动画，closing 播完才卸载 */
+  open: boolean;
+  onClosed: () => void;
 };
 
 /**
@@ -25,6 +28,8 @@ export function ChangeSetPreview({
   document: doc,
   onAccept,
   onDiscard,
+  open,
+  onClosed,
 }: ChangeSetPreviewProps) {
   const { applicable, rejected } = useMemo(
     () => prepareChangeSet(doc, changeSet),
@@ -49,6 +54,21 @@ export function ChangeSetPreview({
     return () => previous?.focus?.();
   }, []);
 
+  // 关闭：下一帧把进入动画换成退出动画（延迟卸载，约定 8/15），播完由 onClosed 卸载；
+  // 重新打开时清掉退出标记，动画从头播
+  useEffect(() => {
+    const el = panelRef.current;
+    if (!el) return;
+    if (open) {
+      el.classList.remove("animate-item-out");
+    } else {
+      const raf = requestAnimationFrame(() => {
+        el.classList.add("animate-item-out");
+      });
+      return () => cancelAnimationFrame(raf);
+    }
+  }, [open]);
+
   const toggle = (id: string) =>
     setChecked((prev) => {
       const next = new Set(prev);
@@ -70,6 +90,11 @@ export function ChangeSetPreview({
       className="animate-item-in rounded-2xl border border-brand-ring bg-brand-soft/60 p-4 text-sm shadow-sm"
       role="dialog"
       aria-labelledby="changeset-preview-title"
+      onAnimationEnd={(e) => {
+        if (e.target === e.currentTarget && e.animationName === "item-fade-out") {
+          onClosed();
+        }
+      }}
       onKeyDown={(e) => {
         if (e.key === "Escape") {
           e.stopPropagation();

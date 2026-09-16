@@ -176,20 +176,28 @@ body {
 .animate-item-in {
   animation: item-fade-in 0.25s ease-out;
 }
+/* 条目淡出（item-fade-in 的反向）：修改集预览关闭时延迟卸载播放 */
+@keyframes item-fade-out {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(4px); }
+}
+.animate-item-out {
+  animation: item-fade-out 0.18s ease-in forwards;
+}
 
-/* 聊天节点时间线抽屉：下拉式浮现（scale 97%→100% + opacity 淡入），
-   锚点在底部中心（从聊天区头部向上展开）。
-   关闭走 timeline-dropdown-closing 的反向过渡（150ms 轻微回缩 + 淡出），
-   需要「closing 状态延迟卸载」——条件渲染会在关闭瞬间卸载节点，过渡根本没机会播。
-   有意沿用 opacity 淡入：抽屉有实底（bg-surface）+ 阴影，不叠加在正文上，
-   半透明阶段不会透叠出横线（此前 translateY 方案才会）。 */
+/* 聊天节点时间线抽屉：下拉式浮现（scale 97%→100% + opacity 淡入，锚点底部中心，
+   从聊天区头部向上展开），关闭走反向淡出微缩（150ms）。
+   需要「closing 状态延迟卸载」——条件渲染会在关闭瞬间卸载节点，退出动画没机会播（约定 8/15）。
+   opacity 淡出按参考的 dropdown 方案保留，但收口刻意停在 opacity 0.01 + scale 0.98、
+   不到 0 / 0.99：opacity 真到 0 时元素完全透明、透出背后正文形成鬼影，卸载瞬间又消失，
+   看起来像闪了一下；停在 0.01 足够淡、又不至于透字。与进入对称也用 0.98 而非 0.97。 */
 @keyframes timeline-dropdown-in {
   from { transform: scale(0.97); opacity: 0; }
   to { transform: scale(1); opacity: 1; }
 }
 @keyframes timeline-dropdown-out {
   from { transform: scale(1); opacity: 1; }
-  to { transform: scale(0.99); opacity: 0; }
+  to { transform: scale(0.98); opacity: 0.01; }
 }
 .animate-timeline-dropdown {
   transform-origin: bottom center;
@@ -200,12 +208,30 @@ body {
   animation: timeline-dropdown-out 150ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+/* 聊天区最小化/展开的高度动画。用 grid-template-rows 的 0fr↔1fr 过渡，纯 CSS、
+   不依赖测高度：0fr 时行高塌成 0（内容 overflow hidden），1fr 时撑满。内层
+   min-h-0 让子元素能被行高压住、overflow-hidden 裁掉——这是该技巧能生效的关键。
+   与消息气泡的 animate-item-in（上浮淡入）呼应，展开从底部往上升。 */
+.chat-body {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.chat-body-min {
+  grid-template-rows: 0fr;
+}
+.chat-body > div {
+  min-height: 0;
+  overflow: hidden;
+}
+
 @media (prefers-reduced-motion: reduce) {
   html { transition: none; }
-  .animate-modal-fade, .animate-modal-pop, .animate-item-in,
+  .animate-modal-fade, .animate-modal-pop, .animate-item-in, .animate-item-out,
   .animate-drawer-in, .animate-drawer-out, .animate-modal-fade-out,
   .animate-timeline-dropdown, .animate-timeline-dropdown-closing,
   .animate-tooltip-rise { animation: none; }
+  .chat-body { transition: none; }
 }
 
 /* ── 审阅建议的编辑器标记（阶段 2）──────────────────────────────

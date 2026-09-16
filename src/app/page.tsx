@@ -82,6 +82,9 @@ export default function Home() {
   const [chatError, setChatError] = useState<string | null>(null);
   const [applyingOpinionId, setApplyingOpinionId] = useState<string | null>(null);
   const [activeChangeSet, setActiveChangeSet] = useState<ChangeSet | null>(null);
+  // 修改集预览框常驻渲染：open 驱动进/出动画，播完由 onClosed 卸载
+  const [changeSetOpen, setChangeSetOpen] = useState(false);
+  const [changeSetMounted, setChangeSetMounted] = useState(false);
   const [copyState, setCopyState] = useState<"idle" | "copied">("idle");
   /** 供屏幕阅读器播报的状态文本（定位、快捷键等） */
   const [announce, setAnnounce] = useState("");
@@ -256,7 +259,7 @@ export default function Home() {
       setChatTurns(lastNode?.turns ?? []);
       setSelectedId(null);
       setChatError(null);
-      setActiveChangeSet(null);
+      setChangeSetOpen(false);
       setSaveState("idle");
       // 窄屏从抽屉里选完就收起；宽屏左栏常驻，这个 state 本来也不生效
       setHistoryOpen(false);
@@ -284,7 +287,7 @@ export default function Home() {
     setChatTurns([]);
     setSelectedId(null);
     setChatError(null);
-    setActiveChangeSet(null);
+    setChangeSetOpen(false);
     setHistoryOpen(false);
     setSaveState("saving");
     setAnnounce("已开始新文章。");
@@ -818,6 +821,16 @@ export default function Home() {
     [nodes],
   );
 
+  // 打开：挂上预览框（未挂载态）并播进入动画；收起：只关 open 播退出动画，
+  // 播完由 ChangeSetPreview 的 onClosed 卸载（延迟卸载，约定 8/15）。
+  // 所有关闭路径（接受/放弃/新建/切文章/回复到达新修改集）都走收起，不直接卸载。
+  const openChangeSet = useCallback((cs: ChangeSet) => {
+    setActiveChangeSet(cs);
+    setChangeSetMounted(true);
+    setChangeSetOpen(true);
+  }, []);
+  const closeChangeSet = useCallback(() => setChangeSetOpen(false), []);
+
   // ── 按意见生成修改集（opinion → ChangeSet）──
   const applyOpinion = useCallback(
     async (id: string) => {
@@ -862,14 +875,14 @@ export default function Home() {
         if (!res.ok) {
           throw new Error(data?.error?.message ?? `生成修改失败（HTTP ${res.status}）`);
         }
-        setActiveChangeSet(data.changeSet as ChangeSet);
+        openChangeSet(data.changeSet as ChangeSet);
       } catch (e) {
         setChatError(e instanceof Error ? e.message : "生成修改集失败。");
       } finally {
         setApplyingOpinionId(null);
       }
     },
-    [doc, reviews, packBlocks, settings],
+    [doc, reviews, packBlocks, settings, openChangeSet],
   );
 
   // ── 修改集：接受选中 / 放弃 ──
@@ -892,12 +905,12 @@ export default function Home() {
           ),
         );
       }
-      setActiveChangeSet(null);
+      closeChangeSet();
     },
-    [doc, activeChangeSet],
+    [doc, activeChangeSet, closeChangeSet],
   );
 
-  const discardChangeSet = useCallback(() => setActiveChangeSet(null), []);
+  const discardChangeSet = useCallback(() => closeChangeSet(), [closeChangeSet]);
 
   // ── 复制全文 / 清空数据 ──
   const copyAll = useCallback(async () => {
@@ -926,7 +939,7 @@ export default function Home() {
     setProjects([]);
     activeProjRef.current = null;
     setActiveProjId(null);
-    setActiveChangeSet(null);
+    setChangeSetOpen(false);
     setSelectedId(null);
     setReviewUi({ phase: "idle" });
     setSaveState("saving");
@@ -1112,11 +1125,14 @@ export default function Home() {
               onSelectChatAnchor={handleSelectChatAnchor}
             />
 
-            {/* 修改集预览（对话或按意见生成时弹出） */}
-            {activeChangeSet && (
+            {/* 修改集预览（对话或按意见生成时弹出）。常驻渲染：open 驱动进/出动画，
+                退出动画播完由 onClosed 卸载（延迟卸载，约定 8/15） */}
+            {changeSetMounted && activeChangeSet && (
               <ChangeSetPreview
                 changeSet={activeChangeSet}
                 document={doc}
+                open={changeSetOpen}
+                onClosed={() => setChangeSetMounted(false)}
                 onAccept={acceptChangeSet}
                 onDiscard={discardChangeSet}
               />
@@ -1147,7 +1163,7 @@ export default function Home() {
                 minimized={chatMinimized}
                 onToggleMinimize={() => setChatMinimized((v) => !v)}
                 onSend={sendChat}
-                onPreviewChangeSet={(cs) => setActiveChangeSet(cs)}
+                onPreviewChangeSet={openChangeSet}
                 panelHeight={chatHeight}
                 onResize={handleChatResize}
                 onJumpToTurn={handleJumpToTurn}

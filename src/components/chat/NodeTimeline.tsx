@@ -13,9 +13,9 @@ export type NodeTimelineProps = {
   /** 行内删除该节点全部讨论（规则 13，直接删不弹确认） */
   onDeleteNode: (nodeId: string) => void;
   onClose: () => void;
-  /** 抽屉显隐：常驻渲染，靠 className 播进/出动画，closing 播完才卸载 */
-  open: boolean;
-  onClosed: () => void;
+  /** 正在播退出动画：换用 -closing 关键帧，播完由 onClosingEnd 通知父组件收尾（约定 8/15） */
+  closing: boolean;
+  onClosingEnd: () => void;
 };
 
 type HoverInfo = { row: number; node: ChatNode; content: string };
@@ -42,12 +42,28 @@ export function NodeTimeline({
   onJump,
   onDeleteNode,
   onClose,
-  open,
-  onClosed,
+  closing,
+  onClosingEnd,
 }: NodeTimelineProps) {
-  const drawerRef = useRef<HTMLDivElement>(null);
   // 当前 hover 的端点：{row 行索引, 摘要内容}，驱动悬浮 tooltip 与行联动高亮
   const [hover, setHover] = useState<HoverInfo | null>(null);
+  const drawerRef = useRef<HTMLDivElement>(null);
+
+  // closing 时把进入动画换成退出动画（互斥，不叠加——两个 both 填充的动画同时
+  // 设置 transform/transform-origin 会互相干扰，抽屉会卡在半透明的鬼影态）。
+  // 直接同步切换 class：进入和退出的 scale 都只差 3%，从中途切换的轻微回跳肉眼
+  // 几乎不可察觉，不值得为此引入 rAF（后台标签会冻结 rAF，反而把退出类卡丢）。
+  useEffect(() => {
+    const el = drawerRef.current;
+    if (!el) return;
+    if (closing) {
+      el.classList.remove("animate-timeline-dropdown");
+      el.classList.add("animate-timeline-dropdown-closing");
+    } else {
+      el.classList.remove("animate-timeline-dropdown-closing");
+      el.classList.add("animate-timeline-dropdown");
+    }
+  }, [closing]);
 
   // Escape 关闭（可访问性）。不做自动聚焦/焦点归还：抽屉由头部按钮 toggle 开合，
   // 强行移动焦点反而会在「再按一次按钮收起」时抢焦点。
@@ -58,23 +74,6 @@ export function NodeTimeline({
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
-
-  // closing 动画播完后才真正卸载（延迟卸载，约定 8/15）；
-  // 打开时清掉残留的 closing 标记，重复开抽屉动画从头播。
-  // 加在抽屉外壳（animate-timeline-dropdown 所在元素）上；effect 同步触发时
-  // 进入动画可能还在播，延迟一帧再切换，避免从进入动画中途硬切到关闭。
-  useEffect(() => {
-    const el = drawerRef.current;
-    if (!el) return;
-    if (open) {
-      el.classList.remove("animate-timeline-dropdown-closing");
-    } else {
-      const raf = requestAnimationFrame(() => {
-        el.classList.add("animate-timeline-dropdown-closing");
-      });
-      return () => cancelAnimationFrame(raf);
-    }
-  }, [open]);
 
   // 按节点创建时间排序（规则 17）
   const sorted = [...nodes].sort((a, b) =>
@@ -95,11 +94,14 @@ export function NodeTimeline({
       }}
       className="absolute inset-x-0 bottom-full z-30 max-h-[42vh] overflow-y-auto rounded-t-2xl border border-border bg-surface shadow-[0_-10px_24px_-14px_rgb(0_0_0/0.28)] animate-timeline-dropdown"
       onAnimationEnd={(e) => {
+        // 只认退出动画结束、且是本层（不是冒泡上来的子元素动画）才收尾。
+        // reduced-motion 下 animation: none 不会有这个事件，由父组件同步收尾。
         if (
+          closing &&
           e.target === e.currentTarget &&
           e.animationName === "timeline-dropdown-out"
         ) {
-          onClosed();
+          onClosingEnd();
         }
       }}
       role="dialog"
