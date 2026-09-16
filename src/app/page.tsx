@@ -1113,7 +1113,7 @@ export default function Home() {
           onOpenChange={setHistoryOpen}
         />
 
-        <div className="grid min-w-0 flex-1 grid-cols-1 items-start gap-6 lg:grid-cols-[1fr_360px]">
+        <div className="grid min-w-0 flex-1 grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(750px,1fr)_360px]">
           <div className="flex min-w-0 flex-col gap-4">
             <DocumentEditor
               ref={editorRef}

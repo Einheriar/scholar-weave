@@ -43,6 +43,9 @@ yarn-error.log*
 # vercel
 .vercel
 
+# 字体源文件（TTF/woff2 原始包，构建用 src/app/fonts/ 下的副本即可）
+/font
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

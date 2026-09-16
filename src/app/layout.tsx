@@ -1,12 +1,23 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import localFont from "next/font/local";
+import { Geist_Mono } from "next/font/google";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
+// 中文 UI + 编辑区（CJK 字符优先命中）
+const misans = localFont({
+  src: "./fonts/MiSans-Regular.woff2",
+  variable: "--font-misans",
+  weight: "400",
 });
 
+// 英文编辑区（Latin 字符优先命中，可变字体 100-900）
+const inter = localFont({
+  src: "./fonts/InterVariable.woff2",
+  variable: "--font-inter",
+  weight: "100 900",
+});
+
+// 保留等宽字体（API 预设徽标、设置面板代码框、mini-markdown 行内代码仍在用）
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
@@ -20,9 +31,9 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
-      lang="en"
+      lang="zh-CN"
       suppressHydrationWarning
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${misans.variable} ${inter.variable} ${geistMono.variable} h-full antialiased`}
     >
       <head>
         {/* 首帧前恢复用户手动选择的主题（ThemeToggle 存于 localStorage），避免深色闪白 */}
