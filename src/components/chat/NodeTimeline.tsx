@@ -17,12 +17,21 @@ export type NodeTimelineProps = {
 
 type HoverInfo = { row: number; node: ChatNode; content: string };
 
+/** 端点（= 一次提问）在尺子上的固定横向间距 px——端点像刻度一样从左往右排，间距不随提问数变化 */
+const TICK_GAP = 26;
+/** hover 两端箭头时尺子卷动的像素/帧 */
+const PAN_STEP = 2;
+
 /**
  * 节点时间线抽屉（规则 14-19）：一条横线 = 一个节点，线上端点 = 一次提问，
  * 多条线并列 = 多个节点。不常驻界面，是「地图 / 目录」。
  * 从聊天区顶部向上抽出、与聊天区外壳连成一体的抽屉（不是屏幕居中弹窗）：
  * 底部衔接聊天区头部、往上展开，点击外部收起。行内不带常驻摘要文字；
  * hover 端点即时浮出锚点摘要 + 该次提问内容（规则 16）；按节点创建时间排序。
+ *
+ * 端点排布：左对齐、固定间距（TICK_GAP），像尺子刻度一样从起点往右累加——
+ * 不用百分比摊匀（摊匀会让端点位置随提问数乱变，1 问居中、2 问挤两头，反直觉）。
+ * 端点太多放不下时，两端出现 hover 卷轴箭头，悬停即平滑卷动整条尺子。
  */
 export function NodeTimeline({
   nodes,
@@ -61,12 +70,13 @@ export function NodeTimeline({
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
-            className="absolute inset-x-0 bottom-full z-30 max-h-[42vh] overflow-y-auto rounded-t-2xl border border-border bg-surface shadow-[0_-10px_24px_-14px_rgb(0_0_0/0.28)] animate-timeline-rise"
+      className="absolute inset-x-0 bottom-full z-30 max-h-[42vh] overflow-y-auto rounded-t-2xl border border-border bg-surface shadow-[0_-10px_24px_-14px_rgb(0_0_0/0.28)] animate-timeline-rise"
       role="dialog"
       aria-label="聊天节点历史"
     >
       <div ref={panelRef}>
-        <div className="sticky top-0 flex items-center justify-between border-b border-border bg-surface px-4 py-2">
+        {/* 标题行：与列表之间不要分割线（抽屉与聊天区已一体，再切一刀是多余的） */}
+        <div className="sticky top-0 flex items-center justify-between bg-surface px-4 pt-2.5 pb-1">
           <h2 className="text-xs font-semibold tracking-tight text-text-muted">
             聊天节点
           </h2>
@@ -90,100 +100,29 @@ export function NodeTimeline({
               还没有聊天节点。选中正文里的词或段落提问后，这里会出现对应的讨论线。
             </li>
           )}
-          {sorted.map((node, row) => {
-            const isActive = node.id === activeNodeId;
-            const turns = node.turns;
-            const userTurnCount = turns.filter((t) => t.role === "user").length;
-            const nodeTitle = deriveNodeTitle(node);
-            const hoverCls = isActive
-              ? "hover:bg-[color-mix(in_srgb,var(--node)_18%,var(--surface))]"
-              : "hover:bg-node-soft";
-            return (
-              <li
-                key={node.id}
-                className={
-                  "flex items-center gap-2 rounded-lg px-3 py-1.5 transition-colors " +
-                  (isActive ? "bg-node-soft " : "") +
-                  (hover?.row === row || isActive ? hoverCls : "")
-                }
-              >
-                {/* 节点身份竖条（琥珀；当前节点深一号）——竖条而非圆点，
-                    与轨道上的提问端点形态区分，避免被误认成「多一次提问」 */}
-                <span
-                  className={
-                    "h-4 w-[3px] shrink-0 rounded-full " +
-                    (isActive ? "bg-node-hover" : "bg-node")
-                  }
-                  aria-hidden
-                />
-                {/* 横线轨道 + 端点（端点 = 提问，颜色同节点色，沿轨道均匀分布） */}
-                <div className="relative h-0.5 min-w-16 flex-1 rounded-full bg-border-strong">
-                  {turns.map((t, i) => {
-                    // 只给用户提问画端点；均匀分布在轨道上
-                    if (t.role !== "user") return null;
-                    const userIdx = turns
-                      .slice(0, i + 1)
-                      .filter((x) => x.role === "user").length;
-                    const total = Math.max(1, userTurnCount);
-                    const left = total === 1 ? 50 : (userIdx - 1) * (100 / (total - 1));
-                    return (
-                      <button
-                        key={i}
-                        type="button"
-                        onClick={() => onJump(node.id, i)}
-                        onMouseEnter={() => showTip(row, node, t.content)}
-                        onMouseLeave={() => setHover(null)}
-                        onFocus={() => showTip(row, node, t.content)}
-                        onBlur={() => setHover(null)}
-                        aria-label={`跳到节点「${nodeTitle}」第 ${userIdx} 次提问：${t.content}`}
-                        className={
-                          "absolute top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 cursor-pointer rounded-full transition-all duration-150 focus-visible:outline-none " +
-                          (isActive ? "bg-node-hover" : "bg-node") +
-                          " hover:scale-150 hover:shadow-[0_0_0_4px_var(--node-soft),0_0_10px_2px_var(--node-ring)] focus-visible:scale-150 focus-visible:shadow-[0_0_0_4px_var(--node-soft),0_0_10px_2px_var(--node-ring)]"
-                        }
-                        style={{ left: `${left}%` }}
-                      />
-                    );
-                  })}
-                </div>
-                <span className="shrink-0 text-[11px] tabular-nums text-text-faint">
-                  {userTurnCount} 问
-                </span>
-                {/* 行内删除（规则 13：删该行全部讨论，直接删不弹确认） */}
-                <button
-                  type="button"
-                  onClick={() => onDeleteNode(node.id)}
-                  aria-label="删除该节点讨论"
-                  title="删除该节点讨论"
-                  className="shrink-0 rounded-md p-1 text-text-faint transition-colors hover:bg-surface hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring dark:hover:text-red-400"
-                >
-                  <svg
-                    width="14"
-                    height="14"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    aria-hidden
-                  >
-                    <line x1="18" y1="6" x2="6" y2="18" />
-                    <line x1="6" y1="6" x2="18" y2="18" />
-                  </svg>
-                </button>
-              </li>
-            );
-          })}
+          {sorted.map((node, row) => (
+            <NodeRow
+              key={node.id}
+              node={node}
+              isActive={node.id === activeNodeId}
+              dimmed={hover !== null && hover.row !== row}
+              lit={hover?.row === row}
+              onShowTip={(content) => showTip(row, node, content)}
+              onHideTip={() => setHover(null)}
+              onJump={onJump}
+              onDeleteNode={onDeleteNode}
+            />
+          ))}
         </ul>
 
         {/* hover 端点悬浮摘要（规则 16）：锚点摘要 + 该次提问内容截断，即时出现。
-            绝对定位悬浮层钉在抽屉顶部（标题栏正下方），脱离文档流——若放进流内，
-            出现/消失会把行撑开，端点随布局位移，鼠标离开端点又触发收起，循环闪烁。
-            置顶而非置底：置底会盖住节点行。pointer-events-none 保证鼠标穿过它。 */}
+            绝对定位悬浮层、顶到与标题行同一高度，不压任何节点行；脱离文档流——
+            放进流内会把行撑开、端点位移、hover 循环闪烁（踩过的坑）。
+            pointer-events-none 保证鼠标穿过它。 */}
         {hover && (
           <div
             role="tooltip"
-            className="pointer-events-none absolute inset-x-3 top-10 z-10 w-fit max-w-full animate-tooltip-rise rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs shadow-md"
+            className="pointer-events-none absolute left-3 top-1.5 z-10 w-fit max-w-[calc(100%-3.5rem)] animate-tooltip-rise rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs shadow-md"
           >
             <span className="font-medium text-foreground">「{deriveNodeTitle(hover.node)}」</span>
             <span className="mx-1.5 text-text-faint" aria-hidden>·</span>
@@ -192,6 +131,205 @@ export function NodeTimeline({
         )}
       </div>
     </div>
+  );
+}
+
+/** 单行：节点身份竖条 + 尺子轨道（端点 = 提问，左对齐固定间距，溢出两端 hover 卷轴）+ N 问 + 删除 */
+function NodeRow({
+  node,
+  isActive,
+  dimmed,
+  lit,
+  onShowTip,
+  onHideTip,
+  onJump,
+  onDeleteNode,
+}: {
+  node: ChatNode;
+  isActive: boolean;
+  /** 其它行正被 hover：本行压暗，突出焦点那行 */
+  dimmed: boolean;
+  /** 本行正被 hover（端点上）：提亮 */
+  lit: boolean;
+  onShowTip: (content: string) => void;
+  onHideTip: () => void;
+  onJump: (nodeId: string, turnIndex: number) => void;
+  onDeleteNode: (nodeId: string) => void;
+}) {
+  const turns = node.turns;
+  const userTurns = turns
+    .map((t, i) => ({ t, i }))
+    .filter(({ t }) => t.role === "user");
+  const userTurnCount = userTurns.length;
+  const nodeTitle = deriveNodeTitle(node);
+
+  // 尺子卷轴：scrollLeft 状态驱动两端箭头显隐
+  const rulerRef = useRef<HTMLDivElement>(null);
+  const [canLeft, setCanLeft] = useState(false);
+  const [canRight, setCanRight] = useState(false);
+  const panRef = useRef<number | null>(null);
+
+  const syncArrows = () => {
+    const el = rulerRef.current;
+    if (!el) return;
+    setCanLeft(el.scrollLeft > 1);
+    setCanRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 1);
+  };
+  // 挂载与端点数变化时量一次（内容超宽才可能有箭头）
+  useEffect(() => {
+    syncArrows();
+    const el = rulerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(syncArrows);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [userTurnCount]);
+
+  // 悬停箭头 → 持续卷动尺子（rAF 循环），移开即停
+  const startPan = (dir: 1 | -1) => {
+    stopPan();
+    const step = () => {
+      const el = rulerRef.current;
+      if (!el) return;
+      el.scrollLeft += dir * PAN_STEP;
+      panRef.current = requestAnimationFrame(step);
+    };
+    panRef.current = requestAnimationFrame(step);
+  };
+  const stopPan = () => {
+    if (panRef.current !== null) cancelAnimationFrame(panRef.current);
+    panRef.current = null;
+  };
+  useEffect(() => stopPan, []);
+
+  const rowBg = isActive ? "bg-node-soft" : "";
+  const rowHover = isActive
+    ? "hover:bg-[color-mix(in_srgb,var(--node)_18%,var(--surface))]"
+    : "hover:bg-node-soft";
+  return (
+    <li
+      className={
+        "flex items-center gap-2 rounded-lg px-3 py-1.5 transition-all duration-200 " +
+        rowBg +
+        " " +
+        (lit || isActive ? rowHover : "") +
+        (dimmed ? " opacity-60" : "")
+      }
+    >
+      {/* 节点身份竖条（琥珀；当前节点深一号）——竖条而非圆点，
+          与轨道上的提问端点形态区分，避免被误认成「多一次提问」 */}
+      <span
+        className={
+          "h-4 w-[3px] shrink-0 rounded-full " +
+          (isActive ? "bg-node-hover" : "bg-node")
+        }
+        aria-hidden
+      />
+
+      {/* 尺子轨道：横向可滚，端点左对齐固定间距；scrollbar 隐藏，靠两端箭头卷动 */}
+      <div className="relative min-w-16 flex-1">
+        <div
+          ref={rulerRef}
+          onScroll={syncArrows}
+          className="timeline-ruler overflow-x-auto overflow-y-hidden"
+        >
+          {/* 轨道线拉满内容宽度，端点按刻度依次排列 */}
+          <div
+            className="relative h-4"
+            style={{ width: Math.max(48, userTurnCount * TICK_GAP + 32) }}
+          >
+            <div className="absolute inset-x-0 top-1/2 h-0.5 -translate-y-1/2 rounded-full bg-border-strong" />
+            {userTurns.map(({ t, i }, k) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => onJump(node.id, i)}
+                onMouseEnter={() => onShowTip(t.content)}
+                onMouseLeave={onHideTip}
+                onFocus={() => onShowTip(t.content)}
+                onBlur={onHideTip}
+                aria-label={`跳到节点「${nodeTitle}」第 ${k + 1} 次提问：${t.content}`}
+                className={
+                  "absolute top-1/2 h-2 w-2 -translate-y-1/2 cursor-pointer rounded-full transition-all duration-150 focus-visible:outline-none " +
+                  (isActive ? "bg-node-hover" : "bg-node") +
+                  " hover:scale-150 hover:shadow-[0_0_0_4px_var(--node-soft),0_0_10px_2px_var(--node-ring)] focus-visible:scale-150 focus-visible:shadow-[0_0_0_4px_var(--node-soft),0_0_10px_2px_var(--node-ring)]"
+                }
+                style={{ left: 16 + k * TICK_GAP }}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* 左卷轴箭头：有内容被卷到左边时出现，悬停持续回卷 */}
+        {canLeft && (
+          <PanArrow dir={-1} onEnter={() => startPan(-1)} onLeave={stopPan} />
+        )}
+        {/* 右卷轴箭头：后面还有端点时出现，悬停持续前卷 */}
+        {canRight && (
+          <PanArrow dir={1} onEnter={() => startPan(1)} onLeave={stopPan} />
+        )}
+      </div>
+
+      <span className="shrink-0 text-[11px] tabular-nums text-text-faint">
+        {userTurnCount} 问
+      </span>
+      {/* 行内删除（规则 13：删该行全部讨论，直接删不弹确认） */}
+      <button
+        type="button"
+        onClick={() => onDeleteNode(node.id)}
+        aria-label="删除该节点讨论"
+        title="删除该节点讨论"
+        className="shrink-0 rounded-md p-1 text-text-faint transition-colors hover:bg-surface hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring dark:hover:text-red-400"
+      >
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          aria-hidden
+        >
+          <line x1="18" y1="6" x2="6" y2="18" />
+          <line x1="6" y1="6" x2="18" y2="18" />
+        </svg>
+      </button>
+    </li>
+  );
+}
+
+/** 尺子两端的 hover 卷轴箭头：悬停即让整条尺子平滑卷动，移开即停。只响应 hover，不是按钮（不可点）。 */
+function PanArrow({
+  dir,
+  onEnter,
+  onLeave,
+}: {
+  dir: 1 | -1;
+  onEnter: () => void;
+  onLeave: () => void;
+}) {
+  return (
+    <span
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
+      aria-hidden
+      className={
+        "absolute top-1/2 z-10 flex h-5 w-5 -translate-y-1/2 cursor-default items-center justify-center text-node transition-opacity " +
+        (dir === 1 ? "right-0" : "left-0")
+      }
+      style={{
+        // 渐入的遮罩，让端点卷到边缘时淡出而不是硬切
+        background:
+          dir === 1
+            ? "linear-gradient(to right, transparent, var(--surface) 60%)"
+            : "linear-gradient(to left, transparent, var(--surface) 60%)",
+      }}
+    >
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        {dir === 1 ? <polyline points="9 18 15 12 9 6" /> : <polyline points="15 18 9 12 15 6" />}
+      </svg>
+    </span>
   );
 }
 

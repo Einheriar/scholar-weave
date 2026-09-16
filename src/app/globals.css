@@ -310,6 +310,14 @@ body {
   animation: tooltip-rise-in 0.15s ease-out both;
 }
 
+/* 节点时间线的尺子轨道：保留横向滚动（端点溢出时两端箭头卷轴），但隐藏滚动条本身 */
+.timeline-ruler {
+  scrollbar-width: none; /* Firefox */
+}
+.timeline-ruler::-webkit-scrollbar {
+  display: none; /* Chrome/Edge/Safari */
+}
+
 /* ── 编辑器纸张排版 ───────────────────────────────────────── */
 .ProseMirror {
   font-size: 1rem;
