@@ -16,11 +16,16 @@ import {
   type ReviewDecorationConfig,
 } from "./ReviewDecorationExtension";
 import {
+  ChatAnchorDecorationExtension,
+  chatAnchorDecorationKey,
+  type ChatAnchorDecorationConfig,
+} from "./ChatAnchorDecorationExtension";
+import {
   docToTiptap,
   tiptapToBlocks,
   type PMDocNode,
 } from "@/lib/tiptap-convert";
-import type { DocumentState, DocumentBlock, ReviewItem } from "@/lib/review-schema";
+import type { DocumentState, DocumentBlock, ReviewItem, ChatNode } from "@/lib/review-schema";
 import { computeChecksum } from "@/lib/revisions";
 import { locateRange } from "@/lib/anchoring";
 
@@ -48,6 +53,10 @@ export type DocumentEditorProps = {
   onSelectReview?: (id: string, viewportTop: number | null) => void;
   /** 选区变化回调：当前选中的（blockId, 文本），无选区时为 null（阶段 5 range 上下文） */
   onSelectionChange?: (sel: { blockId: string; text: string } | null) => void;
+  /** 聊天节点锚点（阶段 6）：被聊过的文字画点状下划线，点击跳节点 */
+  chatNodes?: ChatNode[];
+  /** 点击正文聊天锚点标记时回调（正文→聊天区对应节点） */
+  onSelectChatAnchor?: (nodeId: string) => void;
 };
 
 /**
@@ -65,6 +74,8 @@ export const DocumentEditor = forwardRef<
     selectedReviewId = null,
     onSelectReview,
     onSelectionChange,
+    chatNodes = [],
+    onSelectChatAnchor,
   },
   ref,
 ) {
@@ -75,6 +86,8 @@ export const DocumentEditor = forwardRef<
   const selectedRef = useRef<string | null>(selectedReviewId);
   const onSelectRef = useRef(onSelectReview);
   const onSelChangeRef = useRef(onSelectionChange);
+  const chatNodesRef = useRef<ChatNode[]>(chatNodes);
+  const onChatAnchorRef = useRef(onSelectChatAnchor);
   /** 惰性持有 editor.view，供 extensions 闭包内访问 DOM（不进 deps，避免重建） */
   const viewRef = useRef<Editor["view"] | null>(null);
   useEffect(() => {
@@ -84,7 +97,9 @@ export const DocumentEditor = forwardRef<
     selectedRef.current = selectedReviewId;
     onSelectRef.current = onSelectReview;
     onSelChangeRef.current = onSelectionChange;
-  }, [onDocumentChange, document, reviewItems, selectedReviewId, onSelectReview, onSelectionChange]);
+    chatNodesRef.current = chatNodes;
+    onChatAnchorRef.current = onSelectChatAnchor;
+  }, [onDocumentChange, document, reviewItems, selectedReviewId, onSelectReview, onSelectionChange, chatNodes, onSelectChatAnchor]);
 
   const extensions = useMemo(
     () => [
@@ -119,6 +134,15 @@ export const DocumentEditor = forwardRef<
               center = r.top + r.height / 2;
             }
             cb(id, center);
+          },
+        }),
+      }),
+      ChatAnchorDecorationExtension.configure({
+        getConfig: (): ChatAnchorDecorationConfig => ({
+          nodes: chatNodesRef.current,
+          document: docRef.current,
+          onSelect: (nodeId) => {
+            onChatAnchorRef.current?.(nodeId);
           },
         }),
       }),
@@ -195,6 +219,13 @@ export const DocumentEditor = forwardRef<
     const tr = editor.state.tr.setMeta(reviewDecorationKey, true);
     editor.view.dispatch(tr);
   }, [editor, reviewItems, selectedReviewId]);
+
+  // 聊天节点变化时触发聊天锚点 Decoration 重建
+  useEffect(() => {
+    if (!editor) return;
+    const tr = editor.state.tr.setMeta(chatAnchorDecorationKey, true);
+    editor.view.dispatch(tr);
+  }, [editor, chatNodes]);
 
   // 外部文档（例如从 IndexedDB 恢复）变化时刷新编辑器内容
   const lastLoadedId = useRef<string | null>(null);

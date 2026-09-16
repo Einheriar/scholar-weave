@@ -81,3 +81,25 @@
   纯函数、Dexie `conversations` 表（库结构升到 v2，实例抽到 `src/lib/storage/db.ts`）与
   `ChatHistory` 组件；宽屏（≥1280px）常驻左栏、窄屏汉堡抽屉；发送消息时落库、刷新后自动接上最近一条，
   「清空对话」改为「新对话」（保留已保存记录），单条可删除；配套 20 个 Vitest + 8 个 Playwright 用例
+
+## 项目制历史 + 锚点节点聊天（plan/discussion-document-vs-conversation-history.md）
+
+- `82abecd` feat: 数据层切项目制 + 左栏项目列表（阶段 1+2）——`Project`/`ChatNode` schema、
+  `src/lib/migrations.ts` 旧 documents+conversations → 初始 Project（迁移后删旧表，Dexie v3 仅 projects）、
+  `src/lib/chat-nodes.ts` 节点身份判定、`src/lib/storage/projects.ts`、ChatHistory 改项目列表（data-project-id /
+  「新文章」/「删除文章：」）；配套 `tests/projects.test.ts`（含迁移纯函数）、`tests/chat-nodes.test.ts`
+- `cafac91` feat: 聊天区节点化（阶段 3）——发送那一刻按锚点身份找/建节点（规则 7/8/10）、
+  规则 11 无选区禁止提问、规则 24 节点边界即上下文边界（history 仅本节点、openReviews 仅锚点段落）、
+  ContextChat 头部上下文标签 + 新文章按钮 + stale 存档横幅
+- `2500bf5` feat: 节点时间线弹层（阶段 4）——`NodeTimeline` 组件（brand 圆点 + 轮次轨道 + 行内直接删除，
+  规则 13）；`handleJumpToTurn` 跳某轮
+- `35d93bc` feat: 聊天区浮动 + 最小化（阶段 5）——`sticky bottom-4 z-40` dock（规则 21）、最小化成窄条（规则 22）
+- `—`       feat: 正文锚点标记（阶段 6）——`ChatAnchorDecorationExtension`（range 虚线下划线 / block 左侧竖条，
+  点击标记切节点对话）、`globals.css` 加 `.chat-anchor`/`.chat-anchor-block`（品牌绿，双主题）；
+  `tests/chat-anchor-decoration.test.ts`
+- `—`       fix: 聊天节点丢失/回复不落库——React 批处理下 `setNodes(updater)` 的副作用与返回值不可靠，
+  改为基于 `latestRef` 先算好数组再 setState + `persistProjectNow(repliedNodes)` 立即落库；
+  新增陷阱 21/22 记入 AGENTS.md
+- `—`       test: E2E `selectTextInEditor` 重写——createRange+TreeWalker 取词坐标、滚出浮动聊天区遮挡、
+  多词短语双击词尾再 Shift+点词首；review-chat/chat-history 用例补选区步骤；全套 23 个 Playwright + 141 个 Vitest 通过
+- `—`       docs: AGENTS.md「左侧对话历史」改写为「项目制」+ 聊天节点/锚点约定 + 陷阱 21/22 + 关键文件地图更新

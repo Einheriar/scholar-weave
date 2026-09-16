@@ -64,23 +64,24 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 ## 关键文件地图
 
 ```
-src/lib/review-schema.ts        # Zod 协议唯一来源（Document/ReviewItem/ChangeSet/ChatContext/ChatTurn/Conversation）
+src/lib/review-schema.ts        # Zod 协议唯一来源（Document/ReviewItem/ChangeSet/ChatContext/ChatTurn/ChatNode/Project）
 src/lib/revisions.ts            # 稳定 block ID + revision/checksum
 src/lib/anchoring.ts            # 锚点定位（不信坐标，locateInText/locateRange）
 src/lib/changeset.ts            # ChangeSet 预处理/重叠剔除/批量应用/撤销快照
 src/lib/tiptap-convert.ts       # DocumentState ↔ ProseMirror JSON 互转
 src/lib/sample-data.ts          # 内置样例文档 + 10 条假建议（E2E 依赖其措辞）
 src/lib/settings.ts             # 用户设置（LLM 命名预设 + 审阅偏好）+ localStorage 持久化 + 旧格式迁移
-src/lib/chat-history.ts         # 对话历史纯函数（标题派生、排序、upsert、相对时间），不碰存储与 React
+src/lib/chat-history.ts         # 项目纯函数（newProjectId/deriveProjectTitle/sortProjects/upsertProject + 相对时间），不碰存储与 React
+src/lib/chat-nodes.ts           # 聊天节点纯函数（findNodeByAnchor 节点身份判定 + deriveNodeTitle），不碰存储与 React
+src/lib/migrations.ts           # 旧 documents+conversations → 初始 Project 的迁移（纯函数）
 src/lib/mini-markdown.tsx       # 受限 markdown 渲染器（标题/列表/加粗/斜体/行内代码），不引第三方库
-src/lib/storage/db.ts           # Dexie 实例唯一持有者（documents + conversations 两张表）
-src/lib/storage/documents.ts    # 草稿文档持久化（含 clearAllDocuments）
-src/lib/storage/conversations.ts # 对话历史持久化（列表/保存/删除/清空）
+src/lib/storage/db.ts           # Dexie 实例唯一持有者（v3 起仅 projects 表；v1/v2 留给迁移期读取）
+src/lib/storage/projects.ts     # 项目持久化（saveProject/listProjects/loadLatestProject/loadProject/deleteProject/clearAllProjects）
 src/lib/llm/thinking.ts         # 思考档位 → 请求参数映射（服务端与前端共用）
 src/lib/llm/                    # provider adapter、prompts（审阅+对话）、wire schema、server-helpers
-src/components/editor/          # DocumentEditor、BlockIdExtension、ReviewDecorationExtension
+src/components/editor/          # DocumentEditor、BlockIdExtension、ReviewDecorationExtension、ChatAnchorDecorationExtension
 src/components/review/          # ReviewSidebar、ReviewCard、ChangeSetPreview、review-meta
-src/components/chat/            # ContextChat、ChatHistory（左侧历史栏 + 窄屏抽屉 + 汉堡按钮）
+src/components/chat/            # ContextChat、ChatHistory（左栏项目列表 + 窄屏抽屉）、NodeTimeline（节点时间线弹层）
 src/components/ui/              # button.tsx（buttonClass 工厂）、select.tsx（自定义下拉）
 src/components/ThemeToggle.tsx  # 主题切换按钮（左下角浮动）
 src/components/SettingsPanel.tsx # 设置面板（中央模态，模型/审阅/数据三个 Tab）
@@ -106,9 +107,9 @@ tests/e2e/                      # Playwright 用例（helpers.ts 里是 mock 与
 8. **本项目没有动画库**，动效一律手写 CSS keyframes（`globals.css`）。由此有一条固定约束：**退出动画必须延迟卸载**——`{open && ...}` 这类条件渲染会在关闭瞬间卸载节点，淡出/滑出根本没机会播放。做法是加一个「closing」状态在动画期间继续渲染，`onAnimationEnd` 后再真正移除。另外新加的 keyframes 必须同时登记到 `globals.css` 的 `prefers-reduced-motion` 覆盖名单里，漏了的话，明明开了「减少动态效果」的用户反而还会看到动画。
 9. **滚动条全局自定义过**（`globals.css`）：细窄（8px）半透明滑块，悬停加深；滑块色用 `color-mix(in srgb, var(--text-faint) 45%, transparent)`、悬停用 `--text-muted`，深浅色自适应。Chrome/Edge/Safari 走 `::-webkit-scrollbar`，Firefox 走 `scrollbar-width: thin` + `scrollbar-color`。新增可滚区域不用单独配，全局生效。**注意**：半透明滑块会叠在内容上，长文滚动有轻微透色，是有意的取舍；别改回不透明的粗条。
 
-## 左侧对话历史（ChatGPT 式）
+## 左侧历史（项目制，一篇文章 = 一个项目）
 
-对话历史存在 IndexedDB（`conversations` 表），**与草稿文档同一套 Dexie 库不同表**。响应式两种形态：
+左侧历史列表的单位是**项目（Project）**：一篇文章的完整工作现场 = 正文 `doc` + 建议 `reviews` + 聊天节点 `nodes`。存在 IndexedDB 的 `projects` 表（`id` 主键 + `doc.updatedAt` 索引），由 `src/lib/storage/projects.ts` 读写。响应式两种形态：
 
 | 形态 | 触发 | 实现 |
 |------|------|------|
@@ -120,9 +121,23 @@ tests/e2e/                      # Playwright 用例（helpers.ts 里是 mock 与
 - **断点用 `xl` 而不是 `lg`**：主内容区从 `lg` 起就是 `[1fr_360px]` 两栏，再挤进 240px 历史栏，编辑器会窄到不像阅读界面。1280px 是能同时放下三栏的下限（实测 1280 下编辑器仍有 567px）。
 - 页面结构是「历史栏 | (编辑器+对话  /  审阅侧栏)」：外层 `flex items-start`，中间那层才是原来的 `lg:grid-cols-[1fr_360px]`；历史栏 `shrink-0`，中间层 `min-w-0 flex-1`。
 - **窄屏抽屉的面板必须显式给 `w-60`**：它是 flex 列容器且内容都可收缩，不给宽度就按内容收缩成约 200px，标题被截得比宽屏左栏还窄。配 `max-w-[85vw]` 兜住小屏。
-- 历史条目按钮带 `data-conversation-id`（同 `data-review-card` 的约定）。**写测试时别按标题模糊匹配**：删除按钮的 `aria-label` 是「删除对话：<标题>」，也含标题，会同时命中两个。
-- 发送消息才创建历史条目（发第一条消息时才分配 id），列表里不会堆空对话。「新对话」只是清空界面，**已保存的那条留在列表里**，随时能点回来——不要改回「清空对话」（那会丢记录）。
-- 发给模型的历史只有**当前这条对话**的最近 8 轮，不含其他对话、也不含正文全文（正文按上下文只带相关段落，见 `packBlocks`）。
+- 历史条目按钮带 `data-project-id`（同 `data-review-card` 的约定）。**写测试时别按标题模糊匹配**：删除按钮的 `aria-label` 是「删除文章：<标题>」，也含标题，会同时命中两个。
+- **建档时机 = 首次审阅或发聊天**（规则 1）：那之前 `activeProjId` 为 null，防抖保存时才 `newProjectId()` 分配 id。切换/新建文章前会先把当前项目**立即落库**（`persistProjectNow`），避免防抖未跑导致旧文章丢失。「新文章」清空现场但**已保存的项目留在列表里**，随时点回——不要改回「清空对话」。
+- **项目落库是防抖的**（编辑触发 500ms），但**聊天回复到达会立即落库**（`persistProjectNow(repliedNodes)`），免得用户在防抖窗口内刷新丢消息。
+- 项目标题派生：`deriveProjectTitle` 优先取文档手动标题，否则首段截断（24 字符），兜底「未命名文章」。
+
+### 聊天节点（ChatNode）与锚点
+
+聊天按**锚点节点**组织（规则 7/8/10/11/24），一个节点 = 一处锚点 + 一串对话轮次：
+
+- **节点身份（规则 8）**：review 锚按 `reviewId` 认；range 锚**只按选区原文逐字相同**认（blockId/位置/前后缀不参与——选区大小略有出入算同一节点，选中另一段文字就开新行）；block 锚按 `blockId` 认；document 锚整篇共用一个固定节点。
+- **发送归属（规则 10）**：有新选区跟新选区，没选区跟正在查看的节点；**只在发送那一刻**找/建节点（规则 7，没有「新建节点」按钮）。
+- **规则 11（无选区禁止提问）**：无选区且无选中建议时发送被禁用。E2E 里必须先 `selectTextInEditor` 再发送。
+- **规则 12（stale 锚）**：锚点定位失败时节点仍可读，聊天区显示「原文已变更，以下为存档讨论」，正文里的锚点标记消失。
+- **规则 24（上下文边界 = 节点边界）**：发给模型的 history 只有本节点轮次；openReviews 只带锚点所在段落的 open 建议。
+- 节点时间线（`NodeTimeline`）：聊天区头部「聊天节点历史」按钮弹出，每行一个节点（brand 圆点 + 轮次轨道），行内删除直接删（规则 13，无确认）。
+- 聊天区**浮动**（规则 21 sticky-dock）：`sticky bottom-4`，可最小化成窄条（规则 22）。
+- 正文锚点标记（`ChatAnchorDecorationExtension`）：range 锚画虚线下划线、block 锚画左侧竖条，点击标记切到对应节点对话。Decoration 是视图层，不序列化进正文。
 
 ## 浮动按钮与页面底部布局
 
@@ -181,6 +196,8 @@ tests/e2e/                      # Playwright 用例（helpers.ts 里是 mock 与
 18. **浏览器代理插件（Zero Omega / SwitchyOmega）对 LLM 请求无效**——LLM 请求是服务端 `fetch`，不经过浏览器。服务端代理有两条路：(1) 用户在设置面板按预设配（`LLMPreset.proxy`，HTTP/SOCKS5 均可），经 `settingsToRequestBody` → `llmConfig.proxy` → `OpenAIProvider` 的 `undici.ProxyAgent`；(2) 服务端环境变量 `SOCKS5_PROXY` / `HTTPS_PROXY` / `HTTP_PROXY`（`getProviderFromEnv` 自动读）。两条路互斥，用户配置优先。
 19. **`scrollIntoView` 的 options 里没有 `top` 字段**——`ScrollIntoViewOptions` 只有 `behavior`/`block`/`inline`，写 `top` 会被浏览器**静默忽略**（不报错）。要把元素对齐到容器内某个精确位置，直接设滚动容器的 `scrollTop`（如 `scroller.scrollTop += delta`），不要往 `scrollIntoView` 里塞自定义坐标。
 20. **sticky 元素要「钉住 + 内部滚动」必须用 `h-` 定高，不能用 `max-h-`**——grid/flex 子项默认 `align-items: stretch`，`max-h` 只约束元素自身、约束不了子元素被内容撑高。`max-h-[calc(100vh-3rem)]` 配 `h-full` 的 aside 会被 2900px 的建议列表撑满，内部 `overflow-y-auto` 根本不滚动，表现是「视口下方的卡片永远点不到」（E2E 报 `element is outside of the viewport`，因为 Playwright 滚 window 时 sticky 卡片不动）。改成 `h-[calc(100vh-3rem)]` 后 aside 被限高、内部容器才真正滚动。排查这类「元素可见但点不到」先量 `getBoundingClientRect()` 对比容器高度，别先怀疑测试框架。
+21. **React 批处理下，`setState(updater)` 的 updater 副作用不可靠**——在 updater 里写 `ref.current = ...` 或依赖 updater 的返回值，时机由 React 决定（可能延后到本次事件处理完）。聊天节点更新踩过：回复到达时 `setNodes(prev => { ref = compute(prev); return ... })` 后立刻读那个 ref 去落库，读到的还是旧值（updater 没跑），结果存了空节点。正确做法：**先基于 `latestRef.current`（或闭包）算好确定的数组，再 `setNodes(算好的)`**，副作用同步生效、落库也用这个数组。同理闭包里的 `nodes` 是发起请求那一刻的快照，跨 await 后要用 `latestRef` 取最新。
+22. **E2E 选词要先处理浮动聊天区遮挡 + Decoration 拆词**——聊天区 `sticky bottom` 会遮住编辑器下方的词（点击落在面板上选不中），且 chat-anchor Decoration 会把词拆成多个文本节点（`getByText(子串)` 命中整段）。`selectTextInEditor` 的做法：用 `document.createRange` + `TreeWalker` 找到 needle 的精确文本节点坐标，先滚到聊天区（`[aria-label="上下文对话"]`）上方，单词直接 `dblclick`，**多词短语先双击词尾再 Shift+点词首**（方向反了会缩回只选第一个词）。断言用上下文标签里「选区「…」」的原文前缀（标签截断到 12 字符），别全等。
 
 ## 有意为之的取舍（不要当 bug 改掉）
 

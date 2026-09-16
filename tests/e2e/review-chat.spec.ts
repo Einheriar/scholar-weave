@@ -2,9 +2,11 @@ import { expect, test } from "@playwright/test";
 import {
   MOCK_REVIEW_SUMMARY,
   gotoApp,
+  loadSample,
   mockChatRoute,
   mockReviewRoute,
   paragraphTexts,
+  selectTextInEditor,
   sendChatMessage,
 } from "./helpers";
 
@@ -90,9 +92,12 @@ test.describe("上下文对话（mock /api/chat）", () => {
   test("纯解释回复不改正文", async ({ page }) => {
     await mockChatRoute(page, { withChanges: false });
     await gotoApp(page);
+    await loadSample(page);
+    // 规则 11：先选中正文再提问
+    await selectTextInEditor(page, "upstanding");
 
     const before = await paragraphTexts(page);
-    await sendChatMessage(page, "解释一下全文结构");
+    await sendChatMessage(page, "解释一下这个词");
 
     await expect(
       page.getByText("这是纯解释回复（mock），不包含任何正文修改。"),
@@ -105,6 +110,9 @@ test.describe("上下文对话（mock /api/chat）", () => {
   test("带修改集的回复先预览，接受后才改正文", async ({ page }) => {
     await mockChatRoute(page, { withChanges: true });
     await gotoApp(page);
+    await loadSample(page);
+    // 规则 11：先选中正文再提问（mock 修改集锚定 "overlooking the interpersonal part"）
+    await selectTextInEditor(page, "overlooking the interpersonal part");
 
     const before = await paragraphTexts(page);
     await sendChatMessage(page, "把这段改得更学术一些");
@@ -134,6 +142,9 @@ test.describe("上下文对话（mock /api/chat）", () => {
   test("批量接受修改集后可用 Ctrl+Z 撤销回原文", async ({ page }) => {
     await mockChatRoute(page, { withChanges: true });
     await gotoApp(page);
+    await loadSample(page);
+    // 规则 11：先选中正文再提问
+    await selectTextInEditor(page, "overlooking the interpersonal part");
 
     const before = await paragraphTexts(page);
     await sendChatMessage(page, "把这段改得更学术一些");

@@ -244,6 +244,46 @@ body {
   box-shadow: inset 4px 0 0 0 #d97706;
 }
 
+/* ── 聊天节点锚点的编辑器标记（锚点节点方案 / 阶段 6）──────────
+   原则：不引新色相，用品牌绿 + 弱灰绿；比审阅标记（红/绿）更弱一档，
+   避免与审阅标记争视觉优先级。颜色只作点缀，语义靠点状线型 + hover 提示。 */
+
+/* range 锚点（选区文字）：2px 点状下划线，弱灰绿（--text-faint） */
+.chat-anchor {
+  cursor: pointer;
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
+  text-decoration-thickness: 2px;
+  text-decoration-color: var(--text-faint);
+  text-underline-offset: 4px;
+  border-radius: 2px;
+  transition:
+    background-color 0.15s ease,
+    text-decoration-color 0.15s ease;
+}
+.chat-anchor:hover {
+  text-decoration-color: var(--text-muted);
+  background-color: rgb(0 0 0 / 0.04);
+}
+.dark .chat-anchor:hover {
+  background-color: rgb(255 255 255 / 0.07);
+}
+
+/* block 锚点（段落）：左侧品牌绿圆点竖条，比审阅的琥珀竖线更细更弱 */
+.chat-anchor-block {
+  position: relative;
+  box-shadow: inset 2px 0 0 0 var(--brand);
+  padding-left: 0.6rem;
+  border-radius: 2px;
+  transition: background-color 0.15s ease;
+}
+.chat-anchor-block:hover {
+  background-color: rgb(13 166 120 / 0.06);
+}
+.dark .chat-anchor-block:hover {
+  background-color: rgb(44 196 147 / 0.08);
+}
+
 /* ── 编辑器纸张排版 ───────────────────────────────────────── */
 .ProseMirror {
   font-size: 1rem;

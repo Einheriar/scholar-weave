@@ -30,6 +30,10 @@ export async function loadSample(page: Page) {
   await dialog.getByRole("button", { name: "数据" }).click();
   await dialog.getByRole("button", { name: "载入样例" }).click();
   await expect(page.locator("[data-review-card]").first()).toBeVisible();
+  // 等防抖保存落库（建档时机：文档变化即保存），避免后续「新文章/切换」抢在保存前。
+  // 保存状态是顶栏的 <span role="status">（另有一个 sr-only aria-live 也带 status，取第一个）。
+  const saveStatus = page.getByRole("status").first();
+  await expect(saveStatus).toContainText("已保存到本地");
 }
 
 /**
@@ -189,4 +193,103 @@ export async function sendChatMessage(page: Page, text: string) {
   const box = page.getByLabel("对话输入框");
   await box.fill(text);
   await box.press("Enter");
+}
+
+/**
+ * 在编辑器里选中包含指定片段的一段文字（规则 11：无选区禁止提问，
+ * 节点化聊天必须先选中正文再发送）。通过双击目标词触发选区，
+ * 编辑器 onSelectionUpdate 会回报 { blockId, text }。
+ */
+export async function selectTextInEditor(page: Page, needle: string) {
+  // 找到包含目标片段的段落
+  const para = page
+    .locator(".ProseMirror p")
+    .filter({ hasText: needle })
+    .first();
+  await expect(para).toBeVisible();
+
+  // 浮动聊天区（sticky 贴底）可能遮住目标词，点击会落在面板遮挡处。
+  // 轮询：把段落滚到聊天区上方，再取词坐标点击，直到真的选中目标词。
+  const chat = page.locator('[aria-label="上下文对话"]');
+  const chatBox = (await chat.boundingBox()) ?? { y: Number.POSITIVE_INFINITY, height: 0 };
+  const chatTop = chatBox.y;
+
+  const isPhrase = needle.includes(" ");
+  const expectedPrefix = needle.slice(0, Math.min(needle.length, 12));
+  const selectedPrefix = async (): Promise<string> => {
+    const t =
+      (await chat.getByText(/选区「/, { exact: false }).first().textContent()) ?? "";
+    const m = t.match(/选区「([^」]*)」/);
+    return m ? m[1] : "";
+  };
+
+  // 词可能被 chat-anchor 等 Decoration 拆散，叶子节点的几何中心不一定落在词上。
+  // 用 Range 精确圈出 needle 的位置，双击该范围的中心，并校验真的选中了。
+  let lastErr: unknown = null;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    try {
+      const pt = await page.evaluate(([needle]) => {
+        const pm = document.querySelector(".ProseMirror");
+        if (!pm) return null;
+        const tw = document.createTreeWalker(pm, NodeFilter.SHOW_TEXT);
+        let n: Node | null;
+        while ((n = tw.nextNode())) {
+          const txt = n.textContent ?? "";
+          const i = txt.indexOf(needle as string);
+          if (i >= 0) {
+            const r = document.createRange();
+            r.setStart(n, i);
+            r.setEnd(n, i + (needle as string).length);
+            const startRect = r.getClientRects()[0];
+            const endRect = r.getClientRects()[r.getClientRects().length - 1];
+            return {
+              startX: startRect.x + 1,
+              startY: startRect.y + startRect.height / 2,
+              endX: endRect.x + endRect.width - 1,
+              endY: endRect.y + endRect.height / 2,
+              midX: startRect.x + (endRect.x + endRect.width - startRect.x) / 2,
+              midY: startRect.y + startRect.height / 2,
+            };
+          }
+        }
+        return null;
+      }, [needle]);
+      if (!pt) throw new Error("找不到目标词的文本节点");
+      // 词中心若在聊天区（sticky 贴底）内会被遮住：先把词顶滚到聊天区上方
+      if (pt.midY > chatTop - 4) {
+        await page.evaluate(
+          ([dy]) => window.scrollBy(0, dy),
+          [pt.midY - chatTop + 24],
+        );
+        await page.waitForTimeout(120);
+        continue;
+      }
+      if (isPhrase) {
+        // 多词短语：双击只选中一个词。先双击词尾定位焦点，再 Shift+点词首，
+        // 让选区从词尾扩到词首覆盖整段（方向反了会缩回成只选第一个词）。
+        await page.mouse.dblclick(pt.endX, pt.endY);
+        await page.waitForTimeout(120);
+        await page.keyboard.down("Shift");
+        await page.mouse.click(pt.startX, pt.startY);
+        await page.keyboard.up("Shift");
+        await page.waitForTimeout(120);
+      } else {
+        await page.mouse.dblclick(pt.midX, pt.midY);
+      }
+      // 标签把原文截断到 12 字符（可能带省略号），所以做包含匹配而非全等
+      await expect
+        .poll(async () => (await selectedPrefix()).replace(/…$/, ""), { timeout: 2000 })
+        .toContain(expectedPrefix);
+      return; // 选区正确，结束
+    } catch (e) {
+      lastErr = e;
+      await page.evaluate(() => window.scrollBy(0, -360));
+      await page.waitForTimeout(150);
+    }
+  }
+  // 失败诊断：当前选区前缀
+  const cur = await selectedPrefix().catch(() => "<none>");
+  throw new Error(
+    `选不中目标词：${needle}（当前选区前缀="${cur}"，chatTop=${chatTop}，lastErr=${String(lastErr)}）`,
+  );
 }

@@ -107,6 +107,19 @@ export default function Home() {
 
   const editorRef = useRef<DocumentEditorHandle>(null);
   const abortRef = useRef<AbortController | null>(null);
+  /**
+   * 防抖保存从 ref 读最新状态（doc/reviews/nodes/activeProjId），
+   * 避免 setTimeout 闭包读到批处理前的旧值导致节点/建议丢失。
+   */
+  const latestRef = useRef<{ doc: DocumentState | null; reviews: ReviewItem[]; nodes: ChatNode[]; activeProjId: string | null }>({
+    doc: null,
+    reviews: [],
+    nodes: [],
+    activeProjId: null,
+  });
+  useEffect(() => {
+    latestRef.current = { doc, reviews, nodes, activeProjId };
+  }, [doc, reviews, nodes, activeProjId]);
   const chatAbortRef = useRef<AbortController | null>(null);
 
   // ── 启动：恢复最近项目，否则载入样例 ──
@@ -152,28 +165,40 @@ export default function Home() {
     );
   }, []);
 
-  // 防抖保存项目：正文 + 建议 + 聊天节点整体落库（规则 1：首次保存才建档分配 id）
+  // 立即把当前项目整体落库（正文 + 建议 + 节点）。默认从 latestRef 读最新状态，
+  // 避免 setTimeout 闭包读到批处理前的旧值。首次保存才建档分配 id（规则 1）。
+  // 调用方若刚算好确定的节点数组（如回复到达），应显式传 nodesOverride，
+  // 免得 React 批处理期间 latestRef 被 effect 同步回旧快照。
+  const persistProjectNow = useCallback(async (nodesOverride?: ChatNode[]) => {
+    const { doc: curDoc, reviews: curReviews, nodes: curNodes, activeProjId: curId } =
+      latestRef.current;
+    const nodesToSave = nodesOverride ?? curNodes;
+    if (!curDoc) return;
+    const now = new Date().toISOString();
+    const id = curId ?? newProjectId();
+    const project: Project = {
+      id,
+      title: deriveProjectTitle(curDoc),
+      doc: curDoc,
+      reviews: curReviews,
+      nodes: nodesToSave,
+      lastActivityAt: now,
+    };
+    if (curId === null) setActiveProjId(id);
+    activeProjRef.current = project;
+    setProjects((list) => upsertProject(list, project));
+    await saveProject(project);
+    setSaveState("saved");
+  }, []);
+
+  // 防抖保存项目：编辑触发 saving 后延迟落库；聊天回复到达会立即落库（见 sendChat）。
   useEffect(() => {
     if (!doc || saveState !== "saving") return;
-    const t = setTimeout(async () => {
-      const now = new Date().toISOString();
-      const id = activeProjId ?? newProjectId();
-      const project: Project = {
-        id,
-        title: deriveProjectTitle(doc),
-        doc,
-        reviews,
-        nodes,
-        lastActivityAt: now,
-      };
-      if (activeProjId === null) setActiveProjId(id);
-      activeProjRef.current = project;
-      setProjects((list) => upsertProject(list, project));
-      await saveProject(project);
-      setSaveState("saved");
+    const t = setTimeout(() => {
+      void persistProjectNow();
     }, 500);
     return () => clearTimeout(t);
-  }, [doc, reviews, nodes, saveState, activeProjId]);
+  }, [doc, reviews, nodes, saveState, activeProjId, persistProjectNow]);
 
   // ── 项目：切换 / 新建 / 删除 ──
   /** 点开左栏项目：完整恢复正文 + 建议 + 聊天现场（规则 5 现场可回看） */
@@ -181,6 +206,13 @@ export default function Home() {
     (id: string) => {
       const proj = projects.find((p) => p.id === id);
       if (!proj) return;
+      // 切换前把当前项目立即落库（防抖保存可能还没跑，避免旧文章丢失）
+      const cur = activeProjRef.current;
+      if (cur && cur.id !== id) {
+        const persisted = { ...cur, lastActivityAt: new Date().toISOString() };
+        setProjects((list) => upsertProject(list, persisted));
+        void saveProject(persisted);
+      }
       activeProjRef.current = proj;
       setActiveProjId(id);
       setDoc(proj.doc);
@@ -200,8 +232,15 @@ export default function Home() {
     [projects],
   );
 
-  /** 新文章：清空正文 + 建议 + 聊天开一个新项目；旧文章留在左栏（规则 4） */
+  /** 新文章：清空正文 + 建议 + 聊天开一个新项目；旧文章留在左栏（规则 4）。
+   *  先把当前项目立即落库，避免防抖保存尚未跑导致旧文章丢失。 */
   const handleNewProject = useCallback(() => {
+    const cur = activeProjRef.current;
+    if (cur) {
+      const persisted = { ...cur, lastActivityAt: new Date().toISOString() };
+      setProjects((list) => upsertProject(list, persisted));
+      void saveProject(persisted);
+    }
     activeProjRef.current = null;
     setActiveProjId(null);
     // 开一个空白文档让用户从零开始；id 全新表示这是新项目
@@ -467,8 +506,9 @@ export default function Home() {
       }
       const ctx = chatContext;
       // 规则 8/10：当前上下文 = 有新选区跟新选区，没选区跟正在查看的节点。
-      // 发送那一刻才按身份找/建节点（规则 7）。
-      const existing = findNodeByAnchor(nodes, ctx);
+      // 发送那一刻才按身份找/建节点（规则 7）。从 latestRef 读最新节点，
+      // 避免闭包里的 nodes 是旧快照导致新建节点冲掉已有节点。
+      const existing = findNodeByAnchor(latestRef.current.nodes, ctx);
       const nodeId = existing?.id ?? `node_${crypto.randomUUID()}`;
       // 节点锚点原文快照：range 取选区原文；review 锚取建议定位到的原文（range/block 级）
       const anchorReview =
@@ -489,10 +529,14 @@ export default function Home() {
         ...targetNode,
         turns: [...targetNode.turns, { role: "user", content: message }],
       };
-      const nextNodes = existing
-        ? nodes.map((n) => (n.id === nodeId ? nodeWithUser : n))
-        : [...nodes, nodeWithUser];
-      setNodes(nextNodes);
+      // 基于 latestRef 先算好再 setState（updater 副作用在批处理下不可靠）：
+      // 优先用回调里已写入的最新节点，其次用闭包 nodes
+      const baseNodes = latestRef.current.nodes.length ? latestRef.current.nodes : nodes;
+      const withUser = baseNodes.some((n) => n.id === nodeId)
+        ? baseNodes.map((n) => (n.id === nodeId ? nodeWithUser : n))
+        : [...baseNodes, nodeWithUser];
+      latestRef.current.nodes = withUser;
+      setNodes(withUser);
       setActiveNodeId(nodeId);
       setChatTurns(nodeWithUser.turns);
       setChatError(null);
@@ -573,16 +617,21 @@ export default function Home() {
           ...nodeWithUser,
           turns: [...nodeWithUser.turns, reply],
         };
-        // 等回复期间用户可能切走了：只有还停在这个项目上才动界面与节点，
-        // 否则会把别人的轮次贴到当前项目里。
+        // 等回复期间用户可能切走了：只有还停在这个项目上才同步聊天面板，
+        // 否则只更新节点列表，不会把别人的轮次贴到当前项目里。
+        // 基于 latestRef（含刚加的 user 轮）先算好含回复的数组再 setState，
+        // 避免依赖 setNodes updater 的返回值（React 批处理会延后 updater 执行）。
+        const repliedNodes = latestRef.current.nodes.map((n) =>
+          n.id === nodeId ? nodeWithReply : n,
+        );
+        latestRef.current.nodes = repliedNodes;
+        setNodes(repliedNodes);
         if (activeProjRef.current?.doc.id === doc.id || activeProjId === null) {
-          setNodes((ns) => ns.map((n) => (n.id === nodeId ? nodeWithReply : n)));
           setChatTurns(nodeWithReply.turns);
-        } else {
-          setNodes((ns) => ns.map((n) => (n.id === nodeId ? nodeWithReply : n)));
         }
-        // 回复到达也算活动，触发落库
-        setSaveState("saving");
+        // 回复到达也算活动；立即落库，免得用户在 500ms 防抖窗口内刷新丢掉这轮消息。
+        // 显式传含回复的节点：setNodes 里同步的 latestRef 可能被 effect 覆盖回旧快照。
+        void persistProjectNow(repliedNodes);
       } catch (e) {
         if (e instanceof Error && e.name === "AbortError") {
           // 用户取消：不加错误
@@ -603,6 +652,7 @@ export default function Home() {
       packBlocks,
       activeProjId,
       settings,
+      persistProjectNow,
     ],
   );
 
@@ -674,6 +724,20 @@ export default function Home() {
       setAnnounce("已删除该节点讨论。");
     },
     [activeNodeId],
+  );
+
+  /** 阶段 6：点击正文聊天锚点标记 → 切到对应节点对话 */
+  const handleSelectChatAnchor = useCallback(
+    (nodeId: string) => {
+      const node = nodes.find((n) => n.id === nodeId);
+      if (!node) return;
+      setActiveNodeId(nodeId);
+      setChatTurns(node.turns);
+      // 若聊天区被最小化，展开以便看到对话
+      setChatMinimized(false);
+      setAnnounce(`已切换到聊天节点「${node.originalText || "讨论"}」。`);
+    },
+    [nodes],
   );
 
   // ── 按意见生成修改集（opinion → ChangeSet）──
@@ -966,6 +1030,8 @@ export default function Home() {
               selectedReviewId={selectedId}
               onSelectReview={handleBodySelectAnchor}
               onSelectionChange={setSelection}
+              chatNodes={nodes}
+              onSelectChatAnchor={handleSelectChatAnchor}
             />
 
             {/* 修改集预览（对话或按意见生成时弹出） */}
