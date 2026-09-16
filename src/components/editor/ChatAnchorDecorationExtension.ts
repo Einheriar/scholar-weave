@@ -142,7 +142,10 @@ export const ChatAnchorDecorationExtension =
               const id = el?.getAttribute("data-chat-anchor-id");
               if (id) {
                 getConfig().onSelect?.(id);
-                return true;
+                // 返回 false 把点击继续传给后面的插件：这段文字可能同时是某条
+                // 审阅建议的范围（review 标记 + 聊天锚点重叠），return true 会把
+                // 点击吃掉，导致 ReviewDecorationExtension 收不到、右侧卡片不跳。
+                return false;
               }
               return false;
             },

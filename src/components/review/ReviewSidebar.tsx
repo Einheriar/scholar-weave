@@ -160,7 +160,7 @@ export function ReviewSidebar({
   // 卸载时取消未完成的动画
   useEffect(() => () => cancelAlignRef.current?.(), []);
 
-  // 用户滚动钳制：首尾 80vh 补空是给「程序对齐」用的行程储备，不该被用户滚轮
+  // 用户滚动钳制：首尾 80vh 补空是给「程序对齐」用的行程储备，用户滚轮**完全不该**
   // 滚进去（会对着一大片纯空白）。监听滚动，一旦越界就拉回内容区边缘。
   // aligningRef 为 true 时（程序对齐中）跳过，否则对齐永远到不了补空区。
   useEffect(() => {
@@ -173,13 +173,13 @@ export function ReviewSidebar({
       if (!top || !bottom) return; // 空态无补空，不钳制
       const clientH = scroller.clientHeight;
       const maxScroll = scroller.scrollHeight - clientH;
-      // 下界：顶部补空最多露出到「快贴边」——第一张卡片顶到容器顶即停。
-      // 允许稍微露出一点（避免完全卡死感），但绝不让整屏空白。
-      const minScroll = Math.max(0, top.offsetHeight - clientH * 0.2);
+      // 下界：顶部补空完全不露出——第一张卡片顶到容器顶即停（minScroll = 补空高度）。
+      // 之前留了 20% 过渡口子，用户仍能滚进一截空白（反馈：常看到一大块空白），收紧到 0。
+      const minScroll = top.offsetHeight;
       // 上界：底部补空同理，最后一张卡片贴容器底即停。
       const maxAllowed = Math.min(
         maxScroll,
-        scroller.scrollHeight - bottom.offsetHeight - clientH * 0.8,
+        scroller.scrollHeight - bottom.offsetHeight - clientH,
       );
       if (scroller.scrollTop < minScroll) {
         aligningRef.current = true;
@@ -193,6 +193,19 @@ export function ReviewSidebar({
     };
     scroller.addEventListener("scroll", clamp, { passive: true });
     return () => scroller.removeEventListener("scroll", clamp);
+  }, [filtered.length]);
+
+  // 初始/筛选变化后把滚动位置钳到内容区起点（第一张卡片贴顶），
+  // 否则默认 scrollTop=0 会整屏露出顶部补空（一大片空白）。
+  // aligningRef 跳过：程序对齐到靠顶标记时允许短暂落在补空区。
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    const top = topSpacerRef.current;
+    if (!scroller || !top) return; // 空态无补空
+    if (aligningRef.current) return;
+    if (scroller.scrollTop < top.offsetHeight) {
+      scroller.scrollTop = top.offsetHeight;
+    }
   }, [filtered.length]);
 
   const counts = useMemo(() => {

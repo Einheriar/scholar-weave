@@ -199,10 +199,20 @@ export default function Home() {
     if (!curDoc) return;
     const now = new Date().toISOString();
     const id = curId ?? newProjectId();
+    // 标题单一事实源：doc.title 为空时用派生标题（首段截断）回填进 doc，
+    // 左上角标题框与历史条目显示同一份（改任一处处处生效，列表条目用实时派生）。
+    const derived = deriveProjectTitle(curDoc);
+    const docToSave = curDoc.title.trim()
+      ? curDoc
+      : { ...curDoc, title: derived === "未命名文章" ? "" : derived };
+    if (docToSave !== curDoc) {
+      latestRef.current.doc = docToSave;
+      setDoc(docToSave);
+    }
     const project: Project = {
       id,
-      title: deriveProjectTitle(curDoc),
-      doc: curDoc,
+      title: derived,
+      doc: docToSave,
       reviews: curReviews,
       nodes: nodesToSave,
       lastActivityAt: now,
@@ -743,18 +753,32 @@ export default function Home() {
       setActiveNodeId(nodeId);
       setChatTurns(node.turns);
       setAnnounce(`已切换到聊天节点。`);
-      // 滚动到对应轮次气泡（data-turn-index）；测试环境/减少动态效果下瞬时定位
+      // 滚动到对应轮次气泡（data-turn-index）。
+      // 关键：只在聊天列表容器内部滚（直接设 scrollTop），绝不用 scrollIntoView——
+      // 后者是全局的，会把目标对齐到整个视口，连正文所在的 window 一起滚（用户反馈：
+      // 点端点正文跟着滚到奇怪位置）。目标轮次定位到列表顶部（留 12px 呼吸边距），
+      // 即「这条提问」就是它下面这段对话的开头。测试环境/减少动态效果下瞬时定位。
       requestAnimationFrame(() => {
         const list = document.querySelector(
           '[aria-label="上下文对话"] [data-turn-index]',
         )?.parentElement;
         const target = list?.querySelector(`[data-turn-index="${turnIndex}"]`);
-        if (target instanceof HTMLElement) {
-          const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-          target.scrollIntoView({
-            behavior: reduce || navigator.webdriver ? "instant" : "smooth",
-            block: "center",
-          });
+        if (list instanceof HTMLElement && target instanceof HTMLElement) {
+          const reduce =
+            window.matchMedia("(prefers-reduced-motion: reduce)").matches ||
+            navigator.webdriver;
+          // 目标轮次顶到列表可视区顶（留 12px 呼吸边距）。
+          // 用 rect 差值算「目标相对列表内容的当前偏移」，比 offsetTop 稳
+          //（offsetTop 相对 offsetParent，列表容器无 relative 时会错位）。
+          const to =
+            list.scrollTop +
+            (target.getBoundingClientRect().top - list.getBoundingClientRect().top) -
+            12;
+          if (reduce) {
+            list.scrollTop = to;
+          } else {
+            list.scrollTo({ top: to, behavior: "smooth" });
+          }
         }
       });
     },
@@ -1132,10 +1156,12 @@ export default function Home() {
             </div>
           </div>
 
-          {/* sticky + 定高：侧栏独立于主区滚动，始终钉在视口顶部。
+          {/* sticky + 定高：侧栏独立于主区滚动，钉在视口顶部。
               必须用 h- 而不是 max-h-：grid 子项默认 stretch，max-h 无法约束
-              子元素 aside 的内容高度，内部 overflow-y-auto 就不会真正滚动。 */}
-          <div className="sticky top-6 h-[calc(100vh-3rem)] min-h-[60vh] lg:min-h-0">
+              子元素 aside 的内容高度，内部 overflow-y-auto 就不会真正滚动。
+              高度用 calc(100vh-6.5rem) 而不是 -3rem：侧栏 sticky top-6 上方还有顶栏
+              （实测约 82px），静止时它的顶不在视口顶，-3rem 会让底边越出视口约 34px。 */}
+          <div className="sticky top-6 h-[calc(100vh-6.5rem)]">
             <ReviewSidebar
               items={reviews}
               selectedId={selectedId}

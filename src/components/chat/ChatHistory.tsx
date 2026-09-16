@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Project } from "@/lib/review-schema";
-import { formatRelativeTime } from "@/lib/chat-history";
+import { deriveProjectTitle, formatRelativeTime } from "@/lib/chat-history";
 import { buttonClass } from "@/components/ui/button";
 
 /**
@@ -88,19 +88,20 @@ export function ChatHistory({
     <>
       {/*
         常驻左栏。self-start + sticky 让它在长文档滚动时留在视口里。
-        这里有两个和左下角浮动按钮（设置/主题，占视口左下 104px 高、x=16..56）相关的数值：
+        高度取「内容自适应，但至少六成视口高、至多贴顶且避让左下按钮」：
+        - min-h-[60vh]：内容少（一两条）时也撑到约六成高，不再是孤零零一小条；
         - max-h 用 calc(100vh-8rem) 而不是更"自然"的 calc(100vh-3rem)：栏在静止时顶部
           并不在视口顶端（顶部还有顶栏，实测 82px），只减 3rem 会让长列表的底边落到
           视口外、最后一条被截掉；
-        - pb-28（112px）让列表内容止步于按钮上方：栏的左边缘在窄于约 1328px 时会落到
-          x=24，正好压在按钮那条竖带里。
+        - pb-28（112px）让列表内容止步于左下角两个浮动按钮（设置/主题，x=16..56）上方：
+          栏的左边缘在窄于约 1328px 时会落到 x=24，正好压在按钮那条竖带里。
         两者合起来保证「列表滚到底时最后一条仍在按钮上方约 50px」，且与视口高度无关。
-        改按钮尺寸/位置或这两个数值时要重新实测。理由同页脚 pl-12，详见 AGENTS.md
+        改按钮尺寸/位置或这些数值时要重新实测。理由同页脚 pl-12，详见 AGENTS.md
         「浮动按钮与页面底部布局」。
       */}
       <aside
         aria-label="历史记录"
-        className="sticky top-6 hidden max-h-[calc(100vh-8rem)] w-60 shrink-0 self-start flex-col overflow-y-auto rounded-2xl border border-border bg-surface pb-28 shadow-sm xl:flex"
+        className="sticky top-6 hidden max-h-[calc(100vh-8rem)] min-h-[60vh] w-60 shrink-0 self-start flex-col overflow-y-auto rounded-2xl border border-border bg-surface pb-28 shadow-sm xl:flex"
       >
         <HistoryList
           projects={projects}
@@ -194,6 +195,9 @@ function HistoryList({
         )}
         {projects.map((p) => {
           const active = p.id === activeId;
+          // 标题实时从 doc 派生（doc.title 优先，空则首段截断），不用落库时的快照 p.title——
+          // 这样左上角标题框改一个字，这里立刻跟着变，两处始终是同一个标题（单一事实源）。
+          const title = deriveProjectTitle(p.doc);
           return (
             <li key={p.id} className="relative">
               <button
@@ -214,7 +218,7 @@ function HistoryList({
                     (active ? "font-medium text-brand" : "text-foreground")
                   }
                 >
-                  {p.title}
+                  {title}
                 </span>
                 <span className="mt-0.5 block text-[11px] text-text-faint">
                   最近活动：{formatRelativeTime(p.lastActivityAt)}
@@ -223,7 +227,7 @@ function HistoryList({
               <button
                 type="button"
                 onClick={() => onDelete(p.id)}
-                aria-label={`删除文章：${p.title}`}
+                aria-label={`删除文章：${title}`}
                 title="删除这篇文章"
                 className="absolute right-1 top-1.5 rounded-md p-1 text-text-faint transition-colors hover:bg-surface hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring dark:hover:text-red-400"
               >
