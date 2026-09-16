@@ -1,7 +1,8 @@
 # 已定方案：项目式历史 + 锚点节点聊天 + 浮动聊天区
 
-> 状态：**已定方案 + 实现规格**（2026-09-16 与用户逐点确认）。本文是供**执行 agent** 直接照着做的完整规格，含概念模型、逐条行为规则、美学/状态设定、改动点清单、分阶段规划、验收清单。
-> 相关：[`../AGENTS.md`](../AGENTS.md)（「左侧对话历史」「浮动按钮与页面底部布局」「界面开发约定」三节，实现后需回写）、[./PLAN.md](./PLAN.md)
+> 状态：**已定方案 + 实现规格 + 执行计划**（2026-09-16 与用户逐点确认，含三个执行决策）。
+> 本文是供**执行 agent** 直接照着做的完整规格：概念模型、逐条行为规则、美学/状态设定、改动点清单、分阶段规划、验收清单、**执行决策与数据模型细节**。
+> 相关：[../AGENTS.md](../AGENTS.md)（「左侧对话历史」「浮动按钮与页面底部布局」「界面开发约定」三节，实现后需回写）、[./PLAN.md](./PLAN.md)
 
 ---
 
@@ -34,9 +35,9 @@
 8. **节点身份**（决定「接旧线还是开新线」）：锚定建议 → 按 `reviewId` 认（同一建议的提问永远接同一条线）；锚文字 → 按选区**原文逐字相同**认（`upstanding` 选得大小略有出入也算同一节点；选中另一段文字就开新行）。
 9. **节点内部是线性的往返对话，不分叉**；节点之间平铺并列。
 10. **节点内发消息的归属**：正在翻看旧节点时发送 → 接在旧节点末尾（无需重新选词）；此时正文里有新选区 → **新选区优先**（接新选区对应节点，已有则追加、没有则新建）。即「当前上下文」取值 = 有新选区跟新选区，没选区跟正在查看的节点。
-11. **无选区禁止提问**；想问全文请用户自行全选（直觉操作，不做特殊「全文节点」）。
+11. **无选区禁止提问**；想问全文请用户自行全选（直觉操作，不做特殊「全文节点」）。**阶段 3 起严格执行。**
 12. **锚点失效**（原文被改 / 删）：节点保留、对话可读、**可继续提问**（用建档时存的原文 + 标注「原文已变更」）；正文内的锚点标记消失。
-13. **行内删除**：节点时间线每行最右带删除按钮，删该行全部讨论（防冗杂）。
+13. **行内删除**：节点时间线每行最右带删除按钮，删该行全部讨论（防冗杂）。**直接删除，不弹确认**（删的是单节点讨论、非整篇文章）。
 
 ### C. 节点时间线（视觉呈现）
 
@@ -56,7 +57,7 @@
 
 ### E. LLM 上下文供给
 
-24. **节点边界即上下文边界**：锚点原文（含已被用户改过的当前版本，两者都给）+ 所在完整段落（复用 `packBlocks` 作语义环境）+ 范围内未处理的审阅建议 + 本节点全部历史轮次（过长时摘要 / 截断）；**跨节点的对话一律不给**（省 token 且防干扰）。
+24. **节点边界即上下文边界**：锚点原文（含已被用户改过的当前版本，两者都给）+ 所在完整段落（复用 `packBlocks` 作语义环境）+ 范围内未处理的审阅建议 + 本节点全部历史轮次（过长时摘要 / 截断）；**跨节点的对话一律不给**（省 token 且防干扰）。**「范围内未处理建议」= 仅锚点所在段落（blockId 相同）的 `open` 建议**（执行决策 3）。
 25. 锚点定位复用 `src/lib/anchoring.ts`（blockId + 原文 + 前后缀），不信任坐标的老原则对节点同样成立。
 26. **节点内 assistant 回复带修改集时，仍走「预览修改 → 确认」**（AGENTS.md 核心约束 4），节点化不绕过确认。
 
@@ -98,7 +99,7 @@
 - **每行（一个节点）**：`flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-surface-muted`。行内三段：
   - 左：6px 节点色圆点（色见 3.4）；
   - 中：横线 SVG / CSS——`h-0.5 bg-border-strong rounded-full` 为轨道，端点是 `h-2 w-2 rounded-full` 实心圆，**颜色同节点色**；端点沿轨道均匀分布；
-  - 右：删除按钮（`text-text-faint hover:text-foreground`，`aria-label="删除该节点讨论"`）。
+  - 右：删除按钮（`text-text-faint hover:text-foreground`，`aria-label="删除该节点讨论"`）。**点击直接删除，不弹确认**（执行决策 2）。
 - **当前节点行**：`bg-brand-soft`（浅绿底），圆点和端点色加深。
 - **hover 端点**：端点放大（`scale-125` 过渡）+ 悬浮摘要 tooltip（`rounded-md border border-border bg-surface px-2 py-1 text-xs shadow-md`，内容为锚点原文截断 12 字）。
 - **点端点**：聊天区消息列表 `scrollTo` 到对应轮次气泡（用 `data-turn-index` 定位，平滑滚动，测试环境瞬时——照 `ReviewSidebar` 的「`navigator.webdriver` 下直接瞬时定位」约定）。
@@ -114,8 +115,8 @@
 
 - 沿用现有 `ChatHistory` 外壳（常驻左栏 `xl` 以上 `aside[aria-label="历史记录"]`、窄屏抽屉 `role="dialog"`）。
 - 条目按钮：标题（文章开头截断）+ 副标题「最近活动：x 分钟前」（相对时间，复用 `chat-history.ts` 的相对时间函数）。当前打开的条目 `bg-brand-soft`。
-- 删除按钮沿用现有「删除对话：…」模式（`aria-label="删除文章：<标题>"`），文案与 aria 改为「文章」。
-- **保留 AGENTS.md 已定**：断点 `xl`、抽屉 `w-60 max-w-[85vw]`、`max-h-[calc(100vh-8rem)]` + `pb-28` 避让左下浮动按钮、条目带 `data-conversation-id`（改名 `data-project-id`）等数值，见 AGENTS.md「左侧对话历史」「浮动按钮与页面底部布局」两节，实现时照抄不重测。
+- 删除按钮沿用现有「删除对话：…」模式（`aria-label="删除文章：<标题>"`），文案与 aria 改为「文章」。删除整篇仍弹 `window.confirm`（规则 3 删除的是整个项目）。
+- **保留 AGENTS.md 已定**：断点 `xl`、抽屉 `w-60 max-w-[85vw]`、`max-h-[calc(100vh-8rem)]` + `pb-28` 避让左下浮动按钮、条目带 `data-project-id`（原 `data-conversation-id`）等数值，见 AGENTS.md「左侧对话历史」「浮动按钮与页面底部布局」两节，实现时照抄不重测。
 
 ### 3.6 聊天区浮动（sticky-dock）
 
@@ -130,54 +131,75 @@
 
 ---
 
-## 第四部分：改动点清单（对照实现）
+## 第四部分：执行决策（2026-09-16 用户拍板，覆盖实现细节）
 
-| 文件 | 改动 |
-|------|------|
-| `src/lib/review-schema.ts` | 新增 `ChatNodeSchema`（id / anchor:ChatContext / originalText 快照 / createdAt / turns:ChatTurn[]）与 `ProjectSchema`（id / title / doc:DocumentState / reviews:ReviewItem[] / nodes:ChatNode[] / lastActivityAt）；`Conversation` 演进或被 Project 取代 |
-| `src/lib/storage/db.ts` | Dexie `version(3)` 加 `projects` 表；旧 `documents`/`conversations` 数据迁移（AGENTS.md 第 13 条：`stores()` 是合并语义，旧表不会自动丢，迁移后如需删表要显式写 `null`） |
-| `src/lib/storage/` | 新增 `projects.ts`（列表 / 保存 / 删除 / 清空）；「清空数据」`clearAll` 必须覆盖新表（AGENTS.md 第 14 条） |
-| `src/lib/chat-history.ts` | 项目标题派生（取正文首段截断）、最近活动排序、upsert |
-| `src/components/chat/ChatHistory.tsx` | 改为项目列表（标题 / 相对时间 / 删除 / 点击恢复现场）；`data-conversation-id` → `data-project-id` |
-| `src/components/chat/ContextChat.tsx` | 重构为节点化聊天区：头部（历史按钮 + 上下文标签 + 最小化 + 新文章）+ 当前节点消息列表 + 输入框；节点时间线弹层子组件 |
-| `src/app/page.tsx` | sticky-dock 浮动逻辑；「新对话」→「新文章」；项目切换 / 恢复快照；无选区禁止提问的拦截；节点身份判定与建档 |
-| `src/lib/llm/prompts.ts` 等 | 按规则 24 组装节点边界上下文（复用 `packBlocks`） |
-| `src/components/editor/` | 正文被聊文字的点状下划线标记（Decoration，不序列化进正文，同建议标记思路）；点击跳节点 |
-| `tests/` + `tests/e2e/` | 随结构演进；E2E `helpers.ts` 的 mock 按新协议更新 |
+1. **数据模型演进 = 迁移后删除旧表**。Dexie 升到 `version(3)` 加 `projects` 表；upgrade 钩子里把旧 `documents` + `conversations` 组装成初始 Project 导入 `projects`，然后 `documents: null, conversations: null` 显式删旧表（AGENTS 第 13 条语义）。`projects` 只索引 `id` + `doc.updatedAt`（顶替原 `documents.updatedAt`，让 `loadLatestProject()` 走索引排序）；`reviews` / `nodes` 不入索引，只在内存过滤（本地单人够用，符合「只索引主键和查询字段」约定）。
+2. **节点时间线删除按钮直接删**，不弹 `window.confirm`（删的是单节点讨论、非整篇文章；整篇项目删除仍 confirm）。
+3. **「范围内未处理建议」= 仅锚点所在段落（blockId 相同）的 `open` 建议**，注入 LLM 请求；跨段落建议不带。
+
+### 数据模型细节（阶段 1 照此实现）
+
+- **`ChatNodeSchema`**：`{ id: string, anchor: ChatContextSchema, originalText: string（原文快照，锚点失效后仍可展示/继续提问）, createdAt: string, turns: ChatTurnSchema[] }`。
+- **`ProjectSchema`**：`{ id: string, title: string, doc: DocumentStateSchema, reviews: ReviewItemSchema[], nodes: ChatNodeSchema[], lastActivityAt: string }`。
+- **节点身份判定**（规则 8，仅按选区原文相同）：`review` 锚按 `reviewId` 认；`range` 锚按 `anchor.selectedText` 逐字相同认（位置 / 前后缀不参与）；`block` 锚按 `blockId` 认；`document` 锚整篇共用固定全文档节点。
+- `ConversationSchema` / `ChatContextSchema` / `ChatTurnSchema` 保持不变；`Conversation` 仅作迁移期读取旧数据的临时结构，迁完即弃，`src/lib/storage/conversations.ts` 与 `documents.ts` 删除。
 
 ---
 
-## 第五部分：分阶段实现规划
+## 第五部分：改动点清单（对照实现）
+
+| 文件 | 改动 |
+|------|------|
+| `src/lib/review-schema.ts` | 新增 `ChatNodeSchema`、`ProjectSchema`；`Conversation` 仅留作迁移期读取 |
+| `src/lib/storage/db.ts` | Dexie `version(3)` 加 `projects: "id, doc.updatedAt"`；upgrade 迁移旧数据→初始 Project，然后 `documents:null / conversations:null` |
+| `src/lib/storage/projects.ts` | 新增：`saveProject / listProjects / loadProject / deleteProject / clearAllProjects`（照 `conversations.ts` 模式，读写过 schema） |
+| `src/lib/storage/conversations.ts` / `documents.ts` | 删除（迁完即弃） |
+| `src/lib/chat-history.ts` | 派生函数：`deriveProjectTitle(doc)`（正文首段截断）、`upsertProject / sortProjects / newProjectId`、`deriveNodeTitle`（锚点原文截断，供时间线 hover）；`formatRelativeTime` 复用 |
+| `src/lib/chat-nodes.ts`（新） | 节点身份判定纯函数 `findOrCreateNodeId(nodes, anchor)` 与「当前上下文取值」逻辑（规则 8/10） |
+| `src/components/chat/ChatHistory.tsx` | 改为项目列表（标题 / 最近活动 / 删除 / 恢复快照）；`data-conversation-id` → `data-project-id`；「新对话」→「新文章」；空态文案 |
+| `src/components/chat/ContextChat.tsx` | 重构为节点化聊天区：头部（历史按钮 + 上下文标签 + 最小化 + 新文章）+ 当前节点消息列表（`data-turn-index`）+ 输入框；「原文已变更」提示条；节点时间线弹层子组件 |
+| `src/components/chat/NodeTimeline.tsx`（新） | 节点时间线弹层（行=节点、端点=提问、删除、当前节点高亮、hover 摘要、点端点滚动） |
+| `src/app/page.tsx` | sticky-dock 浮动逻辑；「新对话」→「新文章」；项目切换 / 恢复快照；建档时机（规则 1）；防抖保存把 reviews + nodes 一并写进 project；无选区禁止提问拦截（规则 11）；节点身份判定与建档 |
+| `src/lib/llm/chat-llm-schema.ts` | 请求加「锚点段落 open 建议」字段；`history` 语义改为「本节点全部轮次」 |
+| `src/lib/llm/chat-prompts.ts` | 按规则 24 组装节点边界上下文（复用 `packBlocks`，注入锚点段落 open 建议，history 取本节点 turns） |
+| `src/components/editor/ChatAnchorDecorationExtension.ts`（新） | 正文被聊文字点状下划线标记（照 `ReviewDecorationExtension`，独立 PluginKey + `data-chat-anchor-id` + 只发 `Decoration.inline`，不序列化）；点击跳节点 |
+| `src/components/editor/DocumentEditor.tsx` | 加 `chatAnchors / selectedChatNodeId / onSelectChatAnchor` props 与 ref 同步、meta 派发；选区→偏移换算挂 `onSelectionUpdate` |
+| `src/app/globals.css` | `.chat-anchor` 点状下划线（`--text-faint` 2px dotted，hover `--text-muted`），避开 `rev-` 前缀，dark 变体 |
+| `tests/` + `tests/e2e/` | 随结构演进；`conversations.test.ts`→`projects.test.ts`；E2E `helpers.ts` mock 按新协议更新、`chat-history.spec.ts` 改项目语义、`review-chat.spec.ts` 改选区后发 |
+
+---
+
+## 第六部分：分阶段实现规划
 
 **阶段 1 — 数据层（不动界面）**
-`review-schema.ts` 加 `ChatNode` / `Project`；Dexie 表演进 + 迁移；`clearAll` 覆盖新表；`chat-history.ts` 派生函数。配纯函数单测（Vitest + fake-indexeddb）。验收：旧数据无损迁移、schema 校验通过。
+`review-schema.ts` 加 `ChatNode` / `Project`；Dexie v3 迁移（旧数据→初始 Project→删旧表）；`projects.ts`；`clearAll` 覆盖新表；`chat-history.ts` / `chat-nodes.ts` 派生纯函数。配纯函数单测（Vitest + fake-indexeddb）+ 迁移用例。验收：旧数据无损迁移进 projects、旧表已删、schema 校验通过、clearAll 覆盖。
 
 **阶段 2 — 左栏项目列表**
-`ChatHistory` → 项目列表（标题 / 最近活动 / 删除 / 恢复快照）；「新对话」→「新文章」。验收：点开历史项目完整恢复正文 + 建议状态 + 聊天；删除清空。
+`ChatHistory` → 项目列表（标题 / 最近活动 / 删除 / 恢复快照）；「新对话」→「新文章」；防抖保存把 reviews + nodes 写进 project；建档时机。验收：点开历史项目完整恢复正文 + 建议状态 + 聊天；删除清空；刷新后项目仍在。
 
 **阶段 3 — 聊天区节点化（核心）**
-`ContextChat` 重构 + 节点身份判定 + 上下文组装。验收：选词提问建档、同词再提追加、改选区开新节点、翻看旧节点时发送接旧节点、无选区禁止提问。
+`ContextChat` 重构 + `chat-nodes.ts` 节点身份判定 + 上下文组装 + 无选区禁止提问。验收：选词提问建档、同词再提追加、改选区开新节点、翻看旧节点时发送接旧节点、无选区禁止提问（报错 + aria-live 播报）。
 
 **阶段 4 — 节点时间线弹层**
-「历史」按钮 + 时间线（行 = 节点、端点 = 提问、创建时间排序、行内删除、当前节点高亮、hover 摘要、点端点切对话 + 滚动）。验收：多节点切换、删除行、美学符合 3.3。
+`NodeTimeline.tsx` + 「历史」按钮接线。验收：多节点切换、行内删除（直接删）、当前节点高亮、点端点切对话 + 滚动到对应轮次、美学符合 3.3。
 
 **阶段 5 — 浮动 + 最小化**
 sticky-dock + 最小化。验收：多视口（1920/1440/1366/1280）滚动吸附 / 归位无抖动、不遮挡左下按钮与页脚、reduced-motion 下无动画。
 
 **阶段 6 — 正文锚点标记 + 测试收尾**
-点状下划线标记 + 点击跳节点；补齐 E2E / 集成测试；回写 AGENTS.md「左侧对话历史」一节。
+`ChatAnchorDecorationExtension` + `.chat-anchor` CSS + 点击跳节点；补齐 E2E / 集成测试；回写 AGENTS.md「左侧对话历史」一节与 `plan/CHANGELOG.md`。
 
-**建议先做阶段 1–2**（纯结构改动、可独立验收）；阶段 3 最重，动手前单独过一遍交互稿。每阶段跑 `typecheck` / `lint` / `test`，必要时 `test:e2e`；提交前征得用户同意。
+**执行方式**：连续执行 6 个阶段，每阶段跑 `typecheck` / `lint` / `test`（阶段 3/6 加 `test:e2e`）自测通过后，报「改了什么 + 建议提交信息」、经用户同意 commit，再进入下一阶段。阶段 3 最重，动手前已单独确认交互规则（本文件第二部分）。
 
 ---
 
-## 第六部分：验收总清单（执行 agent 自查）
+## 第七部分：验收总清单（执行 agent 自查）
 
 - [ ] 26 条行为规则逐条可演示
 - [ ] 美学符合第三部分（语义令牌、dark 变体、reduced-motion 登记、避让左下按钮）
 - [ ] 不破坏 AGENTS.md 核心约束 6 条（锚点定位 / opinion-edit 区分 / LLM 不擅自改正文 / Key 安全 / 防注入）
 - [ ] localStorage key、Zod schema 协议、API 路由、aria-label、键盘导航、`aria-live` 不破
-- [ ] 「清空数据」覆盖新表；旧数据迁移无损
+- [ ] 「清空数据」覆盖新表；旧数据迁移无损、旧表已删
 - [ ] 多视口实测（含左下浮动按钮遮挡按文字行测）
 - [ ] `typecheck` / `lint` / `test` / `test:e2e` 全绿
 

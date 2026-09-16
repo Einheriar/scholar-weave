@@ -1,43 +1,43 @@
-import type { ChatTurn, Conversation } from "./review-schema";
+import type { DocumentState, Project } from "./review-schema";
 
 /**
- * 对话历史的纯函数工具（PLAN 7 的延伸）。
- * 只做派生与排序，不碰存储（存储在 src/lib/storage/conversations.ts）也不碰 React。
+ * 项目 / 对话历史的纯函数工具（PLAN 7 的延伸 + 项目制）。
+ * 只做派生与排序，不碰存储（存储在 src/lib/storage/projects.ts）也不碰 React。
  */
 
-export function newConversationId(): string {
-  return `conv_${crypto.randomUUID()}`;
+export function newProjectId(): string {
+  return `proj_${crypto.randomUUID()}`;
+}
+
+/**
+ * 项目标题：取文档标题，为空则退而取正文首段截断。
+ * 文档标题是用户在标题框里输入的；未填时给正文开头的片段，列表里能看出是哪篇。
+ */
+export function deriveProjectTitle(doc: DocumentState): string {
+  const manual = doc.title.trim();
+  if (manual) return manual;
+  const first = doc.blocks[0]?.text.trim() ?? "";
+  if (!first) return "未命名文章";
+  return first.length > TITLE_MAX ? `${first.slice(0, TITLE_MAX)}…` : first;
+}
+
+/** 项目按最近活动（lastActivityAt）新到旧排序，不改动入参数组 */
+export function sortProjects(list: Project[]): Project[] {
+  return [...list].sort((a, b) =>
+    a.lastActivityAt < b.lastActivityAt ? 1 : a.lastActivityAt > b.lastActivityAt ? -1 : 0,
+  );
+}
+
+/** 按 id 覆盖或插入一个项目，返回重新排好序的新列表（不就地修改入参） */
+export function upsertProject(list: Project[], project: Project): Project[] {
+  return sortProjects([
+    project,
+    ...list.filter((p) => p.id !== project.id),
+  ]);
 }
 
 /** 列表里标题的字符上限，超出截断加省略号 */
 const TITLE_MAX = 24;
-
-/** 用首条用户消息当标题（ChatGPT 式），没有用户消息时给个占位 */
-export function deriveConversationTitle(turns: ChatTurn[]): string {
-  const first = turns.find((t) => t.role === "user");
-  // 消息里可能有换行/连续空白，压成单行再截断，避免标题把列表撑高
-  const text = (first?.content ?? "").replace(/\s+/g, " ").trim();
-  if (!text) return "新对话";
-  return text.length > TITLE_MAX ? `${text.slice(0, TITLE_MAX)}…` : text;
-}
-
-/** 新到旧：updatedAt 降序（ISO 字符串按字典序比较即时间序） */
-export function sortConversations(list: Conversation[]): Conversation[] {
-  return [...list].sort((a, b) =>
-    a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0,
-  );
-}
-
-/** 按 id 覆盖或插入一条，返回重新排好序的新列表（不就地修改入参） */
-export function upsertConversation(
-  list: Conversation[],
-  conversation: Conversation,
-): Conversation[] {
-  return sortConversations([
-    conversation,
-    ...list.filter((c) => c.id !== conversation.id),
-  ]);
-}
 
 function pad(n: number): string {
   return n.toString().padStart(2, "0");

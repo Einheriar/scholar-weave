@@ -1,85 +1,84 @@
 import { describe, expect, it } from "vitest";
 import {
-  deriveConversationTitle,
+  deriveProjectTitle,
   formatRelativeTime,
-  sortConversations,
-  upsertConversation,
+  sortProjects,
+  upsertProject,
 } from "@/lib/chat-history";
-import type { ChatTurn, Conversation } from "@/lib/review-schema";
+import type { DocumentState, Project } from "@/lib/review-schema";
 
 const NOW = new Date("2026-09-15T12:00:00");
 
-function conv(id: string, updatedAt: string, turns: ChatTurn[] = []): Conversation {
+function doc(id: string, title: string, firstParagraph: string): DocumentState {
   return {
     id,
-    title: `对话 ${id}`,
-    turns,
-    createdAt: updatedAt,
-    updatedAt,
+    title,
+    blocks: [{ id: "p_1", type: "paragraph", text: firstParagraph }],
+    revision: 1,
+    checksum: "abc12345",
+    updatedAt: "2026-09-15T10:00:00.000Z",
   };
 }
 
-describe("对话历史：标题派生", () => {
-  it("取首条用户消息当标题", () => {
-    const turns: ChatTurn[] = [
-      { role: "assistant", content: "我先说话（异常情况）" },
-      { role: "user", content: "帮我看看这段逻辑" },
-    ];
-    expect(deriveConversationTitle(turns)).toBe("帮我看看这段逻辑");
+function proj(id: string, lastActivityAt: string): Project {
+  return {
+    id,
+    title: `文章 ${id}`,
+    doc: doc(`doc_${id}`, `文章 ${id}`, "正文"),
+    reviews: [],
+    nodes: [],
+    lastActivityAt,
+  };
+}
+
+describe("项目：标题派生", () => {
+  it("优先取文档标题", () => {
+    expect(deriveProjectTitle(doc("d1", "我的手稿", "anything"))).toBe("我的手稿");
   });
 
-  it("把换行与连续空白压成单行", () => {
-    const turns: ChatTurn[] = [
-      { role: "user", content: "第一行\n\n  第二行\t内容" },
-    ];
-    expect(deriveConversationTitle(turns)).toBe("第一行 第二行 内容");
+  it("文档标题为空时取正文首段截断", () => {
+    expect(deriveProjectTitle(doc("d1", "  ", "Introduction"))).toBe("Introduction");
   });
 
-  it("过长标题截断并加省略号", () => {
+  it("首段过长截断并加省略号", () => {
     const long = "一".repeat(40);
-    const title = deriveConversationTitle([{ role: "user", content: long }]);
+    const title = deriveProjectTitle(doc("d1", "", long));
     expect(title).toHaveLength(25);
     expect(title.endsWith("…")).toBe(true);
   });
 
-  it("没有用户消息时给占位标题", () => {
-    expect(deriveConversationTitle([])).toBe("新对话");
-    expect(deriveConversationTitle([{ role: "assistant", content: "嗨" }])).toBe(
-      "新对话",
-    );
-    expect(deriveConversationTitle([{ role: "user", content: "   " }])).toBe(
-      "新对话",
-    );
+  it("标题与首段都空时给占位", () => {
+    expect(deriveProjectTitle(doc("d1", "  ", "   "))).toBe("未命名文章");
   });
 });
 
-describe("对话历史：排序与 upsert", () => {
-  const a = conv("a", "2026-09-15T10:00:00.000Z");
-  const b = conv("b", "2026-09-15T11:00:00.000Z");
-  const c = conv("c", "2026-09-14T09:00:00.000Z");
+describe("项目：排序与 upsert", () => {
+  const a = proj("a", "2026-09-15T10:00:00.000Z");
+  const b = proj("b", "2026-09-15T11:00:00.000Z");
+  const c = proj("c", "2026-09-14T09:00:00.000Z");
 
-  it("按 updatedAt 新到旧排序，且不改动入参数组", () => {
+  it("按 lastActivityAt 新到旧排序，且不改动入参数组", () => {
     const input = [a, c, b];
-    const sorted = sortConversations(input);
+    const sorted = sortProjects(input);
     expect(sorted.map((x) => x.id)).toEqual(["b", "a", "c"]);
     expect(input.map((x) => x.id)).toEqual(["a", "c", "b"]);
   });
 
   it("upsert 已有 id 时覆盖而不是新增，并重新排序到最前", () => {
-    const updated = { ...c, updatedAt: "2026-09-15T13:00:00.000Z" };
-    const list = upsertConversation([b, a, c], updated);
+    const updated = { ...c, lastActivityAt: "2026-09-15T13:00:00.000Z" };
+    const list = upsertProject([b, a, c], updated);
     expect(list).toHaveLength(3);
     expect(list[0].id).toBe("c");
-    expect(list[0].updatedAt).toBe("2026-09-15T13:00:00.000Z");
+    expect(list[0].lastActivityAt).toBe("2026-09-15T13:00:00.000Z");
   });
 
   it("upsert 新 id 时插入到正确位置", () => {
-    const list = upsertConversation([a, c], b);
+    const list = upsertProject([a, c], b);
     expect(list.map((x) => x.id)).toEqual(["b", "a", "c"]);
   });
 });
 
-describe("对话历史：相对时间", () => {
+describe("项目：相对时间", () => {
   it("一分钟内显示刚刚", () => {
     expect(formatRelativeTime("2026-09-15T11:59:30", NOW)).toBe("刚刚");
   });

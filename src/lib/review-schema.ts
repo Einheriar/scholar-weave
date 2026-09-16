@@ -149,8 +149,8 @@ export const ChatTurnSchema = z.object({
 export type ChatTurn = z.infer<typeof ChatTurnSchema>;
 
 /**
- * 一条对话记录（左侧历史记录列表里的一行）。
- * turns 是全部轮次；updatedAt 驱动列表排序，title 由首条用户消息派生。
+ * 一条对话记录（v2 旧模型，仅作迁移期读取旧数据的临时结构，迁完即弃）。
+ * 项目制（见 ProjectSchema）取代它成为左侧历史列表的单位。
  */
 export const ConversationSchema = z.object({
   id: z.string().min(1),
@@ -162,3 +162,33 @@ export const ConversationSchema = z.object({
   updatedAt: z.string(),
 });
 export type Conversation = z.infer<typeof ConversationSchema>;
+
+/**
+ * 聊天节点：一次提问锚定的上下文 + 该节点下的线性往返对话（项目制聊天）。
+ * anchor 复用 ChatContext 四种（document / block / range / review）；
+ * originalText 是建档时的原文快照——锚点失效（原文被改/删）后对话仍可读、
+ * 可继续提问，正文内的锚点标记则消失。
+ */
+export const ChatNodeSchema = z.object({
+  id: z.string().min(1),
+  anchor: ChatContextSchema,
+  originalText: z.string(),
+  createdAt: z.string(),
+  turns: z.array(ChatTurnSchema),
+});
+export type ChatNode = z.infer<typeof ChatNodeSchema>;
+
+/**
+ * 项目：一篇文章的完整工作现场（正文 + 审阅建议状态 + 聊天节点列表）。
+ * 左侧「历史记录」列表的单位；lastActivityAt 驱动排序（最近编辑/聊天/审阅在最上）。
+ * title 取正文首段截断（见 chat-history.ts 的 deriveProjectTitle）。
+ */
+export const ProjectSchema = z.object({
+  id: z.string().min(1),
+  title: z.string(),
+  doc: DocumentStateSchema,
+  reviews: z.array(ReviewItemSchema),
+  nodes: z.array(ChatNodeSchema),
+  lastActivityAt: z.string(),
+});
+export type Project = z.infer<typeof ProjectSchema>;

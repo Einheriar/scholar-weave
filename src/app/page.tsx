@@ -21,32 +21,30 @@ import {
 import type {
   ChangeSet,
   ChatContext,
+  ChatNode,
   ChatTurn,
-  Conversation,
   DocumentState,
+  Project,
   ReviewItem,
 } from "@/lib/review-schema";
 import type { ReviewMode } from "@/lib/llm/review-llm-schema";
 import { buildSampleDocument, buildSampleReview } from "@/lib/sample-data";
 import { canLocateScope } from "@/lib/anchoring";
 import { computeChangeSetApplication } from "@/lib/changeset";
+import { createDocument } from "@/lib/revisions";
 import { APP_VERSION } from "@/lib/version";
 import {
-  deriveConversationTitle,
-  newConversationId,
-  upsertConversation,
+  deriveProjectTitle,
+  newProjectId,
+  upsertProject,
 } from "@/lib/chat-history";
 import {
-  clearAllDocuments,
-  loadLatestDocument,
-  saveDocument,
-} from "@/lib/storage/documents";
-import {
-  clearAllConversations,
-  deleteConversation as deleteStoredConversation,
-  listConversations,
-  saveConversation,
-} from "@/lib/storage/conversations";
+  clearAllProjects,
+  deleteProject as deleteStoredProject,
+  listProjects,
+  loadLatestProject,
+  saveProject,
+} from "@/lib/storage/projects";
 
 type ReviewUiState =
   | { phase: "idle" }
@@ -81,15 +79,19 @@ export default function Home() {
   /** 供屏幕阅读器播报的状态文本（定位、快捷键等） */
   const [announce, setAnnounce] = useState("");
 
-  // 对话历史（左侧列表）
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [activeConvId, setActiveConvId] = useState<string | null>(null);
+  // 项目（左侧历史列表的单位 = 一篇文章的完整工作现场）
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [activeProjId, setActiveProjId] = useState<string | null>(null);
+  /** 当前项目的聊天节点（节点化聊天的数据；阶段 3 起按节点组织） */
+  const [nodes, setNodes] = useState<ChatNode[]>([]);
+  /** 当前查看的聊天节点 id（翻看旧节点时发送接它，见规则 10） */
+  const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   /**
-   * 当前对话上次落库后的对象。只用来取 createdAt（覆盖时不重置）与判断
-   * 「回复回来时用户是否还停在这条对话上」——在事件回调/异步里写，不在渲染期写。
+   * 当前项目上次落库后的对象。判断「回复回来时用户是否还停在这个项目上」
+   * 以及建档时机（首次审阅/发聊天才分配 id）——在事件回调/异步里写，不在渲染期写。
    */
-  const activeConvRef = useRef<Conversation | null>(null);
+  const activeProjRef = useRef<Project | null>(null);
 
   // 设置面板
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -104,24 +106,23 @@ export default function Home() {
   const abortRef = useRef<AbortController | null>(null);
   const chatAbortRef = useRef<AbortController | null>(null);
 
-  // ── 启动：恢复最近草稿与最近一条对话，否则载入样例 ──
+  // ── 启动：恢复最近项目，否则载入样例 ──
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [restored, stored] = await Promise.all([
-        loadLatestDocument(),
-        listConversations(),
-      ]);
+      const [latest, all] = await Promise.all([loadLatestProject(), listProjects()]);
       if (cancelled) return;
-      const base = restored ?? buildSampleDocument().doc;
-      setDoc(base);
-      setConversations(stored);
-      // 与 ChatGPT 一致：进来就接着上次那条对话说
-      const latest = stored[0];
+      setDoc(latest ? latest.doc : buildSampleDocument().doc);
+      setProjects(all);
       if (latest) {
-        activeConvRef.current = latest;
-        setActiveConvId(latest.id);
-        setChatTurns(latest.turns);
+        // 接着上次的项目继续：恢复正文 + 建议 + 聊天现场
+        activeProjRef.current = latest;
+        setActiveProjId(latest.id);
+        setReviews(latest.reviews);
+        setNodes(latest.nodes);
+        const lastNode = latest.nodes[latest.nodes.length - 1];
+        setActiveNodeId(lastNode?.id ?? null);
+        setChatTurns(lastNode?.turns ?? []);
       }
     })();
     return () => {
@@ -148,88 +149,94 @@ export default function Home() {
     );
   }, []);
 
-  // 防抖保存草稿
+  // 防抖保存项目：正文 + 建议 + 聊天节点整体落库（规则 1：首次保存才建档分配 id）
   useEffect(() => {
     if (!doc || saveState !== "saving") return;
     const t = setTimeout(async () => {
-      await saveDocument(doc);
+      const now = new Date().toISOString();
+      const id = activeProjId ?? newProjectId();
+      const project: Project = {
+        id,
+        title: deriveProjectTitle(doc),
+        doc,
+        reviews,
+        nodes,
+        lastActivityAt: now,
+      };
+      if (activeProjId === null) setActiveProjId(id);
+      activeProjRef.current = project;
+      setProjects((list) => upsertProject(list, project));
+      await saveProject(project);
       setSaveState("saved");
     }, 500);
     return () => clearTimeout(t);
-  }, [doc, saveState]);
+  }, [doc, reviews, nodes, saveState, activeProjId]);
 
-  // ── 对话历史：落库与切换 ──
-  /**
-   * 把某条对话的轮次写进本地历史（不存在则新建），并同步左侧列表。
-   * createdAt 只在新建时取当前时间，覆盖已有对话不重置。
-   */
-  const persistConversation = useCallback(
-    async (id: string, turns: ChatTurn[]) => {
-      if (!doc) return;
-      const previous = activeConvRef.current;
-      const now = new Date().toISOString();
-      const conversation: Conversation = {
-        id,
-        title: deriveConversationTitle(turns),
-        turns,
-        documentId: doc.id,
-        createdAt: previous?.id === id ? previous.createdAt : now,
-        updatedAt: now,
-      };
-      // 先更新内存（列表立即反映，后续判断也拿得到），再落库
-      activeConvRef.current = conversation;
-      setConversations((list) => upsertConversation(list, conversation));
-      await saveConversation(conversation);
-    },
-    [doc],
-  );
-
-  const handleSelectConversation = useCallback(
+  // ── 项目：切换 / 新建 / 删除 ──
+  /** 点开左栏项目：完整恢复正文 + 建议 + 聊天现场（规则 5 现场可回看） */
+  const handleSelectProject = useCallback(
     (id: string) => {
-      const conv = conversations.find((c) => c.id === id);
-      if (!conv) return;
-      activeConvRef.current = conv;
-      setActiveConvId(id);
-      setChatTurns(conv.turns);
+      const proj = projects.find((p) => p.id === id);
+      if (!proj) return;
+      activeProjRef.current = proj;
+      setActiveProjId(id);
+      setDoc(proj.doc);
+      setReviews(proj.reviews);
+      setNodes(proj.nodes);
+      const lastNode = proj.nodes[proj.nodes.length - 1];
+      setActiveNodeId(lastNode?.id ?? null);
+      setChatTurns(lastNode?.turns ?? []);
+      setSelectedId(null);
       setChatError(null);
       setActiveChangeSet(null);
+      setSaveState("idle");
       // 窄屏从抽屉里选完就收起；宽屏左栏常驻，这个 state 本来也不生效
       setHistoryOpen(false);
-      setAnnounce(`已打开对话：${conv.title}。`);
+      setAnnounce(`已打开文章：${proj.title}。`);
     },
-    [conversations],
+    [projects],
   );
 
-  /** 开新对话：只清空界面，已保存的那条留在左侧列表里，随时能点回来 */
-  const handleNewConversation = useCallback(() => {
-    activeConvRef.current = null;
-    setActiveConvId(null);
+  /** 新文章：清空正文 + 建议 + 聊天开一个新项目；旧文章留在左栏（规则 4） */
+  const handleNewProject = useCallback(() => {
+    activeProjRef.current = null;
+    setActiveProjId(null);
+    // 开一个空白文档让用户从零开始；id 全新表示这是新项目
+    setDoc(createDocument("", [""]));
+    setReviews([]);
+    setNodes([]);
+    setActiveNodeId(null);
     setChatTurns([]);
+    setSelectedId(null);
     setChatError(null);
     setActiveChangeSet(null);
     setHistoryOpen(false);
-    setAnnounce("已开始新对话。");
+    setSaveState("saving");
+    setAnnounce("已开始新文章。");
   }, []);
 
-  const handleDeleteConversation = useCallback(
+  const handleDeleteProject = useCallback(
     async (id: string) => {
-      const target = conversations.find((c) => c.id === id);
+      const target = projects.find((p) => p.id === id);
       if (
         target &&
-        !window.confirm(`删除对话「${target.title}」？此操作不可撤销。`)
+        !window.confirm(`删除文章「${target.title}」？此操作不可撤销。`)
       ) {
         return;
       }
-      await deleteStoredConversation(id);
-      setConversations((list) => list.filter((c) => c.id !== id));
-      if (activeConvId === id) {
-        activeConvRef.current = null;
-        setActiveConvId(null);
+      await deleteStoredProject(id);
+      setProjects((list) => list.filter((p) => p.id !== id));
+      if (activeProjId === id) {
+        activeProjRef.current = null;
+        setActiveProjId(null);
+        setReviews([]);
+        setNodes([]);
+        setActiveNodeId(null);
         setChatTurns([]);
       }
-      setAnnounce("已删除对话记录。");
+      setAnnounce("已删除文章。");
     },
-    [conversations, activeConvId],
+    [projects, activeProjId],
   );
 
   // ── 审阅 ──
@@ -453,17 +460,13 @@ export default function Home() {
         .map((t) => ({ role: t.role, content: t.content }))
         .slice(-8);
 
-      // 新对话在这里才分配 id：只发过消息的对话才进历史，列表里不会堆空条目
-      const convId = activeConvId ?? newConversationId();
-      if (activeConvId === null) setActiveConvId(convId);
-
       const withUser: ChatTurn[] = [
         ...chatTurns,
         { role: "user", content: message },
       ];
       setChatTurns(withUser);
-      // 用户消息先落库：左侧列表立刻出现这条对话（标题取自首条消息）
-      void persistConversation(convId, withUser);
+      // 触发项目落库（建档时机：发消息即保存，id 在防抖保存里分配）
+      setSaveState("saving");
 
       setChatBusy(true);
       setChatError(null);
@@ -510,12 +513,13 @@ export default function Home() {
               }
             : { role: "assistant", content: data.answer ?? "" };
         const withReply = [...withUser, reply];
-        // 等回复期间用户可能切走了：始终写回这条对话自己的记录，
-        // 但只有还停在这条上才动界面，否则会把别人的轮次贴到当前对话里。
-        void persistConversation(convId, withReply);
-        if (activeConvRef.current?.id === convId) {
+        // 等回复期间用户可能切走了：只有还停在这个项目上才动界面，
+        // 否则会把别人的轮次贴到当前项目里。
+        if (activeProjRef.current?.doc.id === doc.id || activeProjId === null) {
           setChatTurns(withReply);
         }
+        // 回复到达也算活动，触发落库
+        setSaveState("saving");
       } catch (e) {
         if (e instanceof Error && e.name === "AbortError") {
           // 用户取消：不加错误
@@ -532,8 +536,7 @@ export default function Home() {
       chatTurns,
       contextReview,
       packBlocks,
-      activeConvId,
-      persistConversation,
+      activeProjId,
       settings,
     ],
   );
@@ -636,14 +639,16 @@ export default function Home() {
     if (!window.confirm("确定要清空本地保存的草稿与数据吗？当前编辑器内容也会被重置。")) {
       return;
     }
-    await Promise.all([clearAllDocuments(), clearAllConversations()]);
+    await clearAllProjects();
     const { doc: d } = buildSampleDocument();
     setDoc(d);
     setReviews([]);
+    setNodes([]);
+    setActiveNodeId(null);
     setChatTurns([]);
-    setConversations([]);
-    activeConvRef.current = null;
-    setActiveConvId(null);
+    setProjects([]);
+    activeProjRef.current = null;
+    setActiveProjId(null);
     setActiveChangeSet(null);
     setSelectedId(null);
     setReviewUi({ phase: "idle" });
@@ -807,11 +812,11 @@ export default function Home() {
       */}
       <div className="flex flex-1 items-start gap-6">
         <ChatHistory
-          conversations={conversations}
-          activeId={activeConvId}
-          onSelect={handleSelectConversation}
-          onNew={handleNewConversation}
-          onDelete={handleDeleteConversation}
+          projects={projects}
+          activeId={activeProjId}
+          onSelect={handleSelectProject}
+          onNew={handleNewProject}
+          onDelete={handleDeleteProject}
           open={historyOpen}
           onOpenChange={setHistoryOpen}
         />
@@ -851,7 +856,7 @@ export default function Home() {
               busy={chatBusy}
               onSend={sendChat}
               onPreviewChangeSet={(cs) => setActiveChangeSet(cs)}
-              onNewChat={handleNewConversation}
+              onNewChat={handleNewProject}
             />
           </div>
 

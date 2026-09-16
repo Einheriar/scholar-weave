@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { Conversation } from "@/lib/review-schema";
+import type { Project } from "@/lib/review-schema";
 import { formatRelativeTime } from "@/lib/chat-history";
 import { buttonClass } from "@/components/ui/button";
 
 /**
- * 左侧对话历史（ChatGPT 式的一条一条记录）。
+ * 左侧历史记录（项目列表）：一项 = 一篇文章的完整工作现场（正文 + 建议 + 聊天）。
  *
  * 响应式两种形态，同一个列表组件复用：
  * - 宽屏（xl 及以上）：常驻左栏，sticky 跟随滚动；
@@ -17,7 +17,7 @@ import { buttonClass } from "@/components/ui/button";
  */
 
 export type ChatHistoryProps = {
-  conversations: Conversation[];
+  projects: Project[];
   activeId: string | null;
   onSelect: (id: string) => void;
   onNew: () => void;
@@ -30,7 +30,7 @@ export type ChatHistoryProps = {
 type HistoryListProps = Omit<ChatHistoryProps, "open" | "onOpenChange">;
 
 export function ChatHistory({
-  conversations,
+  projects,
   activeId,
   onSelect,
   onNew,
@@ -103,7 +103,7 @@ export function ChatHistory({
         className="sticky top-6 hidden max-h-[calc(100vh-8rem)] w-60 shrink-0 self-start flex-col overflow-y-auto rounded-2xl border border-border bg-surface pb-28 shadow-sm xl:flex"
       >
         <HistoryList
-          conversations={conversations}
+          projects={projects}
           activeId={activeId}
           onSelect={onSelect}
           onNew={onNew}
@@ -144,7 +144,7 @@ export function ChatHistory({
             }
           >
             <HistoryList
-              conversations={conversations}
+              projects={projects}
               activeId={activeId}
               onSelect={onSelect}
               onNew={onNew}
@@ -165,7 +165,7 @@ export function ChatHistory({
 }
 
 function HistoryList({
-  conversations,
+  projects,
   activeId,
   onSelect,
   onNew,
@@ -182,24 +182,24 @@ function HistoryList({
           onClick={onNew}
           className={buttonClass("secondary", "xs")}
         >
-          新对话
+          新文章
         </button>
       </div>
 
       <ul className="space-y-1 p-2">
-        {conversations.length === 0 && (
+        {projects.length === 0 && (
           <li className="px-2 py-3 text-xs leading-relaxed text-text-faint">
-            还没有对话记录。发送第一条消息后会自动保存到这里。
+            还没有文章。开始审阅或发送第一条消息后会自动保存到这里。
           </li>
         )}
-        {conversations.map((c) => {
-          const active = c.id === activeId;
+        {projects.map((p) => {
+          const active = p.id === activeId;
           return (
-            <li key={c.id} className="relative">
+            <li key={p.id} className="relative">
               <button
                 type="button"
-                data-conversation-id={c.id}
-                onClick={() => onSelect(c.id)}
+                data-project-id={p.id}
+                onClick={() => onSelect(p.id)}
                 aria-current={active ? "true" : undefined}
                 className={
                   "block w-full rounded-xl border px-2.5 py-2 pr-8 text-left transition-colors " +
@@ -214,17 +214,17 @@ function HistoryList({
                     (active ? "font-medium text-brand" : "text-foreground")
                   }
                 >
-                  {c.title}
+                  {p.title}
                 </span>
                 <span className="mt-0.5 block text-[11px] text-text-faint">
-                  {formatRelativeTime(c.updatedAt)} · {c.turns.length} 条消息
+                  最近活动：{formatRelativeTime(p.lastActivityAt)}
                 </span>
               </button>
               <button
                 type="button"
-                onClick={() => onDelete(c.id)}
-                aria-label={`删除对话：${c.title}`}
-                title="删除这条对话"
+                onClick={() => onDelete(p.id)}
+                aria-label={`删除文章：${p.title}`}
+                title="删除这篇文章"
                 className="absolute right-1 top-1.5 rounded-md p-1 text-text-faint transition-colors hover:bg-surface hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring dark:hover:text-red-400"
               >
                 <svg
