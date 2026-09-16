@@ -49,6 +49,9 @@ export function ReviewCard({
   const st = STATUS_META[item.status];
   const actionable = item.kind === "edit" && item.status === "open";
   const revertible = item.status === "accepted" || item.status === "rejected";
+  // 已忽略 / 已过期是「不再待处理」的终态，视觉上要弱化：
+  // 背景用更浅偏灰的 surface-muted（区别于正常卡的白/绿），边框也更淡。
+  const inactive = item.status === "rejected" || item.status === "stale";
 
   return (
     <li className="animate-item-in">
@@ -57,10 +60,16 @@ export function ReviewCard({
         aria-current={selected ? "true" : undefined}
         className={
           "cursor-pointer rounded-xl border p-3.5 text-sm shadow-sm transition-all duration-200 " +
-          (selected
-            ? "border-brand bg-brand-soft shadow-md ring-1 ring-brand-ring"
-            : "border-border bg-surface hover:-translate-y-px hover:border-border-strong hover:shadow-md") +
-          (item.status === "stale" ? " opacity-60" : "")
+          (inactive
+            // 终态卡：浅灰底 + 淡边框；选中时边框加深（border-foreground/40）
+            // 让「选中了」仍然明确，不因弱化而看不清
+            ? "bg-surface-muted opacity-75 " +
+              (selected
+                ? "border-foreground/40 ring-1 ring-foreground/20"
+                : "border-border")
+            : selected
+              ? "border-brand bg-brand-soft shadow-md ring-1 ring-brand-ring"
+              : "border-border bg-surface hover:-translate-y-px hover:border-border-strong hover:shadow-md")
         }
         onClick={() => onSelect(item.id)}
       >
@@ -87,9 +96,9 @@ export function ReviewCard({
           {renderMiniMarkdown(item.explanation)}
         </div>
 
-        {/* edit：展示 原文 → 替换 */}
+        {/* edit：展示 原文 → 替换（终态卡底色已是灰，内层框换成 surface 避免融掉） */}
         {item.kind === "edit" && item.replacement !== undefined && (
-          <div className="mb-2.5 space-y-1.5 rounded-lg bg-surface-muted p-2.5 text-xs">
+          <div className={`mb-2.5 space-y-1.5 rounded-lg p-2.5 text-xs ${inactive ? "bg-surface" : "bg-surface-muted"}`}>
             {item.scope.type === "range" && (
               <div className="flex gap-1.5">
                 <span className="shrink-0 text-text-faint">原文</span>

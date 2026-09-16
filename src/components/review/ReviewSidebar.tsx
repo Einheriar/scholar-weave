@@ -32,6 +32,10 @@ export type ReviewSidebarProps = {
  * 按范围分三区（全文 / 段落 / 局部），并支持按 范围/类型/类别/状态 筛选。
  * 范围筛选用胶囊按钮组（Grammarly 式一键切换），其余维度用下拉。
  */
+
+/** 卡片对齐时与侧栏可视区上下边缘的呼吸边距（px），避免贴死边缘显得局促 */
+const ALIGN_EDGE_GAP = 8;
+
 export function ReviewSidebar({
   items,
   selectedId,
@@ -78,10 +82,13 @@ export function ReviewSidebar({
   const bottomSpacerRef = useRef<HTMLDivElement | null>(null);
   /** 程序对齐进行中（对齐要拉进首尾补空区，钳制 effect 据此跳过） */
   const aligningRef = useRef(false);
+  /** 取消正在进行的平滑对齐动画（新一次对齐/卸载时调用） */
+  const cancelAlignRef = useRef<(() => void) | null>(null);
 
   // 选中变化时把卡片滚动到位。两种意图分开处理：
-  // - 正文→侧栏（anchorTop 有值）：直接设 scrollTop 把卡片对齐到与正文标记齐平，
-  //   不经过 scrollIntoView，避免它的 window 滚动修正把页面推跑
+  // - 正文→侧栏（anchorTop 有值）：平滑滚动到与正文标记对齐（中心对中心，
+  //   完整可见优先）。自写 rAF 插值而不用原生 smooth——后者动画期间持续位移
+  //   会让 E2E「元素稳定」检查超时；自写版在测试环境/减动效下直接瞬时定位。
   // - 侧栏→正文（anchorTop 为 null）：scrollIntoView 保底，确保卡片进入可视区
   useEffect(() => {
     if (!selectedId) return;
@@ -90,35 +97,68 @@ export function ReviewSidebar({
     if (!(scroller instanceof HTMLElement) || !(card instanceof HTMLElement)) {
       return;
     }
+    // 新一次对齐先取消上一次未完成的动画
+    cancelAlignRef.current?.();
+    cancelAlignRef.current = null;
+
     if (anchorTop != null) {
-      // 中心对齐：卡片是一个块、正文标记是一条线，顶部对齐会让卡片重心偏下。
-      // anchorTop 是「标记垂直中心」相对视口顶部的距离（DocumentEditor 已算上半个行高）。
-      // 目标：让卡片垂直中心对齐到它——但前提是卡片完整可见。
       const cardRect = card.getBoundingClientRect();
       const scrollerRect = scroller.getBoundingClientRect();
       // 理想卡片顶（相对视口）：中心对中心
       let targetCardTop = anchorTop - cardRect.height / 2;
-      // 上界钳制：卡片顶不能高过侧栏可视区上沿（否则靠顶的句子会把卡片切头）。
-      // 一旦要切头，就降级为「顶部贴齐可视区上沿」，优先保证完整可见。
-      targetCardTop = Math.max(targetCardTop, scrollerRect.top);
-      // 下界钳制：卡片底不能低过可视区下沿（卡片很长时中心对齐会切到底）。
+      // 完整可见优先：顶不切头（不低过可视区上沿）、底不切尾（不高过下沿）。
+      // 上下各留 ALIGN_EDGE_GAP 的呼吸边距，避免卡片贴死可视区边缘显得局促。
+      targetCardTop = Math.max(targetCardTop, scrollerRect.top + ALIGN_EDGE_GAP);
       targetCardTop = Math.min(
         targetCardTop,
-        scrollerRect.bottom - cardRect.height,
+        scrollerRect.bottom - cardRect.height - ALIGN_EDGE_GAP,
       );
-      const delta = cardRect.top - targetCardTop;
-      // 对齐可能要把卡片拉进首尾补空区，用 aligningRef 告诉钳制 effect 别拦。
+      // 目标 scrollTop = 当前 scrollTop + 卡片需移动的视口距离
+      const from = scroller.scrollTop;
+      const to = from + (cardRect.top - targetCardTop);
+
+      // 测试环境（navigator.webdriver）与「减少动态效果」用户：瞬时定位，不播动画
+      const reduceMotion =
+        typeof window !== "undefined" &&
+        (window.matchMedia("(prefers-reduced-motion: reduce)").matches ||
+          navigator.webdriver);
+      const distance = Math.abs(to - from);
+      if (reduceMotion || distance < 1) {
+        aligningRef.current = true;
+        scroller.scrollTop = to;
+        requestAnimationFrame(() => { aligningRef.current = false; });
+        return;
+      }
+
+      // 方案 B：短距离快、长距离封顶 750ms。每屏（clientH）约 300ms，上限 750ms。
+      const duration = Math.min(750, (distance / scroller.clientHeight) * 300 + 150);
+      const start = performance.now();
+      let raf = 0;
+      const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
       aligningRef.current = true;
-      scroller.scrollTop += delta;
-      // scroll 事件同步触发，复位放到下一拍，确保本次对齐不被钳制
-      requestAnimationFrame(() => {
+      const step = (now: number) => {
+        const t = Math.min(1, (now - start) / duration);
+        scroller.scrollTop = from + (to - from) * easeOut(t);
+        if (t < 1) {
+          raf = requestAnimationFrame(step);
+        } else {
+          aligningRef.current = false;
+          cancelAlignRef.current = null;
+        }
+      };
+      raf = requestAnimationFrame(step);
+      cancelAlignRef.current = () => {
+        cancelAnimationFrame(raf);
         aligningRef.current = false;
-      });
+      };
     } else {
       card.scrollIntoView({ block: "nearest" });
     }
     // 只在「选中了谁」或「正文标记位置」真正变化时对齐
   }, [selectedId, anchorTop]);
+
+  // 卸载时取消未完成的动画
+  useEffect(() => () => cancelAlignRef.current?.(), []);
 
   // 用户滚动钳制：首尾 80vh 补空是给「程序对齐」用的行程储备，不该被用户滚轮
   // 滚进去（会对着一大片纯空白）。监听滚动，一旦越界就拉回内容区边缘。
