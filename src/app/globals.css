@@ -209,6 +209,49 @@ body {
   --drawer-skel-dur: 250ms;
   --drawer-skel-blur: 2px;
   --drawer-skel-ease: ease-in-out;
+  /* 「新文章」凸起投影：Tailwind shadow-md 的黑投影在深色底上很弱，凸起主要靠
+     位移（translateY(-1px)）+ 背景抬亮兜底，不额外写 color-mix 提亮投影（方案 a）。 */
+  --new-btn-shadow:
+    0 4px 6px -1px rgb(0 0 0 / 0.1),
+    0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --new-btn-shadow-active:
+    0 1px 3px 0 rgb(0 0 0 / 0.1),
+    0 1px 2px -1px rgb(0 0 0 / 0.1);
+}
+
+/* 历史列表新条目出现动画（transitions.dev Toast 思路 + 占位生长）。
+   结构分两层，各管一件事：
+   - .t-toast-rise（外层 li）：display:grid + rows 0fr→1fr，高度从 0 平滑长到实际值。
+     动画期间兄弟项位置被容器高度连续顶开——「把下面的项目推下去」来自这里，
+     不需要给兄弟项单独写动画；
+   - .t-toast-content（内层）：从格底 rise（+8px 下移起跳）+ fade + 轻缩放 + 交叉模糊。
+     因为内容落在占位格底部，格子向上长，所以方向是「从下方弹进自己的格子」，
+     而不是从上方落下（从上方落会有一帧悬在空档上方、与列表其他项对不齐）。
+   动画只在挂载瞬间从 0fr 起步，is-open 挂上后 rows 停在 1fr，之后 li 高度由内容决定，
+   不影响删除/筛选的正常高度变化。 */
+.t-toast-rise {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 300ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.t-toast-rise.is-open {
+  grid-template-rows: 1fr;
+}
+.t-toast-rise > .t-toast-content {
+  overflow: hidden;
+  min-height: 0;
+  opacity: 0;
+  transform: translateY(8px) scale(0.97);
+  filter: blur(2px);
+  transition:
+    opacity 350ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 350ms cubic-bezier(0.22, 1, 0.36, 1),
+    filter 350ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.t-toast-rise.is-open > .t-toast-content {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  filter: blur(0);
 }
 
 /* 列表条目淡入（筛选切换 / 审阅结果到达） */
@@ -344,6 +387,7 @@ body {
   .animate-timeline-dropdown, .animate-timeline-dropdown-closing,
   .animate-tooltip-rise, .t-success-check, .review-card-collapsible { animation: none; }
   .t-icon-swap .t-icon { transition: none; }
+  .t-toast-rise, .t-toast-rise > .t-toast-content { transition: none !important; }
   .t-success-check { opacity: 1; }
   .t-success-check svg path { stroke-dashoffset: 0; }
   .review-card-collapsible { grid-template-rows: 0fr; }

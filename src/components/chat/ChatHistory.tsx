@@ -22,6 +22,11 @@ export type ChatHistoryProps = {
   onSelect: (id: string) => void;
   onNew: (opts?: { keepHistoryOpen?: boolean }) => void;
   onDelete: (id: string) => void;
+  /** 刚由「新文章」创建、尚未播过出现动画的项目 id；播完由 onCreatedShown 清掉。
+   *  按事件钉 id 而不是按时间取最新：列表里永远有一条最新，初次加载/切回旧项目/
+   *  筛选变化都会误触发「蹦」动画。 */
+  justCreatedId: string | null;
+  onCreatedShown: () => void;
   /** 窄屏抽屉是否展开（xl 及以上忽略） */
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -35,6 +40,8 @@ export function ChatHistory({
   onSelect,
   onNew,
   onDelete,
+  justCreatedId,
+  onCreatedShown,
   open,
   onOpenChange,
 }: ChatHistoryProps) {
@@ -109,6 +116,8 @@ export function ChatHistory({
           onSelect={onSelect}
           onNew={onNew}
           onDelete={onDelete}
+          justCreatedId={justCreatedId}
+          onCreatedShown={onCreatedShown}
         />
       </aside>
 
@@ -152,6 +161,8 @@ export function ChatHistory({
               onSelect={onSelect}
               onNew={onNew}
               onDelete={onDelete}
+              justCreatedId={justCreatedId}
+              onCreatedShown={onCreatedShown}
               variant="drawer"
             />
           </div>
@@ -167,6 +178,8 @@ function HistoryList({
   onSelect,
   onNew,
   onDelete,
+  justCreatedId,
+  onCreatedShown,
   variant = "sidebar",
 }: HistoryListProps & { variant?: "sidebar" | "drawer" }) {
   const drawer = variant === "drawer";
@@ -203,12 +216,15 @@ function HistoryList({
                 历史记录
               </span>
             </div>
-            {/* 层 2：新文章（hover 时淡入，字间距调宽与历史记录同宽；ghost 底 + hover 加深表可点击） */}
+            {/* 层 2：新文章（hover 时淡入，字间距调宽与历史记录同宽）。
+                「可按下」用扁平凸起三件套表达：背景抬亮到纸面 + 上抬 1px + 软投影；
+                active 把位移/投影收回 + scale 0.98，因果关系完整。投影变量见 globals.css
+                （深色下黑投影弱，位移+抬亮兜底，方案 a）。淡入淡出仍走内联 style。 */}
             <button
               type="button"
               onClick={() => onNew({ keepHistoryOpen: true })}
               className={
-                "t-skel-content absolute inset-y-0 right-0 my-auto flex h-10 w-[96.2px] items-center justify-center rounded-lg bg-surface-muted !text-lg font-medium !tracking-[0.3em] text-foreground transition-colors duration-150 hover:bg-border/50 active:scale-[0.98]"
+                "t-skel-content absolute inset-y-0 right-0 my-auto flex h-10 w-[96.2px] items-center justify-center rounded-lg bg-surface-muted !text-lg font-medium !tracking-[0.3em] text-foreground transition-[transform,box-shadow,background-color] duration-150 hover:-translate-y-px hover:bg-surface hover:shadow-[var(--new-btn-shadow)] active:translate-y-0 active:bg-border/50 active:shadow-[var(--new-btn-shadow-active)] active:scale-[0.98]"
               }
               style={{
                 opacity: titleHover ? 1 : 0,
@@ -241,63 +257,108 @@ function HistoryList({
             还没有文章。开始审阅或发送第一条消息后会自动保存到这里。
           </li>
         )}
-        {projects.map((p) => {
-          const active = p.id === activeId;
-          // 标题实时从 doc 派生（doc.title 优先，空则首段截断），不用落库时的快照 p.title——
-          // 这样左上角标题框改一个字，这里立刻跟着变，两处始终是同一个标题（单一事实源）。
-          const title = deriveProjectTitle(p.doc);
-          return (
-            <li key={p.id} className="relative">
-              <button
-                type="button"
-                data-project-id={p.id}
-                onClick={() => onSelect(p.id)}
-                aria-current={active ? "true" : undefined}
-                className={
-                  "block w-full rounded-xl border px-2.5 py-2 pr-8 text-left transition-colors " +
-                  (active
-                    ? "border-brand-ring bg-brand-soft"
-                    : "border-transparent hover:bg-surface-muted")
-                }
-              >
-                <span
-                  className={
-                    "block truncate text-sm " +
-                    (active ? "font-medium text-brand" : "text-foreground")
-                  }
-                >
-                  {title}
-                </span>
-                <span className="mt-0.5 block text-[11px] text-text-faint">
-                  最近活动：{formatRelativeTime(p.lastActivityAt)}
-                </span>
-              </button>
-              <button
-                type="button"
-                onClick={() => onDelete(p.id)}
-                aria-label={`删除文章：${title}`}
-                title="删除这篇文章"
-                className="absolute right-1 top-1.5 rounded-md p-1 text-text-faint transition-colors hover:bg-surface hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring dark:hover:text-red-400"
-              >
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  aria-hidden
-                >
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
-            </li>
-          );
-        })}
+        {projects.map((p) => (
+          <HistoryEntry
+            key={p.id}
+            project={p}
+            active={p.id === activeId}
+            justCreated={p.id === justCreatedId}
+            onSelect={onSelect}
+            onDelete={onDelete}
+            onCreatedShown={onCreatedShown}
+          />
+        ))}
       </ul>
     </>
+  );
+}
+
+/** 单条历史项目。刚创建（点「新文章」）的那一条播 toast-rise 出现动画：
+ *  外层 li 占位从 0fr 长到 1fr（兄弟项被连续顶下去），内层内容从格底 rise+fade。
+ *  播完回调清掉全局 justCreatedId，之后该条目与其他条目无异（筛选/重排不重演）。 */
+function HistoryEntry({
+  project: p,
+  active,
+  justCreated,
+  onSelect,
+  onDelete,
+  onCreatedShown,
+}: {
+  project: Project;
+  active: boolean;
+  justCreated: boolean;
+  onSelect: (id: string) => void;
+  onDelete: (id: string) => void;
+  onCreatedShown: () => void;
+}) {
+  // 渲染期 derived state（React 官方模式，同外层 closing 的写法）：justCreated 在防抖建档
+  // （~500ms 后）才变 true，命中时本条目已挂载，在渲染体内 setState、同渲染内立即重跑，
+  // 下一帧带 is-open 提交——动画从挂载首帧起步，与交叉淡入的初始态同理。
+  // 同批内不清 justCreated（要等动画播完由 onTransitionEnd 回调），否则这 500ms 窗口里
+  // 其他条目进列表会短暂误命中。
+  const [roseFor, setRoseFor] = useState<string | null>(null);
+  if (justCreated && roseFor !== p.id) setRoseFor(p.id);
+  const riseOpen = roseFor === p.id;
+  // 标题实时从 doc 派生（doc.title 优先，空则首段截断），不用落库时的快照 p.title——
+  // 这样左上角标题框改一个字，这里立刻跟着变，两处始终是同一个标题（单一事实源）。
+  const title = deriveProjectTitle(p.doc);
+  return (
+    <li
+      className={"t-toast-rise relative" + (riseOpen ? " is-open" : "")}
+      onTransitionEnd={(e) => {
+        // 占位生长播完（grid-template-rows 过渡结束）即视为出现动画完成
+        if (justCreated && e.target === e.currentTarget && e.propertyName === "grid-template-rows")
+          onCreatedShown();
+      }}
+    >
+      <div className="t-toast-content">
+        <button
+          type="button"
+          data-project-id={p.id}
+          onClick={() => onSelect(p.id)}
+          aria-current={active ? "true" : undefined}
+          className={
+            "block w-full rounded-xl border px-2.5 py-2 pr-8 text-left transition-colors " +
+            (active
+              ? "border-brand-ring bg-brand-soft"
+              : "border-transparent hover:bg-surface-muted")
+          }
+        >
+          <span
+            className={
+              "block truncate text-sm " +
+              (active ? "font-medium text-brand" : "text-foreground")
+            }
+          >
+            {title}
+          </span>
+          <span className="mt-0.5 block text-[11px] text-text-faint">
+            最近活动：{formatRelativeTime(p.lastActivityAt)}
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => onDelete(p.id)}
+          aria-label={`删除文章：${title}`}
+          title="删除这篇文章"
+          className="absolute right-1 top-1.5 rounded-md p-1 text-text-faint transition-colors hover:bg-surface hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring dark:hover:text-red-400"
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            aria-hidden
+          >
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </div>
+    </li>
   );
 }
 

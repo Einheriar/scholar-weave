@@ -116,6 +116,11 @@ export default function Home() {
     }
   }, []);
   const [historyOpen, setHistoryOpen] = useState(false);
+  // 点「新文章」后等待建档（防抖 ~500ms 后 persistProjectNow 分配 id）的标记。
+  // 建档时把它换成项目 id 传给列表，条目出现动画（toast-rise）按事件钉到这个 id，
+  // 播完由 onCreatedShown 清掉——不能按时间取最新，否则初次加载/切回旧项目都会误触发「蹦」。
+  const [justCreatedId, setJustCreatedId] = useState<string | null>(null);
+  const pendingNewRef = useRef(false);
   /**
    * 当前项目上次落库后的对象。判断「回复回来时用户是否还停在这个项目上」
    * 以及建档时机（首次审阅/发聊天才分配 id）——在事件回调/异步里写，不在渲染期写。
@@ -220,7 +225,14 @@ export default function Home() {
       nodes: nodesToSave,
       lastActivityAt: now,
     };
-    if (curId === null) setActiveProjId(id);
+    if (curId === null) {
+      setActiveProjId(id);
+      // 本次建档若正是「新文章」后的首次建档，把标记换成具体 id 供出现动画钉住这一条
+      if (pendingNewRef.current) {
+        pendingNewRef.current = false;
+        setJustCreatedId(id);
+      }
+    }
     activeProjRef.current = project;
     setProjects((list) => upsertProject(list, project));
     await saveProject(project);
@@ -290,6 +302,7 @@ export default function Home() {
     setChangeSetOpen(false);
     if (!opts?.keepHistoryOpen) setHistoryOpen(false);
     setSaveState("saving");
+    pendingNewRef.current = true; // 等 persistProjectNow 建档时换成具体 id
     setAnnounce("已开始新文章。");
   }, []);
 
@@ -1109,6 +1122,8 @@ export default function Home() {
           onSelect={handleSelectProject}
           onNew={handleNewProject}
           onDelete={handleDeleteProject}
+          justCreatedId={justCreatedId}
+          onCreatedShown={() => setJustCreatedId(null)}
           open={historyOpen}
           onOpenChange={setHistoryOpen}
         />
