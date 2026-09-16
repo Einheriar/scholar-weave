@@ -473,6 +473,33 @@ export default function Home() {
     [nodes, activeNodeId],
   );
 
+  // 上下文联动（2026-09-16 反馈修订）：点击侧栏/正文的另一条建议、或在正文里
+  // 划出新选区时，聊天视图同步切到该上下文对应的节点——「看什么就聊什么」，
+  // 头部标签与消息列表永远一致。该上下文还没有节点 → 清空消息列表显示空态
+  // （activeNodeId 置 null，发送时按规则 7/8 现找/现建，节点不提前创建）。
+  // 注意只认 selection/selectedId 的变化，不依赖 nodes，避免回复到达等节点更新误触。
+  useEffect(() => {
+    if (selection && selection.text.trim()) {
+      const hit = findNodeByAnchor(latestRef.current.nodes, {
+        type: "range",
+        blockId: selection.blockId,
+        selectedText: selection.text,
+      });
+      setActiveNodeId(hit?.id ?? null);
+      setChatTurns(hit?.turns ?? []);
+      return;
+    }
+    if (selectedId) {
+      const hit = findNodeByAnchor(latestRef.current.nodes, {
+        type: "review",
+        reviewId: selectedId,
+      });
+      setActiveNodeId(hit?.id ?? null);
+      setChatTurns(hit?.turns ?? []);
+    }
+    // 两者皆空：不动——保持正在查看的节点（chatContext 回退链的 activeNode 一级）
+  }, [selection, selectedId]);
+
   // ── 上下文计算：选区 > 选中建议 > 正在查看的节点 > 全文 ──
   // 规则 11：无选区禁止提问；但选区空了（如点侧栏建议后光标收起）不该直接掉回「全文」——
   // 只要还在某个节点/某条建议的上下文里，就保持它。兜底 document 仅迁移/占位。

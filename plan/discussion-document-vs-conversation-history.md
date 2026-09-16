@@ -214,3 +214,57 @@ sticky-dock + 最小化。验收：多视口（1920/1440/1366/1280）滚动吸�
 
 经多轮讨论，实际达成的是**比 (丙) 更彻底的项目制**：历史组织单位从「对话」换成「文章」，聊天降级为文章附属并按锚点节点组织；方向 (乙) 被「新文章」语义吸收。
 </details>
+
+---
+
+## 第八部分：执行报告（2026-09-16，供审核）
+
+本部分由执行 agent 在全部 6 个阶段 + 一轮用户反馈修订完成后撰写，供审核模型对照代码核查。总提交链（时间先后）：`82abecd` → `cafac91` → `2500bf5` → `35d93bc` → `acb009a` → `ce8529e`。
+
+### 8.1 每阶段实际做了什么（与第六部分计划对照）
+
+| 阶段 | 提交 | 实际落点 | 自测 |
+|------|------|----------|------|
+| 1+2 数据层 + 左栏 | `82abecd` | `src/lib/review-schema.ts` 加 `ChatNodeSchema`/`ProjectSchema`（`Conversation` 仅迁移期读取）；`db.ts` Dexie v3 仅 `projects` 表，upgrade 迁移旧 documents+conversations→初始 Project 后 `documents:null / conversations:null`；新增 `storage/projects.ts`、`migrations.ts`、`chat-nodes.ts`（节点身份纯函数）；`chat-history.ts` 改项目派生；`ChatHistory.tsx` 改项目列表（data-project-id / 新文章 / 删除文章：）；建档时机=首次审阅或发聊天，切换/新建前 `persistProjectNow` 立即落库 | Vitest 含 `tests/projects.test.ts`（迁移纯函数守护） |
+| 3 聊天区节点化 | `cafac91` | `ContextChat` 重构为节点化：头部上下文标签、stale 存档横幅（规则 12）、消息列表按当前节点过滤；`page.tsx` 发送那一刻按锚点身份找/建节点（`chat-nodes.ts`，规则 7/8/10），规则 11 无选区禁发；规则 24 上下文边界=节点边界（chat-prompts 只带本节点轮次 + 锚点段落 open 建议） | typecheck/lint/test |
+| 4 时间线 | `2500bf5` | 新增 `NodeTimeline.tsx`：行=节点（brand 圆点 + 轮次轨道 + 「N 问」），行内删除直接删（规则 13），端点=用户提问（数量恒等于提问次数，单端点居中 left:50%），点端点 `handleJumpToTurn` 切节点+滚到对应轮次 | typecheck/lint |
+| 5 浮动+最小化 | `35d93bc` | `page.tsx` sticky-dock：`sticky bottom-4 z-40`，最小化成窄条（规则 22）；reduced-motion 下 sticky 无位移动画 | 多视口人工核对 |
+| 6 锚点标记+收尾 | `acb009a` | 新增 `ChatAnchorDecorationExtension.ts`（range 虚线下划线 / block 左侧竖条，PluginKey 独立，`data-chat-anchor-id`，Decoration 视图层不序列化）+ `.chat-anchor` CSS（品牌绿，dark 变体）；`tests/chat-anchor-decoration.test.ts`；修「节点丢失/回复不落库」：React 批处理下 `setNodes(updater)` 副作用不可靠，改基于 `latestRef` 先算数组再 setState + `persistProjectNow(repliedNodes)`；E2E `selectTextInEditor` 重写（createRange+TreeWalker 取坐标、滚出浮动聊天区遮挡、短语双击词尾+Shift 点词首）；回写 AGENTS.md（陷阱 21/22）与 plan/CHANGELOG.md | 23 Playwright + 141 Vitest 全绿 |
+| 反馈修订 | `ce8529e` | 见 8.2 | 23 Playwright + 141 Vitest + typecheck/lint 全绿 |
+
+### 8.2 用户反馈修订（commit `ce8529e`）— 原始需求 5 条，逐条处理
+
+用户针对阶段 1–6 的成品截图提出 5 点，确认后实施：
+
+1. **时间线改抽屉**：`NodeTimeline` 从居中弹窗改为**从聊天区顶部向上滑出的抽屉**（`absolute inset-x-0 bottom-full`，即第二层抽拉，按用户示意图实现，非弹窗）。标题行 `sticky top-0 bg-surface`；点面板外（`e.target === e.currentTarget`）收起；新增 `animate-timeline-rise`（0.22s ease-out，`both`）并登记进 `globals.css` 的 `prefers-reduced-motion` 覆盖名单。移除 `aria-modal`。
+2. **删聊天区头部「新文章」按钮**：与左侧栏入口重复。`ContextChat` 的 `onNewChat` prop 及其按钮 JSX 整体删除（页面层 `handleNewProject` 仍接左栏）；聊天区头部只留「聊天节点历史」+ 最小化/展开。
+3. **端点数量**：核对后判定**不是 bug**——轨道端点只给用户提问画（`t.role === "user"`），1 问 = 1 端点；用户截图里的第二个圆点是行首节点色圆点（`bg-brand`，仅指示当前节点深浅）。逻辑未改，AGENTS.md 补了约定说明防止误判。
+4. **焦点丢失 bug**：几轮对话后头部「当前上下文」从选区掉回「全文」。根因：`chatContext` 回退链缺少「正在查看的节点」一级。修法（`page.tsx`）：把 `activeNode` 的 `useMemo` 上移到 `chatContext` 之前，回退链变为 选区 > 选中建议（selectedId）> **activeNode 的锚点** > 全文。规则 11（无选区禁发）不受影响——activeNode 非空时发送仍可用，归属规则 10 不变。
+5. **聊天框可拖拽调高**：头部与消息区之间加把手按钮（`aria-label="调整聊天区高度"`，`cursor-ns-resize` + `touch-none`，pointer capture + window `pointermove` 计算）。范围 180–720px（`MIN_PANEL_HEIGHT`/`MAX_PANEL_HEIGHT` clamp），拖动中实时 `onResize` → `page.tsx` 的 `handleChatResize`：setState + 写 localStorage `supergrammarly-chat-height`（lazy 初始化读回，超界取默认 320）。消息列表 `maxHeight = max(120, panelHeight - 160)`，`minHeight: 0` 保证 flex 收缩。
+
+### 8.3 架构决策与折中（审核要点）
+
+- **节点身份**（规则 8，与文档一致）：range 锚只按 `selectedText` 逐字相同认（blockId/位置/前后缀不参与）；block 锚按 `blockId`；review 锚按 `reviewId`；document 锚全篇一个固定节点。`stale` 可逆（定位恢复即回 open），与审阅建议的 stale 语义一致。
+- **React 18 批处理陷阱**（AGENTS.md 陷阱 21）：异步回调（回复到达、防抖保存）里一律读 `latestRef.current` 而非闭包 state；setState 前先算好新数组，持久化用显式算出的数组（`persistProjectNow(nodesOverride)`），不依赖 updater 返回值。
+- **Decoration 不序列化**（核心约束 1/2 不破）：`ChatAnchorDecorationExtension` 只发 `Decoration.inline/block`，正文与 blockId 机制不受影响；`chat-anchor` 避开 `rev-` 前缀防串扰。
+- **安全红线未动**：API Key 仍只走服务端 `.env.local` 或用户 localStorage 预设（设置面板），本轮改动零接触密钥链路；LLM 改正文仍必须经 ChangeSet 预览确认（批量接受依赖 Ctrl+Z 的既有取舍不变）。
+- **未做项**（明确不在本轮范围）：PLAN 10.5 的 revision/checksum 比对仍未接产品代码（AGENTS.md 陷阱 12，现状如实保留）；档位 clamp 映射表不做；「记住上次审阅模式」不做。
+
+### 8.4 测试与验证结果（截至 `ce8529e`）
+
+| 项 | 结果 |
+|----|------|
+| `npm run typecheck` | ✅ 无错误 |
+| `npm run lint` | ✅ 无错误 |
+| `npm run test`（Vitest） | ✅ 141/141（含 projects/chat-nodes/chat-anchor-decoration 新增） |
+| `npm run test:e2e`（Playwright，系统 Chrome） | ✅ 23/23（chat-history 项目语义 8 + core-flow 9 + review-chat 6），反馈修订后无回归 |
+| 浏览器实测 | 经可访问树确认：抽屉结构（标题/1 问/单端点/关闭）、拖拽把手、头部无「新文章」均已生效；用户窗口被 ZCode 面板遮挡，**滑出动画与拖拽手势的视觉验证未做成**（建议审核者目视补验） |
+| 多视口浮动按钮遮挡 | 阶段 5 按文字行（Range.getClientRects）实测过；反馈修订未改按钮尺寸/位置 |
+
+### 8.5 留给审核者的核查清单
+
+1. `ce8529e` diff（6 文件 +124/−41）逐条对照 8.2 五条修订，重点：`ContextChat.tsx` 把手 pointer 逻辑（capture 丢失边界）、`NodeTimeline.tsx` 的 `bottom-full` 定位是否在窄屏也能完整展开（`max-h-[46vh]` + `overflow-y-auto`）。
+2. `page.tsx` 的 `chatContext` 依赖数组 `[selection, selectedId, reviews, activeNode]` 是否完备（reviews 仅因 review 分支需要）。
+3. 抽屉点外部收起的 `e.target === e.currentTarget` 判断在抽屉内部滚动时是否误触（面板是遮罩子元素，滚动事件 target 应为面板本身，预期安全）。
+4. E2E 是否有用例该补未补：拖拽调高、抽屉开合目前无自动化覆盖（人工确认），如需可补。
+5. AGENTS.md 新增约定（时间线抽屉、端点=提问数、`supergrammarly-chat-height`、焦点回退链）与代码是否一致。

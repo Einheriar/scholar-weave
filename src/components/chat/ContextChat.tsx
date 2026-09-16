@@ -108,7 +108,11 @@ export function ContextChat({
 
   return (
     <section
-      className="relative flex flex-col rounded-2xl border border-border bg-surface shadow-sm"
+      className={
+        "relative flex flex-col border border-border bg-surface shadow-sm " +
+        // 时间线抽屉展开时它贴在聊天区上沿，顶部圆角让位给抽屉（视觉上连成一体）
+        (timelineOpen ? "rounded-b-2xl" : "rounded-2xl")
+      }
       aria-label="上下文对话"
     >
       <div
@@ -120,10 +124,16 @@ export function ContextChat({
         <span className="flex min-w-0 items-center gap-1.5 text-text-muted">
           <button
             type="button"
-            onClick={() => setTimelineOpen(true)}
+            onClick={() => setTimelineOpen((v) => !v)}
             aria-label="聊天节点历史"
+            aria-expanded={timelineOpen}
             title="聊天节点历史"
-            className="shrink-0 rounded-md p-1 text-text-faint transition-colors hover:bg-surface-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring"
+            className={
+              "shrink-0 rounded-md p-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring " +
+              (timelineOpen
+                ? "bg-node-soft text-node"
+                : "text-text-faint hover:bg-surface-muted hover:text-foreground")
+            }
           >
             <svg
               width="16"
@@ -145,7 +155,7 @@ export function ContextChat({
           </button>
           {activeNode && (
             <span
-              className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand"
+              className="h-1.5 w-1.5 shrink-0 rounded-full bg-node"
               title="正在聊这个节点"
               aria-hidden
             />

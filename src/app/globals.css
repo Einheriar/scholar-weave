@@ -20,6 +20,11 @@
   --brand-hover: #0b9069;
   --brand-soft: #e3f4ee;        /* 浅绿底（选中态等） */
   --brand-ring: #a8dcc9;
+  /* 聊天节点专用色（琥珀）：与审阅红/绿、品牌绿三层语义错开 */
+  --node: #b45309;              /* 琥珀主色（节点竖条 / 端点 / 正文锚点标记） */
+  --node-hover: #92400e;        /* 深一号（当前节点） */
+  --node-soft: rgb(180 83 9 / 0.10);   /* 浅琥珀底（当前行 / hover 光晕） */
+  --node-ring: rgb(180 83 9 / 0.25);   /* hover 光晕环 */
 }
 
 .dark {
@@ -36,6 +41,10 @@
   --brand-hover: #3fd6a5;
   --brand-soft: rgb(44 196 147 / 0.12);
   --brand-ring: rgb(44 196 147 / 0.35);
+  --node: #d97706;              /* 深色下稍亮，保持辨识度 */
+  --node-hover: #f59e0b;
+  --node-soft: rgb(217 119 6 / 0.16);
+  --node-ring: rgb(217 119 6 / 0.30);
 }
 
 @theme inline {
@@ -51,6 +60,10 @@
   --color-brand-hover: var(--brand-hover);
   --color-brand-soft: var(--brand-soft);
   --color-brand-ring: var(--brand-ring);
+  --color-node: var(--node);
+  --color-node-hover: var(--node-hover);
+  --color-node-soft: var(--node-soft);
+  --color-node-ring: var(--node-ring);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -177,7 +190,7 @@ body {
   html { transition: none; }
   .animate-modal-fade, .animate-modal-pop, .animate-item-in,
   .animate-drawer-in, .animate-drawer-out, .animate-modal-fade-out,
-  .animate-timeline-rise { animation: none; }
+  .animate-timeline-rise, .animate-tooltip-rise { animation: none; }
 }
 
 /* ── 审阅建议的编辑器标记（阶段 2）──────────────────────────────
@@ -255,16 +268,16 @@ body {
 }
 
 /* ── 聊天节点锚点的编辑器标记（锚点节点方案 / 阶段 6）──────────
-   原则：不引新色相，用品牌绿 + 弱灰绿；比审阅标记（红/绿）更弱一档，
-   避免与审阅标记争视觉优先级。颜色只作点缀，语义靠点状线型 + hover 提示。 */
+   节点系统专用琥珀色（--node-*）：与审阅标记（红=待处理/绿=已接受）、
+   品牌绿（主操作）三层语义错开。颜色只作点缀，语义靠点状线型 + hover 提示。 */
 
-/* range 锚点（选区文字）：2px 点状下划线，弱灰绿（--text-faint） */
+/* range 锚点（选区文字）：2px 点状下划线，琥珀（--node） */
 .chat-anchor {
   cursor: pointer;
   text-decoration-line: underline;
   text-decoration-style: dotted;
   text-decoration-thickness: 2px;
-  text-decoration-color: var(--text-faint);
+  text-decoration-color: var(--node);
   text-underline-offset: 4px;
   border-radius: 2px;
   transition:
@@ -272,26 +285,29 @@ body {
     text-decoration-color 0.15s ease;
 }
 .chat-anchor:hover {
-  text-decoration-color: var(--text-muted);
-  background-color: rgb(0 0 0 / 0.04);
-}
-.dark .chat-anchor:hover {
-  background-color: rgb(255 255 255 / 0.07);
+  text-decoration-color: var(--node-hover);
+  background-color: var(--node-soft);
 }
 
-/* block 锚点（段落）：左侧品牌绿圆点竖条，比审阅的琥珀竖线更细更弱 */
+/* block 锚点（段落）：左侧琥珀竖条 */
 .chat-anchor-block {
   position: relative;
-  box-shadow: inset 2px 0 0 0 var(--brand);
+  box-shadow: inset 2px 0 0 0 var(--node);
   padding-left: 0.6rem;
   border-radius: 2px;
   transition: background-color 0.15s ease;
 }
 .chat-anchor-block:hover {
-  background-color: rgb(13 166 120 / 0.06);
+  background-color: var(--node-soft);
 }
-.dark .chat-anchor-block:hover {
-  background-color: rgb(44 196 147 / 0.08);
+
+/* 节点时间线 hover 摘要：上浮淡入（悬浮层，不参与布局） */
+@keyframes tooltip-rise-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-tooltip-rise {
+  animation: tooltip-rise-in 0.15s ease-out both;
 }
 
 /* ── 编辑器纸张排版 ───────────────────────────────────────── */
