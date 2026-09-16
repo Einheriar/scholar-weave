@@ -87,6 +87,8 @@ export default function Home() {
   const [nodes, setNodes] = useState<ChatNode[]>([]);
   /** 当前查看的聊天节点 id（翻看旧节点时发送接它，见规则 10） */
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
+  /** 聊天区最小化（规则 22：收起为只有头部的窄条） */
+  const [chatMinimized, setChatMinimized] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   /**
    * 当前项目上次落库后的对象。判断「回复回来时用户是否还停在这个项目上」
@@ -982,21 +984,31 @@ export default function Home() {
                 {chatError}
               </p>
             )}
-            <ContextChat
-              context={chatContext}
-              contextReview={contextReview}
-              nodes={nodes}
-              activeNode={activeNode}
-              anchorStale={anchorStale}
-              turns={chatTurns}
-              busy={chatBusy}
-              sendDisabled={chatForbidden}
-              onSend={sendChat}
-              onPreviewChangeSet={(cs) => setActiveChangeSet(cs)}
-              onNewChat={handleNewProject}
-              onJumpToTurn={handleJumpToTurn}
-              onDeleteNode={handleDeleteNode}
-            />
+            {/*
+              聊天区浮动（规则 21 sticky-dock）：position sticky bottom 让它在文档流中
+              自然吸附——上滑至聊天区即将滚出视口时整个吸附到视口底部，回滚归位。
+              纯 CSS 无 JS 抖动；居中于内容列、左右留白天然避开左下两个 fixed 按钮。
+              z-40 低于设置模态 z-50；reduced-motion 下 sticky 无位移动画。
+            */}
+            <div className="sticky bottom-4 z-40">
+              <ContextChat
+                context={chatContext}
+                contextReview={contextReview}
+                nodes={nodes}
+                activeNode={activeNode}
+                anchorStale={anchorStale}
+                turns={chatTurns}
+                busy={chatBusy}
+                sendDisabled={chatForbidden}
+                minimized={chatMinimized}
+                onToggleMinimize={() => setChatMinimized((v) => !v)}
+                onSend={sendChat}
+                onPreviewChangeSet={(cs) => setActiveChangeSet(cs)}
+                onNewChat={handleNewProject}
+                onJumpToTurn={handleJumpToTurn}
+                onDeleteNode={handleDeleteNode}
+              />
+            </div>
           </div>
 
           {/* sticky + 定高：侧栏独立于主区滚动，始终钉在视口顶部。

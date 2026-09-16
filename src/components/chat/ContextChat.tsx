@@ -26,6 +26,9 @@ export type ContextChatProps = {
   busy: boolean;
   /** 规则 11：无选区且无选中建议时禁止提问（发送按钮禁用，由 page 拦截并提示） */
   sendDisabled: boolean;
+  /** 最小化（规则 22）：收起为只有头部的窄条，方便阅读正文腾空间 */
+  minimized: boolean;
+  onToggleMinimize: () => void;
   onSend: (message: string) => void;
   /** 打开某条回复附带的修改集预览 */
   onPreviewChangeSet: (changeSet: ChangeSet) => void;
@@ -52,6 +55,8 @@ export function ContextChat({
   turns,
   busy,
   sendDisabled,
+  minimized,
+  onToggleMinimize,
   onSend,
   onPreviewChangeSet,
   onNewChat,
@@ -80,7 +85,12 @@ export function ContextChat({
       className="flex flex-col rounded-2xl border border-border bg-surface shadow-sm"
       aria-label="上下文对话"
     >
-      <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2 text-xs">
+      <div
+        className={
+          "flex items-center justify-between gap-2 px-4 py-2 text-xs " +
+          (minimized ? "" : "border-b border-border")
+        }
+      >
         <span className="flex min-w-0 items-center gap-1.5 text-text-muted">
           <button
             type="button"
@@ -119,6 +129,23 @@ export function ContextChat({
           </span>
         </span>
         <div className="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            onClick={onToggleMinimize}
+            aria-label={minimized ? "展开聊天区" : "最小化聊天区"}
+            title={minimized ? "展开聊天区" : "最小化聊天区"}
+            className="rounded-md p-1 text-text-faint transition-colors hover:bg-surface-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring"
+          >
+            {minimized ? (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                <polyline points="18 15 12 9 6 15" />
+              </svg>
+            )}
+          </button>
           {turns.length > 0 && (
             <button
               type="button"
@@ -131,13 +158,13 @@ export function ContextChat({
         </div>
       </div>
 
-      {anchorStale && (
+      {anchorStale && !minimized && (
         <p className="mx-3.5 mt-3 rounded-lg bg-surface-muted px-3 py-2 text-xs text-text-muted">
           原文已变更，以下为存档讨论
         </p>
       )}
 
-      {turns.length > 0 && (
+      {!minimized && turns.length > 0 && (
         <div
           ref={listRef}
           className="max-h-56 space-y-2.5 overflow-y-auto px-3.5 py-3"
@@ -185,6 +212,7 @@ export function ContextChat({
         </div>
       )}
 
+      {!minimized && (
       <div className="flex items-end gap-2 border-t border-border p-2.5">
         <textarea
           value={draft}
@@ -214,6 +242,7 @@ export function ContextChat({
           发送
         </button>
       </div>
+      )}
 
       {timelineOpen && (
         <NodeTimeline
