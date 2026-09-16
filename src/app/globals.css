@@ -164,10 +164,20 @@ body {
   animation: item-fade-in 0.25s ease-out;
 }
 
+/* 聊天节点时间线抽屉：从聊天区顶部向上抽出（translateY 正值 → 0） */
+@keyframes timeline-rise-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-timeline-rise {
+  animation: timeline-rise-in 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
 @media (prefers-reduced-motion: reduce) {
   html { transition: none; }
   .animate-modal-fade, .animate-modal-pop, .animate-item-in,
-  .animate-drawer-in, .animate-drawer-out, .animate-modal-fade-out { animation: none; }
+  .animate-drawer-in, .animate-drawer-out, .animate-modal-fade-out,
+  .animate-timeline-rise { animation: none; }
 }
 
 /* ── 审阅建议的编辑器标记（阶段 2）──────────────────────────────

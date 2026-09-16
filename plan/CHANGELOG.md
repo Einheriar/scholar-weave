@@ -103,3 +103,10 @@
 - `—`       test: E2E `selectTextInEditor` 重写——createRange+TreeWalker 取词坐标、滚出浮动聊天区遮挡、
   多词短语双击词尾再 Shift+点词首；review-chat/chat-history 用例补选区步骤；全套 23 个 Playwright + 141 个 Vitest 通过
 - `—`       docs: AGENTS.md「左侧对话历史」改写为「项目制」+ 聊天节点/锚点约定 + 陷阱 21/22 + 关键文件地图更新
+- `—`       feat: 节点时间线改抽屉 + 聊天区拖拽调高 + 删头部新文章按钮 + 上下文焦点回落——
+  ① NodeTimeline 从居中弹窗改为从聊天区顶部向上滑出的抽屉（`absolute bottom-full`、`animate-timeline-rise`，
+  标题行 sticky，点面板外收起）；② 聊天区头部与消息区之间加拖拽把手（`调整聊天区高度`，
+  范围 180–720px，实时持久化 `supergrammarly-chat-height` localStorage）；③ 删除聊天区头部
+  「新文章」按钮（新建文章统一走左侧栏）；④ 修复焦点丢失：`chatContext` 回退链增加
+  「正在查看的节点（activeNode 锚点）」一级，选区收起后不再掉回「当前上下文：全文」；
+  端点数=用户提问数核对无误（1 问 = 1 端点居中）

@@ -61,6 +61,12 @@ const MODE_LABEL: Record<ReviewMode, string> = {
 
 type Selection = { blockId: string; text: string } | null;
 
+/** 聊天区高度（拖拽把手可调）的持久化 key 与范围 */
+const CHAT_HEIGHT_KEY = "supergrammarly-chat-height";
+const DEFAULT_CHAT_HEIGHT = 320;
+const MIN_CHAT_H = 180;
+const MAX_CHAT_H = 720;
+
 export default function Home() {
   const [doc, setDoc] = useState<DocumentState | null>(null);
   const [reviews, setReviews] = useState<ReviewItem[]>([]);
@@ -89,6 +95,23 @@ export default function Home() {
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
   /** 聊天区最小化（规则 22：收起为只有头部的窄条） */
   const [chatMinimized, setChatMinimized] = useState(false);
+  /** 聊天区高度 px（顶部拖拽把手可调；持久化到 localStorage） */
+  const [chatHeight, setChatHeight] = useState<number>(() => {
+    if (typeof window === "undefined") return DEFAULT_CHAT_HEIGHT;
+    const raw = window.localStorage.getItem(CHAT_HEIGHT_KEY);
+    const n = raw ? Number(raw) : NaN;
+    return Number.isFinite(n) && n >= MIN_CHAT_H && n <= MAX_CHAT_H
+      ? n
+      : DEFAULT_CHAT_HEIGHT;
+  });
+  const handleChatResize = useCallback((h: number) => {
+    setChatHeight(h);
+    try {
+      window.localStorage.setItem(CHAT_HEIGHT_KEY, String(h));
+    } catch {
+      /* localStorage 不可用时静默 */
+    }
+  }, []);
   const [historyOpen, setHistoryOpen] = useState(false);
   /**
    * 当前项目上次落库后的对象。判断「回复回来时用户是否还停在这个项目上」
@@ -444,7 +467,15 @@ export default function Home() {
     );
   }, []);
 
-  // ── 上下文计算：选区 > 建议（规则 11：无选区禁止提问，兜底 document 仅迁移/占位）──
+  /** 当前查看的聊天节点（消息列表显示它的轮次；上下文回落也用它，见 chatContext） */
+  const activeNode = useMemo(
+    () => nodes.find((n) => n.id === activeNodeId) ?? null,
+    [nodes, activeNodeId],
+  );
+
+  // ── 上下文计算：选区 > 选中建议 > 正在查看的节点 > 全文 ──
+  // 规则 11：无选区禁止提问；但选区空了（如点侧栏建议后光标收起）不该直接掉回「全文」——
+  // 只要还在某个节点/某条建议的上下文里，就保持它。兜底 document 仅迁移/占位。
   const chatContext: ChatContext = useMemo(() => {
     if (selection && selection.text.trim()) {
       return {
@@ -462,8 +493,10 @@ export default function Home() {
         return { type: "review", reviewId: item.id };
       }
     }
+    // 无选区、无选中建议时，沿用正在查看的节点锚点（焦点不丢）
+    if (activeNode) return activeNode.anchor;
     return { type: "document" };
-  }, [selection, selectedId, reviews]);
+  }, [selection, selectedId, reviews, activeNode]);
 
   /** 规则 11 拦截：无选区且无选中建议时禁止提问（想问全文请自行全选） */
   const chatForbidden = !selection && !selectedId;
@@ -654,12 +687,6 @@ export default function Home() {
       settings,
       persistProjectNow,
     ],
-  );
-
-  /** 当前查看的聊天节点（消息列表显示它的轮次） */
-  const activeNode = useMemo(
-    () => nodes.find((n) => n.id === activeNodeId) ?? null,
-    [nodes, activeNodeId],
   );
 
   /** 规则 12：当前节点锚点是否失效（原文被改/删），复用 canLocateScope 老原则 */
@@ -1070,7 +1097,8 @@ export default function Home() {
                 onToggleMinimize={() => setChatMinimized((v) => !v)}
                 onSend={sendChat}
                 onPreviewChangeSet={(cs) => setActiveChangeSet(cs)}
-                onNewChat={handleNewProject}
+                panelHeight={chatHeight}
+                onResize={handleChatResize}
                 onJumpToTurn={handleJumpToTurn}
                 onDeleteNode={handleDeleteNode}
               />

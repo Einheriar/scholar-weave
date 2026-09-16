@@ -32,8 +32,9 @@ export type ContextChatProps = {
   onSend: (message: string) => void;
   /** 打开某条回复附带的修改集预览 */
   onPreviewChangeSet: (changeSet: ChangeSet) => void;
-  /** 开一篇新文章（当前项目已自动存进左侧历史，不会被丢掉） */
-  onNewChat: () => void;
+  /** 聊天区当前高度 px（顶部拖拽把手可调；page 持久化到 localStorage） */
+  panelHeight: number;
+  onResize: (height: number) => void;
   /** 点击时间线端点：切到该节点并滚动到对应轮次（规则 19） */
   onJumpToTurn: (nodeId: string, turnIndex: number) => void;
   /** 时间线行内删除该节点全部讨论（规则 13） */
@@ -43,7 +44,9 @@ export type ContextChatProps = {
 /**
  * 节点化上下文对话（项目制聊天，PLAN 7 + 锚点节点方案）。
  * 底部对话框，显示**当前聊天节点**的线性往返对话（不是全文混合流）。
- * 头部：历史按钮（阶段 4 挂节点时间线）+ 当前上下文标签 + 最小化/展开 + 新文章。
+ * 头部：历史按钮（节点时间线抽屉）+ 当前上下文标签 + 最小化/展开。
+ * 新建文章只走左栏「新文章」，这里不放（避免意义不明的重复入口）。
+ * 顶部有一条拖拽把手，按住上/下拖可调聊天区高度（用户可控大小）。
  * LLM 回复若带修改集，只显示“预览修改”入口，绝不直接改正文。
  */
 export function ContextChat({
@@ -59,17 +62,40 @@ export function ContextChat({
   onToggleMinimize,
   onSend,
   onPreviewChangeSet,
-  onNewChat,
+  panelHeight,
+  onResize,
   onJumpToTurn,
   onDeleteNode,
 }: ContextChatProps) {
   const [draft, setDraft] = useState("");
   const [timelineOpen, setTimelineOpen] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
+  // 拖拽把手：记录起始高度与指针位置，pointermove 时差值调整
+  const dragRef = useRef<{ startY: number; startHeight: number } | null>(null);
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
   }, [turns, busy]);
+
+  // 拖拽调高：在 window 上监听 pointermove/up，松手结束
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => {
+      const d = dragRef.current;
+      if (!d) return;
+      // 往上拖（y 变小）→ 变高；钳制在 [MIN_PANEL_HEIGHT, MAX_PANEL_HEIGHT]
+      const next = clampPanelHeight(d.startHeight + (d.startY - e.clientY));
+      onResize(next);
+    };
+    const onUp = () => {
+      dragRef.current = null;
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, [onResize]);
 
   const submit = () => {
     const text = draft.trim();
@@ -82,7 +108,7 @@ export function ContextChat({
 
   return (
     <section
-      className="flex flex-col rounded-2xl border border-border bg-surface shadow-sm"
+      className="relative flex flex-col rounded-2xl border border-border bg-surface shadow-sm"
       aria-label="上下文对话"
     >
       <div
@@ -146,17 +172,24 @@ export function ContextChat({
               </svg>
             )}
           </button>
-          {turns.length > 0 && (
-            <button
-              type="button"
-              onClick={onNewChat}
-              className="rounded-md px-1.5 py-0.5 text-text-faint transition-colors hover:bg-surface-muted hover:text-foreground"
-            >
-              新文章
-            </button>
-          )}
         </div>
       </div>
+
+      {/* 顶部拖拽把手：按住上/下拖调整聊天区高度（用户可控大小） */}
+      {!minimized && (
+        <button
+          type="button"
+          onPointerDown={(e) => {
+            dragRef.current = { startY: e.clientY, startHeight: panelHeight };
+            e.currentTarget.setPointerCapture?.(e.pointerId);
+          }}
+          aria-label="调整聊天区高度"
+          title="按住上下拖动，调整聊天区高度"
+          className="group flex w-full cursor-ns-resize touch-none items-center justify-center border-b border-border py-1 transition-colors hover:bg-surface-muted"
+        >
+          <span className="h-1 w-10 rounded-full bg-border-strong transition-colors group-hover:bg-text-faint" />
+        </button>
+      )}
 
       {anchorStale && !minimized && (
         <p className="mx-3.5 mt-3 rounded-lg bg-surface-muted px-3 py-2 text-xs text-text-muted">
@@ -167,7 +200,8 @@ export function ContextChat({
       {!minimized && turns.length > 0 && (
         <div
           ref={listRef}
-          className="max-h-56 space-y-2.5 overflow-y-auto px-3.5 py-3"
+          className="flex-1 space-y-2.5 overflow-y-auto px-3.5 py-3"
+          style={{ minHeight: 0, maxHeight: Math.max(120, panelHeight - 160) }}
         >
           {turns.map((t, i) => (
             <div
@@ -258,6 +292,13 @@ export function ContextChat({
       )}
     </section>
   );
+}
+
+/** 聊天区高度钳制范围（拖拽把手可调） */
+const MIN_PANEL_HEIGHT = 180;
+const MAX_PANEL_HEIGHT = 720;
+function clampPanelHeight(h: number): number {
+  return Math.min(MAX_PANEL_HEIGHT, Math.max(MIN_PANEL_HEIGHT, Math.round(h)));
 }
 
 function describeContext(

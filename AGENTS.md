@@ -81,7 +81,7 @@ src/lib/llm/thinking.ts         # 思考档位 → 请求参数映射（服务�
 src/lib/llm/                    # provider adapter、prompts（审阅+对话）、wire schema、server-helpers
 src/components/editor/          # DocumentEditor、BlockIdExtension、ReviewDecorationExtension、ChatAnchorDecorationExtension
 src/components/review/          # ReviewSidebar、ReviewCard、ChangeSetPreview、review-meta
-src/components/chat/            # ContextChat、ChatHistory（左栏项目列表 + 窄屏抽屉）、NodeTimeline（节点时间线弹层）
+src/components/chat/            # ContextChat、ChatHistory（左栏项目列表 + 窄屏抽屉）、NodeTimeline（节点时间线抽屉）
 src/components/ui/              # button.tsx（buttonClass 工厂）、select.tsx（自定义下拉）
 src/components/ThemeToggle.tsx  # 主题切换按钮（左下角浮动）
 src/components/SettingsPanel.tsx # 设置面板（中央模态，模型/审阅/数据三个 Tab）
@@ -131,12 +131,12 @@ tests/e2e/                      # Playwright 用例（helpers.ts 里是 mock 与
 聊天按**锚点节点**组织（规则 7/8/10/11/24），一个节点 = 一处锚点 + 一串对话轮次：
 
 - **节点身份（规则 8）**：review 锚按 `reviewId` 认；range 锚**只按选区原文逐字相同**认（blockId/位置/前后缀不参与——选区大小略有出入算同一节点，选中另一段文字就开新行）；block 锚按 `blockId` 认；document 锚整篇共用一个固定节点。
-- **发送归属（规则 10）**：有新选区跟新选区，没选区跟正在查看的节点；**只在发送那一刻**找/建节点（规则 7，没有「新建节点」按钮）。
+- **发送归属（规则 10）**：有新选区跟新选区，没选区跟正在查看的节点；**只在发送那一刻**找/建节点（规则 7，没有「新建节点」按钮）。「正在查看的节点」同时是上下文的兜底：头部「当前上下文」标签的回退链是 选区 > 选中建议 > **activeNode 的锚点** > 全文（`page.tsx` 的 `chatContext` memo）——选区收起时不该掉回「全文」，这是个修过的 bug，别去掉 activeNode 这一级。
 - **规则 11（无选区禁止提问）**：无选区且无选中建议时发送被禁用。E2E 里必须先 `selectTextInEditor` 再发送。
 - **规则 12（stale 锚）**：锚点定位失败时节点仍可读，聊天区显示「原文已变更，以下为存档讨论」，正文里的锚点标记消失。
 - **规则 24（上下文边界 = 节点边界）**：发给模型的 history 只有本节点轮次；openReviews 只带锚点所在段落的 open 建议。
-- 节点时间线（`NodeTimeline`）：聊天区头部「聊天节点历史」按钮弹出，每行一个节点（brand 圆点 + 轮次轨道），行内删除直接删（规则 13，无确认）。
-- 聊天区**浮动**（规则 21 sticky-dock）：`sticky bottom-4`，可最小化成窄条（规则 22）。
+- 节点时间线（`NodeTimeline`）：聊天区头部「聊天节点历史」按钮**从聊天区顶部向上滑出的抽屉**（第二层抽拉，不是居中弹窗；标题行 `sticky top-0`，点面板外收起），每行一个节点（brand 圆点 + 轮次轨道 + 行尾「N 问」），行内删除直接删（规则 13，无确认）。**轨道上的端点 = 用户提问，数量恒等于提问次数**（1 次提问 = 1 个端点，单端点居中 left:50%）；辅助圆点（行首节点色圆点）不是端点，别和它混。
+- 聊天区**浮动**（规则 21 sticky-dock）：`sticky bottom-4`，可最小化成窄条（规则 22）。**高度可拖拽**：头部与消息区之间的把手（`aria-label="调整聊天区高度"`）按住上拉/下拖，范围 180–720px，实时持久化到 localStorage `supergrammarly-chat-height`。新建文章**只在左侧历史栏**，聊天区头部不放「新文章」按钮（曾加过又删掉，与左侧入口重复）。
 - 正文锚点标记（`ChatAnchorDecorationExtension`）：range 锚画虚线下划线、block 锚画左侧竖条，点击标记切到对应节点对话。Decoration 是视图层，不序列化进正文。
 
 ## 浮动按钮与页面底部布局

@@ -16,9 +16,10 @@ export type NodeTimelineProps = {
 };
 
 /**
- * 节点时间线弹层（规则 14-19）：一条横线 = 一个节点，线上端点 = 一次提问，
+ * 节点时间线抽屉（规则 14-19）：一条横线 = 一个节点，线上端点 = 一次提问，
  * 多条线并列 = 多个节点。不常驻界面，是「地图 / 目录」。
- * 行内不带摘要文字；hover 端点悬浮锚点摘要；按节点创建时间排序。
+ * 从聊天区顶部向上抽出的抽屉（不是屏幕居中弹窗）：底部衔接聊天区头部、往上展开，
+ * 点击外部收起。行内不带摘要文字；hover 端点悬浮锚点摘要；按节点创建时间排序。
  */
 export function NodeTimeline({
   nodes,
@@ -49,22 +50,18 @@ export function NodeTimeline({
   );
 
   return (
+    // 从聊天区顶部向上抽出的抽屉：absolute 定位于聊天区容器（ContextChat section 是 relative），
+    // bottom-full 贴住聊天区上沿往上展开。点抽屉外部（聊天区其余区域）收起。
     <div
-      // 只认点遮罩空白处：面板是遮罩子元素，面板内按下拖到遮罩上松手不该关
-      //（同 SettingsPanel / ChatHistory 的写法，见 AGENTS.md 界面开发约定 7）
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
-      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4 backdrop-blur-[2px] animate-modal-fade"
+      className="absolute inset-x-0 bottom-full z-30 max-h-[46vh] overflow-y-auto rounded-t-2xl border border-b-0 border-border bg-surface shadow-lg animate-timeline-rise"
       role="dialog"
-      aria-modal="true"
       aria-label="聊天节点历史"
     >
-      <div
-        ref={panelRef}
-        className="w-full max-w-md rounded-2xl border border-border bg-surface shadow-lg animate-modal-pop"
-      >
-        <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
+      <div ref={panelRef}>
+        <div className="sticky top-0 flex items-center justify-between border-b border-border bg-surface px-4 py-2.5">
           <h2 className="text-xs font-semibold tracking-tight text-text-muted">
             聊天节点
           </h2>
@@ -77,7 +74,7 @@ export function NodeTimeline({
           </button>
         </div>
 
-        <ul className="max-h-80 space-y-1 overflow-y-auto p-2">
+        <ul className="space-y-1 p-2">
           {sorted.length === 0 && (
             <li className="px-3 py-4 text-xs leading-relaxed text-text-faint">
               还没有聊天节点。选中正文里的词或段落提问后，这里会出现对应的讨论线。
