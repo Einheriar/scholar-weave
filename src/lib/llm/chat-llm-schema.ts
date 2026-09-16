@@ -90,6 +90,20 @@ export const ChatRequestSchema = z.object({
       category: ReviewCategorySchema,
     })
     .optional(),
+  /**
+   * 锚点所在段落内未处理的审阅建议（规则 24：节点边界即上下文边界，
+   * 只带锚点段的 open 建议，跨段落不带）。纯上下文供给，不影响修改集协议。
+   */
+  openReviews: z
+    .array(
+      z.object({
+        id: z.string(),
+        title: z.string(),
+        explanation: z.string(),
+        category: ReviewCategorySchema,
+      }),
+    )
+    .default([]),
   language: z.enum(["zh", "en"]).default("zh"),
 });
 export type ChatRequest = z.infer<typeof ChatRequestSchema>;

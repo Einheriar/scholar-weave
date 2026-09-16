@@ -42,8 +42,16 @@ export function buildChatMessages(req: ChatRequest): ChatMessage[] {
   const selectedPart = req.context.selectedText
     ? `\n用户选中的文字：「${req.context.selectedText}」`
     : "";
+  // 规则 24：锚点段落内未处理的建议，供模型知晓该段还有哪些待处理问题（不直接改）
+  const openReviewsPart =
+    req.openReviews.length > 0
+      ? `\n锚点段落内还有 ${req.openReviews.length} 条未处理建议：\n` +
+        req.openReviews
+          .map((r) => `- 「${r.title}」：${r.explanation}`)
+          .join("\n")
+      : "";
 
-  const system = `你是一个文档写作助手，正在就一份${language}文档与用户对话。当前对话上下文是：${contextDesc}。${reviewPart}${selectedPart}
+  const system = `你是一个文档写作助手，正在就一份${language}文档与用户对话。当前对话上下文是：${contextDesc}。${reviewPart}${selectedPart}${openReviewsPart}
 你的解释/回答用${explanationLanguage}撰写（无论文档是什么语言）；涉及替换正文时，replacement 用${language}（与对应段落原文一致）。
 
 ${SAFETY}

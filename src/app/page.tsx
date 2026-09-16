@@ -38,6 +38,7 @@ import {
   newProjectId,
   upsertProject,
 } from "@/lib/chat-history";
+import { findNodeByAnchor } from "@/lib/chat-nodes";
 import {
   clearAllProjects,
   deleteProject as deleteStoredProject,
@@ -402,7 +403,7 @@ export default function Home() {
     );
   }, []);
 
-  // ── 上下文计算：选区 > 建议 > 全文 ──
+  // ── 上下文计算：选区 > 建议（规则 11：无选区禁止提问，兜底 document 仅迁移/占位）──
   const chatContext: ChatContext = useMemo(() => {
     if (selection && selection.text.trim()) {
       return {
@@ -422,6 +423,9 @@ export default function Home() {
     }
     return { type: "document" };
   }, [selection, selectedId, reviews]);
+
+  /** 规则 11 拦截：无选区且无选中建议时禁止提问（想问全文请自行全选） */
+  const chatForbidden = !selection && !selectedId;
 
   const contextReview = useMemo(
     () =>
@@ -449,27 +453,72 @@ export default function Home() {
     [doc],
   );
 
-  // ── 对话 ──
+  // ── 对话（节点化：规则 7/8/10/11/24）──
   const sendChat = useCallback(
     async (message: string) => {
       if (!doc) return;
+      // 规则 11：无选区且无选中建议时禁止提问（想问全文请自行全选）
+      if (chatForbidden) {
+        setChatError("请先选中正文中的词、段落，或选中一条审阅建议，再提问。");
+        setAnnounce("提问前请先选中正文或一条建议。");
+        return;
+      }
       const ctx = chatContext;
-      const blocks = packBlocks(ctx);
-      // 发给模型的历史只有当前这条对话的最近 8 轮，不含其他对话、也不含正文全文
-      const history = chatTurns
-        .map((t) => ({ role: t.role, content: t.content }))
-        .slice(-8);
-
-      const withUser: ChatTurn[] = [
-        ...chatTurns,
-        { role: "user", content: message },
-      ];
-      setChatTurns(withUser);
+      // 规则 8/10：当前上下文 = 有新选区跟新选区，没选区跟正在查看的节点。
+      // 发送那一刻才按身份找/建节点（规则 7）。
+      const existing = findNodeByAnchor(nodes, ctx);
+      const nodeId = existing?.id ?? `node_${crypto.randomUUID()}`;
+      // 节点锚点原文快照：range 取选区原文；review 锚取建议定位到的原文（range/block 级）
+      const anchorReview =
+        ctx.type === "review" ? reviews.find((r) => r.id === ctx.reviewId) : undefined;
+      const originalText =
+        ctx.type === "range"
+          ? (ctx.selectedText ?? "")
+          : existing?.originalText ??
+            (anchorReview?.scope.type === "range" ? anchorReview.scope.original : "");
+      const targetNode: ChatNode = existing ?? {
+        id: nodeId,
+        anchor: ctx,
+        originalText,
+        createdAt: new Date().toISOString(),
+        turns: [],
+      };
+      const nodeWithUser: ChatNode = {
+        ...targetNode,
+        turns: [...targetNode.turns, { role: "user", content: message }],
+      };
+      const nextNodes = existing
+        ? nodes.map((n) => (n.id === nodeId ? nodeWithUser : n))
+        : [...nodes, nodeWithUser];
+      setNodes(nextNodes);
+      setActiveNodeId(nodeId);
+      setChatTurns(nodeWithUser.turns);
+      setChatError(null);
       // 触发项目落库（建档时机：发消息即保存，id 在防抖保存里分配）
       setSaveState("saving");
 
+      // 规则 24：节点边界即上下文边界。history 取本节点全部轮次（不含跨节点），
+      // blocks 用 packBlocks 取锚点段 ±1 段，建议只带锚点段的 open 建议。
+      const history = nodeWithUser.turns
+        .map((t) => ({ role: t.role, content: t.content }));
+      const blocks = packBlocks(ctx);
+      const anchorBlockId =
+        ctx.type === "range" || ctx.type === "block"
+          ? ctx.blockId
+          : anchorReview && anchorReview.scope.type !== "document"
+            ? anchorReview.scope.blockId
+            : undefined;
+      // 规则 24：「范围内未处理建议」= 仅锚点所在段落（blockId 相同）的 open 建议
+      const openReviews = anchorBlockId
+        ? reviews.filter(
+            (r) =>
+              r.status === "open" &&
+              (r.scope.type === "block" || r.scope.type === "range") &&
+              r.scope.blockId === anchorBlockId,
+          )
+        : [];
+
       setChatBusy(true);
-      setChatError(null);
       chatAbortRef.current?.abort();
       const controller = new AbortController();
       chatAbortRef.current = controller;
@@ -488,6 +537,12 @@ export default function Home() {
             message,
             history,
             blocks,
+            openReviews: openReviews.map((r) => ({
+              id: r.id,
+              title: r.title,
+              explanation: r.explanation,
+              category: r.category,
+            })),
             reviewItem: contextReview
               ? {
                   id: contextReview.id,
@@ -512,11 +567,17 @@ export default function Home() {
                 changeSet: data.changeSet,
               }
             : { role: "assistant", content: data.answer ?? "" };
-        const withReply = [...withUser, reply];
-        // 等回复期间用户可能切走了：只有还停在这个项目上才动界面，
+        const nodeWithReply: ChatNode = {
+          ...nodeWithUser,
+          turns: [...nodeWithUser.turns, reply],
+        };
+        // 等回复期间用户可能切走了：只有还停在这个项目上才动界面与节点，
         // 否则会把别人的轮次贴到当前项目里。
         if (activeProjRef.current?.doc.id === doc.id || activeProjId === null) {
-          setChatTurns(withReply);
+          setNodes((ns) => ns.map((n) => (n.id === nodeId ? nodeWithReply : n)));
+          setChatTurns(nodeWithReply.turns);
+        } else {
+          setNodes((ns) => ns.map((n) => (n.id === nodeId ? nodeWithReply : n)));
         }
         // 回复到达也算活动，触发落库
         setSaveState("saving");
@@ -533,13 +594,40 @@ export default function Home() {
     [
       doc,
       chatContext,
-      chatTurns,
+      chatForbidden,
+      nodes,
+      reviews,
       contextReview,
       packBlocks,
       activeProjId,
       settings,
     ],
   );
+
+  /** 当前查看的聊天节点（消息列表显示它的轮次） */
+  const activeNode = useMemo(
+    () => nodes.find((n) => n.id === activeNodeId) ?? null,
+    [nodes, activeNodeId],
+  );
+
+  /** 规则 12：当前节点锚点是否失效（原文被改/删），复用 canLocateScope 老原则 */
+  const anchorStale = useMemo(() => {
+    if (!activeNode || !doc) return false;
+    const a = activeNode.anchor;
+    if (a.type === "document") return false;
+    if (a.type === "block") return !canLocateScope(doc, { type: "block", blockId: a.blockId ?? "" });
+    if (a.type === "range")
+      return !canLocateScope(doc, {
+        type: "range",
+        blockId: a.blockId ?? "",
+        original: a.selectedText ?? "",
+      });
+    if (a.type === "review") {
+      const item = reviews.find((r) => r.id === a.reviewId);
+      return item ? !canLocateScope(doc, item.scope) : true;
+    }
+    return false;
+  }, [activeNode, doc, reviews]);
 
   // ── 按意见生成修改集（opinion → ChangeSet）──
   const applyOpinion = useCallback(
@@ -852,8 +940,11 @@ export default function Home() {
             <ContextChat
               context={chatContext}
               contextReview={contextReview}
+              activeNode={activeNode}
+              anchorStale={anchorStale}
               turns={chatTurns}
               busy={chatBusy}
+              sendDisabled={chatForbidden}
               onSend={sendChat}
               onPreviewChangeSet={(cs) => setActiveChangeSet(cs)}
               onNewChat={handleNewProject}
