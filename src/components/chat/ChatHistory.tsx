@@ -232,7 +232,13 @@ function HistoryList({
                 transition: "opacity 250ms ease-in-out, filter 250ms ease-in-out",
               }}
             >
-              新文章
+              {/*
+                tracking-[0.3em] 会在最后一个字后面也追加一个 5.4px 字距，且布局把它算进
+                文字宽度——justify-center 居中的是「三字 + 末尾空白」，墨迹因此左偏半个字距
+                （实测左偏 2.708px，右空隙比左大一个完整字距）。负右边距把这截尾随留白拉回，
+                墨迹才真正居中（CSS 通用手法：负边距抵消字距尾随留白）。
+              */}
+              <span className="-mr-[0.3em]">新文章</span>
             </button>
           </div>
         </div>
@@ -274,8 +280,9 @@ function HistoryList({
 }
 
 /** 单条历史项目。刚创建（点「新文章」）的那一条播 toast-rise 出现动画：
- *  外层 li 占位从 0fr 长到 1fr（兄弟项被连续顶下去），内层内容从格底 rise+fade。
- *  播完回调清掉全局 justCreatedId，之后该条目与其他条目无异（筛选/重排不重演）。 */
+ *  外层 li 播 grid 行高 0fr→1fr（兄弟项被容器高度连续顶下去），内层内容从格底 rise+fade。
+ *  播完回调清掉全局 justCreatedId。**普通条目走普通 li**——rise 的 grid 结构只挂在
+ *  会动的这一条上（曾经无条件挂给所有 li，结果没动画类的条目行高塌成 0、整列看不见）。 */
 function HistoryEntry({
   project: p,
   active,
@@ -292,72 +299,74 @@ function HistoryEntry({
   onCreatedShown: () => void;
 }) {
   // 渲染期 derived state（React 官方模式，同外层 closing 的写法）：justCreated 在防抖建档
-  // （~500ms 后）才变 true，命中时本条目已挂载，在渲染体内 setState、同渲染内立即重跑，
-  // 下一帧带 is-open 提交——动画从挂载首帧起步，与交叉淡入的初始态同理。
-  // 同批内不清 justCreated（要等动画播完由 onTransitionEnd 回调），否则这 500ms 窗口里
-  // 其他条目进列表会短暂误命中。
+  // （~500ms 后）才变 true，在渲染体内 setState、同渲染内立即重跑，使条目「首次挂载」时就
+  // 已带 rise 类——关键帧动画只在挂载时播放，晚一帧再挂就只剩跳变了。
+  // 命中后长期保持（roseFor 不再变），该条目之后就是稳定的 grid 1fr，重渲染/筛选不重演。
   const [roseFor, setRoseFor] = useState<string | null>(null);
   if (justCreated && roseFor !== p.id) setRoseFor(p.id);
-  const riseOpen = roseFor === p.id;
+  const rising = roseFor === p.id;
   // 标题实时从 doc 派生（doc.title 优先，空则首段截断），不用落库时的快照 p.title——
   // 这样左上角标题框改一个字，这里立刻跟着变，两处始终是同一个标题（单一事实源）。
   const title = deriveProjectTitle(p.doc);
+  const body = (
+    <>
+      <button
+        type="button"
+        data-project-id={p.id}
+        onClick={() => onSelect(p.id)}
+        aria-current={active ? "true" : undefined}
+        className={
+          "block w-full rounded-xl border px-2.5 py-2 pr-8 text-left transition-colors " +
+          (active
+            ? "border-brand-ring bg-brand-soft"
+            : "border-transparent hover:bg-surface-muted")
+        }
+      >
+        <span
+          className={
+            "block truncate text-sm " +
+            (active ? "font-medium text-brand" : "text-foreground")
+          }
+        >
+          {title}
+        </span>
+        <span className="mt-0.5 block text-[11px] text-text-faint">
+          最近活动：{formatRelativeTime(p.lastActivityAt)}
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={() => onDelete(p.id)}
+        aria-label={`删除文章：${title}`}
+        title="删除这篇文章"
+        className="absolute right-1 top-1.5 rounded-md p-1 text-text-faint transition-colors hover:bg-surface hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring dark:hover:text-red-400"
+      >
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          aria-hidden
+        >
+          <line x1="18" y1="6" x2="6" y2="18" />
+          <line x1="6" y1="6" x2="18" y2="18" />
+        </svg>
+      </button>
+    </>
+  );
   return (
     <li
-      className={"t-toast-rise relative" + (riseOpen ? " is-open" : "")}
-      onTransitionEnd={(e) => {
-        // 占位生长播完（grid-template-rows 过渡结束）即视为出现动画完成
-        if (justCreated && e.target === e.currentTarget && e.propertyName === "grid-template-rows")
+      className={"relative" + (rising ? " t-toast-rise" : "")}
+      onAnimationEnd={(e) => {
+        // 行高关键帧播完即视为出现动画完成（只认外层那条动画，内容层的不算）
+        if (e.target === e.currentTarget && e.animationName === "toast-rise-rows")
           onCreatedShown();
       }}
     >
-      <div className="t-toast-content">
-        <button
-          type="button"
-          data-project-id={p.id}
-          onClick={() => onSelect(p.id)}
-          aria-current={active ? "true" : undefined}
-          className={
-            "block w-full rounded-xl border px-2.5 py-2 pr-8 text-left transition-colors " +
-            (active
-              ? "border-brand-ring bg-brand-soft"
-              : "border-transparent hover:bg-surface-muted")
-          }
-        >
-          <span
-            className={
-              "block truncate text-sm " +
-              (active ? "font-medium text-brand" : "text-foreground")
-            }
-          >
-            {title}
-          </span>
-          <span className="mt-0.5 block text-[11px] text-text-faint">
-            最近活动：{formatRelativeTime(p.lastActivityAt)}
-          </span>
-        </button>
-        <button
-          type="button"
-          onClick={() => onDelete(p.id)}
-          aria-label={`删除文章：${title}`}
-          title="删除这篇文章"
-          className="absolute right-1 top-1.5 rounded-md p-1 text-text-faint transition-colors hover:bg-surface hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring dark:hover:text-red-400"
-        >
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            aria-hidden
-          >
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
-        </button>
-      </div>
+      {rising ? <div className="t-toast-content">{body}</div> : body}
     </li>
   );
 }

@@ -116,11 +116,9 @@ export default function Home() {
     }
   }, []);
   const [historyOpen, setHistoryOpen] = useState(false);
-  // 点「新文章」后等待建档（防抖 ~500ms 后 persistProjectNow 分配 id）的标记。
-  // 建档时把它换成项目 id 传给列表，条目出现动画（toast-rise）按事件钉到这个 id，
-  // 播完由 onCreatedShown 清掉——不能按时间取最新，否则初次加载/切回旧项目都会误触发「蹦」。
+  // 刚由「新文章」创建的项目 id，供列表条目播出现动画（toast-rise），播完由
+  // onCreatedShown 清掉。建档在 handleNewProject 里同步完成，所以这里也在点击那一帧就设上。
   const [justCreatedId, setJustCreatedId] = useState<string | null>(null);
-  const pendingNewRef = useRef(false);
   /**
    * 当前项目上次落库后的对象。判断「回复回来时用户是否还停在这个项目上」
    * 以及建档时机（首次审阅/发聊天才分配 id）——在事件回调/异步里写，不在渲染期写。
@@ -227,11 +225,6 @@ export default function Home() {
     };
     if (curId === null) {
       setActiveProjId(id);
-      // 本次建档若正是「新文章」后的首次建档，把标记换成具体 id 供出现动画钉住这一条
-      if (pendingNewRef.current) {
-        pendingNewRef.current = false;
-        setJustCreatedId(id);
-      }
     }
     activeProjRef.current = project;
     setProjects((list) => upsertProject(list, project));
@@ -254,10 +247,24 @@ export default function Home() {
     (id: string) => {
       const proj = projects.find((p) => p.id === id);
       if (!proj) return;
-      // 切换前把当前项目立即落库（防抖保存可能还没跑，避免旧文章丢失）
-      const cur = activeProjRef.current;
-      if (cur && cur.id !== id) {
-        const persisted = { ...cur, lastActivityAt: new Date().toISOString() };
+      // 切换前把当前项目立即落库（防抖保存可能还没跑，避免旧文章丢失）。
+      // 同样读 latestRef 拿最新现场、且**不刷新 lastActivityAt**——离开一篇不是编辑它，
+      // 刷成 now 会让被离开的那篇在列表里跳到顶部（点开 B 结果 A 上去了）。
+      const {
+        doc: curDoc,
+        reviews: curReviews,
+        nodes: curNodes,
+        activeProjId: curId,
+      } = latestRef.current;
+      const prev = activeProjRef.current;
+      if (curId && curId !== id && curDoc && prev) {
+        const persisted: Project = {
+          ...prev,
+          title: deriveProjectTitle(curDoc),
+          doc: curDoc,
+          reviews: curReviews,
+          nodes: curNodes,
+        };
         setProjects((list) => upsertProject(list, persisted));
         void saveProject(persisted);
       }
@@ -280,19 +287,57 @@ export default function Home() {
     [projects],
   );
 
-  /** 新文章：清空正文 + 建议 + 聊天开一个新项目；旧文章留在左栏（规则 4）。
-   *  先把当前项目立即落库，避免防抖保存尚未跑导致旧文章丢失。 */
+  /** 新文章：清空正文 + 建议 + 聊天，开一个新项目；旧文章留在左栏（规则 4）。
+   *
+   *  两件事在点击这一帧同步做完，不能拖到 500ms 防抖保存里：
+   *  - **把旧项目的当前现场立即落库**（防抖可能还没跑）。读 `latestRef` 而不是
+   *    `activeProjRef`——后者是「上次保存的快照」，防抖窗口内刚敲的字只在 latestRef 上，
+   *    用快照落库会丢掉这不到 500ms 的编辑。
+   *  - **分配新项目 id 并插进列表**。分配 id 只是个 crypto.randomUUID、不需要任何 I/O，
+   *    早先却挂在防抖落库路径上，于是「点」与「新行蹦出来」之间空出约一秒。
+   */
   const handleNewProject = useCallback((opts?: { keepHistoryOpen?: boolean }) => {
-    const cur = activeProjRef.current;
-    if (cur) {
-      const persisted = { ...cur, lastActivityAt: new Date().toISOString() };
+    const {
+      doc: curDoc,
+      reviews: curReviews,
+      nodes: curNodes,
+      activeProjId: curId,
+    } = latestRef.current;
+    const prev = activeProjRef.current;
+    if (curId && curDoc && prev) {
+      // 用旧现场回填，但**不刷新 lastActivityAt**：用户是「离开」这篇、而不是编辑它，
+      // 刷成 now 会让它在列表里无端跳到顶部（点新文章时那次突然的「旧项目刷新」）。
+      const persisted: Project = {
+        ...prev,
+        title: deriveProjectTitle(curDoc),
+        doc: curDoc,
+        reviews: curReviews,
+        nodes: curNodes,
+      };
       setProjects((list) => upsertProject(list, persisted));
       void saveProject(persisted);
     }
-    activeProjRef.current = null;
-    setActiveProjId(null);
-    // 开一个空白文档让用户从零开始；id 全新表示这是新项目
-    setDoc(createDocument("", [""]));
+
+    const id = newProjectId();
+    const blankDoc = createDocument("", [""]);
+    const blank: Project = {
+      id,
+      title: "未命名文章",
+      doc: blankDoc,
+      reviews: [],
+      nodes: [],
+      lastActivityAt: new Date().toISOString(),
+    };
+    activeProjRef.current = blank;
+    setActiveProjId(id);
+    setProjects((list) => upsertProject(list, blank));
+    // 出现动画按事件钉住这一条，播完由 onCreatedShown 清掉（不按「时间最新」取，
+    // 否则初次加载/切回旧项目都会误触发）
+    setJustCreatedId(id);
+    // latestRef 同步推进到新项目：下面 setSaveState("saving") 触发的防抖保存、
+    // 以及聊天回复的立即落库都读它，留着旧现场会把旧文章内容写进新 id
+    latestRef.current = { doc: blankDoc, reviews: [], nodes: [], activeProjId: id };
+    setDoc(blankDoc);
     setReviews([]);
     setNodes([]);
     setActiveNodeId(null);
@@ -302,7 +347,6 @@ export default function Home() {
     setChangeSetOpen(false);
     if (!opts?.keepHistoryOpen) setHistoryOpen(false);
     setSaveState("saving");
-    pendingNewRef.current = true; // 等 persistProjectNow 建档时换成具体 id
     setAnnounce("已开始新文章。");
   }, []);
 

@@ -122,9 +122,11 @@ tests/e2e/                      # Playwright 用例（helpers.ts 里是 mock 与
 - 页面结构是「历史栏 | (编辑器+对话  /  审阅侧栏)」：外层 `flex items-start`，中间那层才是原来的 `lg:grid-cols-[1fr_360px]`；历史栏 `shrink-0`，中间层 `min-w-0 flex-1`。
 - **窄屏抽屉的面板必须显式给 `w-60`**：它是 flex 列容器且内容都可收缩，不给宽度就按内容收缩成约 200px，标题被截得比宽屏左栏还窄。配 `max-w-[85vw]` 兜住小屏。
 - 历史条目按钮带 `data-project-id`（同 `data-review-card` 的约定）。**写测试时别按标题模糊匹配**：删除按钮的 `aria-label` 是「删除文章：<标题>」，也含标题，会同时命中两个。
-- **建档时机 = 首次审阅或发聊天**（规则 1）：那之前 `activeProjId` 为 null，防抖保存时才 `newProjectId()` 分配 id。切换/新建文章前会先把当前项目**立即落库**（`persistProjectNow`），避免防抖未跑导致旧文章丢失。「新文章」清空现场但**已保存的项目留在列表里**，随时点回——不要改回「清空对话」。
+- **建档时机 = 首次审阅或发聊天**（规则 1）：那之前 `activeProjId` 为 null，防抖保存时才 `newProjectId()` 分配 id。切换/新建文章前会先把当前项目**立即落库**，避免防抖未跑导致旧文章丢失——落库用的是 `latestRef`（最新现场，含防抖窗口内刚敲的字），**不是** `activeProjRef`（它是「上次保存的快照」，用它会把不到 500ms 的编辑丢掉）。「新文章」清空现场但**已保存的项目留在列表里**，随时点回——不要改回「清空对话」。
+- **点「新文章」时同步建档（分配 id + 插入列表），不能挂在防抖落库路径上。** 分配 id 只是个 `crypto.randomUUID()`、不需要任何 I/O，早先却要等 500ms 防抖保存跑到 `persistProjectNow` 才发生，于是「点」与「新行蹦出来」之间空出约一秒（用户反馈「先看到旧项目刷新，约 1s 后新项目才蹦出来」）。现在 `handleNewProject` 在点击那一帧就 `newProjectId()` + `upsertProject` + `setJustCreatedId(id)`，出现动画因此与点击因果相连；`latestRef` 也同步推进到新项目（否则随后的防抖保存/聊天回复落库会把旧文章内容写进新 id）。
+- **「离开」一篇不算它的活动：切换/新建时落库旧项目不要刷新 `lastActivityAt`。** 列表按 `lastActivityAt` 倒序排（`upsertProject` 内部调 `sortProjects`），把被离开的项目刷成 `now` 会让它**跳到列表顶部**（点开 B 结果 A 上去了；点「新文章」时表现为「旧项目突然刷新一下」）。只有真正的编辑/回复（走 `persistProjectNow`）才更新它。
 - **项目落库是防抖的**（编辑触发 500ms），但**聊天回复到达会立即落库**（`persistProjectNow(repliedNodes)`），免得用户在防抖窗口内刷新丢消息。
-- 项目标题派生：`deriveProjectTitle` 优先取文档手动标题，否则首段截断（24 字符），兜底「未命名文章」。
+- **项目标题派生**：`deriveProjectTitle` 优先取文档手动标题，否则首段截断（24 字符），兜底「未命名文章」。
 
 ### 聊天节点（ChatNode）与锚点
 
@@ -200,6 +202,8 @@ tests/e2e/                      # Playwright 用例（helpers.ts 里是 mock 与
 20. **sticky 元素要「钉住 + 内部滚动」必须用 `h-` 定高，不能用 `max-h-`**——grid/flex 子项默认 `align-items: stretch`，`max-h` 只约束元素自身、约束不了子元素被内容撑高。`max-h-[calc(100vh-3rem)]` 配 `h-full` 的 aside 会被 2900px 的建议列表撑满，内部 `overflow-y-auto` 根本不滚动，表现是「视口下方的卡片永远点不到」（E2E 报 `element is outside of the viewport`，因为 Playwright 滚 window 时 sticky 卡片不动）。改成 `h-[calc(100vh-3rem)]` 后 aside 被限高、内部容器才真正滚动。**但侧栏静止时顶部还有顶栏（实测 82px），`top-6` + `h-[calc(100vh-3rem)]` 会让底边越出视口约 34px（中宽视口 1280 实测）——现已收紧为 `h-[calc(100vh-6.5rem)]`，底边收进视口。** 排查这类「元素可见但点不到/越界」先量 `getBoundingClientRect()` 对比容器高度，别先怀疑测试框架。
 21. **React 批处理下，`setState(updater)` 的 updater 副作用不可靠**——在 updater 里写 `ref.current = ...` 或依赖 updater 的返回值，时机由 React 决定（可能延后到本次事件处理完）。聊天节点更新踩过：回复到达时 `setNodes(prev => { ref = compute(prev); return ... })` 后立刻读那个 ref 去落库，读到的还是旧值（updater 没跑），结果存了空节点。正确做法：**先基于 `latestRef.current`（或闭包）算好确定的数组，再 `setNodes(算好的)`**，副作用同步生效、落库也用这个数组。同理闭包里的 `nodes` 是发起请求那一刻的快照，跨 await 后要用 `latestRef` 取最新。
 22. **E2E 选词要先处理浮动聊天区遮挡 + Decoration 拆词**——聊天区 `sticky bottom` 会遮住编辑器下方的词（点击落在面板上选不中），且 chat-anchor Decoration 会把词拆成多个文本节点（`getByText(子串)` 命中整段）。`selectTextInEditor` 的做法：用 `document.createRange` + `TreeWalker` 找到 needle 的精确文本节点坐标，先滚到聊天区（`[aria-label="上下文对话"]`）上方，单词直接 `dblclick`，**多词短语先双击词尾再 Shift+点词首**（方向反了会缩回只选第一个词）。断言用上下文标签里「选区「…」」的原文前缀（标签截断到 12 字符），别全等。
+23. **`letter-spacing` 会在最后一个字后面也追加字距，且布局把它算进宽度——文字因此不居中，而且用 `Range.getBoundingClientRect()` 自测发现不了。** 「新文章」按钮用 `tracking-[0.3em]`（18px → 5.4px）凑宽度时，`justify-center` 居中的是「三字 + 末尾 5.4px 空白」，墨迹左偏半个字距（实测墨迹中心比按钮中心左 2.708px，右空隙比左大整整一个字距 5.4px）。**我反复"验证通过"是量错了对象**：`Range` 返回的是 advance 宽度（含末尾留白），它的中心当然与容器中心重合，所以每次都报"差 0.008px，已居中"；肉眼看的墨迹中心才是真的。修法是包一层 `-mr-[0.3em]` 用负边距抵消尾随留白（通用手法）。教训有两层：(1) **不要拿 `letter-spacing` 当宽度调节器**，它必然带上末尾留白；(2) 量"文字居中"要量**逐字符 Range 的并集去掉末字字距**，或直接 `getClientRects()` 逐字看墨迹，别量整段 advance 盒再说"居中了"。
+24. **「出现动画」的起始态不能写进常驻 class，否则所有没在动的元素都会被它压成 0——曾把整个历史项目列表变成一片空白。** 给新建项目做「占位生长」时，把 `display:grid; grid-template-rows:0fr` 写在 `.t-toast-rise` 基础规则里、无条件挂到每条 `li` 上，结果**没挂动画态的条目行高全是 0**，用户看到的是「之前的项目都不见了」（数据其实都在，量 `li.getBoundingClientRect().height === 0` 即现形）。两条修正同时做才干净：(1) **起始态只写进 `@keyframes`，基础 class 不写**（`animation: toast-rise-rows ... both`），这样动画被禁用/未挂类时元素都是自然高度；(2) **rising 结构只挂在会动的那一条上**，普通条目走普通 `li`（`{rising ? <div className="t-toast-content">{body}</div> : body}`）。另外动画用 `@keyframes` 而非 `transition`：新挂载元素直接带最终样式不触发 transition（没有起始帧可比），关键帧在挂载时自然播放。**教训：CSS 里「只该临时存在」的起始值，一旦写进常驻规则就会永久生效。**
 
 ## 有意为之的取舍（不要当 bug 改掉）
 

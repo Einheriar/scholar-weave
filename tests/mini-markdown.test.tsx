@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { renderMiniMarkdown } from "@/lib/mini-markdown";
 
@@ -103,5 +103,24 @@ describe("renderMiniMarkdown", () => {
     const html = render("这是 - 不是列表项的行内用法");
     expect(html).not.toContain("<ul");
     expect(html).toContain("不是列表项的行内用法");
+  });
+
+  // 回归：列表块（renderList 的容器 div）漏了 key，被 push 进 blocks 数组后
+  // 触发 React「Each child in a list should have a unique "key" prop」警告。
+  // 列表与其它 block 混排时才暴露，所以这里同时放标题/段落/列表。
+  it("混合块渲染不产生 React key 警告", () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    render("# 标题\n\n段落一。\n\n- 甲\n- 乙\n\n1. 一\n2. 二\n\n---\n\n段落二。");
+    const warnings = spy.mock.calls.map((c) => String(c[0]));
+    spy.mockRestore();
+    expect(warnings.filter((w) => w.includes("unique") && w.includes("key"))).toEqual([]);
+  });
+
+  it("嵌套列表也不产生 key 警告", () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    render("- 父项\n  - 子项\n  - 子项二\n- 父项二");
+    const warnings = spy.mock.calls.map((c) => String(c[0]));
+    spy.mockRestore();
+    expect(warnings.filter((w) => w.includes("unique") && w.includes("key"))).toEqual([]);
   });
 });

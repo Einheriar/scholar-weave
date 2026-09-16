@@ -220,38 +220,36 @@ body {
 }
 
 /* 历史列表新条目出现动画（transitions.dev Toast 思路 + 占位生长）。
-   结构分两层，各管一件事：
-   - .t-toast-rise（外层 li）：display:grid + rows 0fr→1fr，高度从 0 平滑长到实际值。
+   只挂在「刚创建」的那一条上（普通条目就是普通 li），两层各管一件事：
+   - .t-toast-rise（外层 li）：grid 行高 0fr→1fr 的关键帧动画，高度从 0 长到实际值，
      动画期间兄弟项位置被容器高度连续顶开——「把下面的项目推下去」来自这里，
      不需要给兄弟项单独写动画；
    - .t-toast-content（内层）：从格底 rise（+8px 下移起跳）+ fade + 轻缩放 + 交叉模糊。
-     因为内容落在占位格底部，格子向上长，所以方向是「从下方弹进自己的格子」，
+     因为内容落在占位格底部、格子向上长，方向是「从下方弹进自己的格子」，
      而不是从上方落下（从上方落会有一帧悬在空档上方、与列表其他项对不齐）。
-   动画只在挂载瞬间从 0fr 起步，is-open 挂上后 rows 停在 1fr，之后 li 高度由内容决定，
-   不影响删除/筛选的正常高度变化。 */
+
+   两个要点（都踩过）：
+   1. **用 @keyframes 而不是 transition**：条目是随防抖建档「新挂载」的，新挂载的元素
+      直接带最终样式不会触发 transition（没有起始帧可比），关键帧动画则在挂载时自然播放。
+   2. **基础态绝不能写 `grid-template-rows: 0fr`**：那会把任何没挂动画类的条目塌成 0 高、
+      整列「看不见」（曾经把 `t-toast-rise` 无条件挂在每条 li 上，导致已有项目全部消失）。
+      rows 只在关键帧里出现，基础态不写，于是即便动画被禁用条目也是正常高度。 */
+@keyframes toast-rise-rows {
+  from { grid-template-rows: 0fr; }
+  to { grid-template-rows: 1fr; }
+}
+@keyframes toast-rise-content {
+  from { opacity: 0; transform: translateY(8px) scale(0.97); filter: blur(2px); }
+  to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
 .t-toast-rise {
   display: grid;
-  grid-template-rows: 0fr;
-  transition: grid-template-rows 300ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-.t-toast-rise.is-open {
-  grid-template-rows: 1fr;
+  animation: toast-rise-rows 300ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 .t-toast-rise > .t-toast-content {
   overflow: hidden;
   min-height: 0;
-  opacity: 0;
-  transform: translateY(8px) scale(0.97);
-  filter: blur(2px);
-  transition:
-    opacity 350ms cubic-bezier(0.22, 1, 0.36, 1),
-    transform 350ms cubic-bezier(0.22, 1, 0.36, 1),
-    filter 350ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-.t-toast-rise.is-open > .t-toast-content {
-  opacity: 1;
-  transform: translateY(0) scale(1);
-  filter: blur(0);
+  animation: toast-rise-content 350ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 /* 列表条目淡入（筛选切换 / 审阅结果到达） */
@@ -387,7 +385,7 @@ body {
   .animate-timeline-dropdown, .animate-timeline-dropdown-closing,
   .animate-tooltip-rise, .t-success-check, .review-card-collapsible { animation: none; }
   .t-icon-swap .t-icon { transition: none; }
-  .t-toast-rise, .t-toast-rise > .t-toast-content { transition: none !important; }
+  .t-toast-rise, .t-toast-rise > .t-toast-content { animation: none; }
   .t-success-check { opacity: 1; }
   .t-success-check svg path { stroke-dashoffset: 0; }
   .review-card-collapsible { grid-template-rows: 0fr; }

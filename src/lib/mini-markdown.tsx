@@ -144,7 +144,14 @@ function renderList(
     }
     i = j;
   }
-  return <div className="space-y-1">{nodes}</div>;
+  // key 给这个块级容器：renderList 的返回值会被 push 进 renderMiniMarkdown 的 blocks 数组
+  // 成列表渲染，缺 key 会报「Each child in a list should have a unique key prop」
+  // （其余 block 的 p/h/hr 都自带 key，这里漏了）。嵌套调用时多一个 key 无害。
+  return (
+    <div key={keyPrefix} className="space-y-1">
+      {nodes}
+    </div>
+  );
 }
 
 /** 判断一行是否属于当前列表（在列表块内部被连续行调用） */

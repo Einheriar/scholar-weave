@@ -121,3 +121,48 @@
   ⑤ 上下文联动：点侧栏/正文另一条建议、或划出新选区时，聊天视图同步切到该上下文对应节点
   （`page.tsx` 新增 effect，只依赖 `selection`/`selectedId`），头部标签与消息列表永远一致。
   全套 141 Vitest + 23 Playwright 通过
+
+## 窄屏历史抽屉（用户反馈修订第 4–5 轮）
+
+- `a14480b` feat: 窄屏历史抽屉标题化 + 汉堡/叉叉同位切换 + 冷却防抖——
+  ① 「历史记录」升级为抽屉标题（更大字号），去掉标题下分割线改呼吸间距；
+  ② 顶栏汉堡与叉叉**同位置**原地切换（双 SVG 叠格 `data-state` + `grid-area: 1/1`，
+  见 globals.css `.t-icon-swap`），按钮放大到 40×40，双击不移动鼠标即可开关；
+  ③ 标题行 `pl-14` 让出按钮槽位，「叉叉 + 标题」逐像素连成一行；
+  ④ 冷却 500ms（动画 250ms + 250ms）在 JS 层做，挡住双击与关闭动画中途重开
+- `c384ffc` feat: 抽屉标题 hover 交叉淡入 + 宽度 +50% + 点新文章保持开启——
+  ① 「历史记录」做成按钮样式靠右，hover 时与「新文章」按钮 250ms 交叉淡入
+  （transitions.dev skeleton-reveal 思路）；两字重 500 / 18px，字间距调到同宽 96.2px；
+  ② 交叉淡入状态改由内联 style + React 事件驱动（Turbopack 的 Lightning CSS 会合并
+  相同声明的相邻规则并丢掉整条，CSS 方案反复失效）；
+  ③ 抽屉 `w-60` → `w-90`（窄屏一屏只干一件事，抽屉是主要工作区）；
+  ④ `handleNewProject` 加 `keepHistoryOpen` 选项，点「新文章」不再收起抽屉
+- `e1cd08a` feat: 新文章凸起三件套 + 新建条目 toast-rise 出现动画——
+  ① 按钮「可按下」用扁平凸起三件套表达：hover 背景抬亮到纸面 + `translateY(-1px)` + 软投影，
+  active 位移/投影收回 + `scale-[0.98]`（深色下黑投影弱，由位移/抬亮兜底）；
+  ② 新建项目条目出现动画（transitions.dev Toast 思路 + 占位生长）：外层 `li`
+  `grid-template-rows: 0fr → 1fr` 长高度（下面的项目被连续顶下去），内层内容从格底
+  rise + fade + 轻缩放 + 交叉模糊（350ms open 时钟）；
+  ③ 只播一次：`pendingNewRef` 等防抖建档后换具体 id 钉住该条目，动画播完回调清
+  `justCreatedId`，重渲染/筛选/切回不重演
+- `—`       fix: 「新文章」三字不居中——`tracking-[0.3em]` 在末字后也追加 5.4px 字距且
+  布局算进宽度，`justify-center` 居中「三字 + 末尾空白」导致墨迹左偏半个字距；
+  包一层 `-mr-[0.3em]` 负边距抵消尾随留白（实测墨迹中心与按钮中心差 0.005px）；
+  同时修正自测方法（`Range` 量的是 advance 盒、含末尾留白，量不出偏），陷阱 23 记入 AGENTS.md
+- `—`       fix: **历史项目列表整列消失**（用户报告「找不到之前的聊天项目」）——
+  `e1cd08a` 把出现动画的起始态 `display:grid; grid-template-rows:0fr` 写进了
+  `.t-toast-rise` 常驻规则并无条件挂到每条 `li`，导致没挂动画态的条目行高全为 0
+  （数据都在，`li.getBoundingClientRect().height === 0`）。改为：起始态只写进 `@keyframes`
+  （`animation: toast-rise-rows ... both`），且 rising 结构只挂在会动的那一条上；陷阱 24 记入 AGENTS.md
+- `—`       fix: 聊天消息含 markdown 列表时报 React「Each child in a list should have a
+  unique key prop」（左下角 dev 覆盖层 1 Issue）——`mini-markdown.tsx` 的 `renderList`
+  返回的块级 `<div>` 漏了 `key`（同批 `p`/`h`/`hr` 都有），补 `key={keyPrefix}`；
+  新增两条回归用例（混排/嵌套列表断言无 key 警告，验证过移除 key 即失败）
+- `—`       fix: 点「新文章」后要等约 1s 新项目才出现 + 旧项目无端「刷新」跳顶——
+  ① 建档（`newProjectId()` 分配 id + 插入列表 + `setJustCreatedId`）从 500ms 防抖落库路径
+  移到点击那一帧同步做，出现动画与点击直接因果相连（实测点击后 18ms 新行即出现并从 0 长到
+  55px）；`latestRef` 同步推进到新项目，避免随后的落库把旧文章内容写进新 id；
+  ② 切换/新建时落库旧项目改用 `latestRef`（最新现场，含防抖窗口内刚敲的字，原先用
+  `activeProjRef` 快照会丢掉这不到 500ms 的编辑）且**不再刷新 `lastActivityAt`**——
+  「离开」不是活动，原先刷新会让该条目跳到列表顶部（实测旧项目时间戳保持冻结不再跳动）。
+  实测（含防抖窗口内编辑后立刻新建、刷新后核对）数据零丢失
