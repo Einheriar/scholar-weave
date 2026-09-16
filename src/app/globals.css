@@ -202,6 +202,15 @@ body {
   transform: scale(var(--drawer-icon-swap-start-scale));
 }
 
+/* 历史抽屉标题行的 hover 交叉淡入（transitions.dev skeleton-reveal 思路）：
+   「历史记录」按钮样式与「新文章」按钮等宽，叠在同一位置；hover 时前者淡出+模糊，
+   后者淡入。纯内联 style 驱动（React 事件），这里只保留过渡缓动变量。 */
+:root {
+  --drawer-skel-dur: 250ms;
+  --drawer-skel-blur: 2px;
+  --drawer-skel-ease: ease-in-out;
+}
+
 /* 列表条目淡入（筛选切换 / 审阅结果到达） */
 @keyframes item-fade-in {
   from { opacity: 0; transform: translateY(4px); }

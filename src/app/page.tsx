@@ -270,7 +270,7 @@ export default function Home() {
 
   /** 新文章：清空正文 + 建议 + 聊天开一个新项目；旧文章留在左栏（规则 4）。
    *  先把当前项目立即落库，避免防抖保存尚未跑导致旧文章丢失。 */
-  const handleNewProject = useCallback(() => {
+  const handleNewProject = useCallback((opts?: { keepHistoryOpen?: boolean }) => {
     const cur = activeProjRef.current;
     if (cur) {
       const persisted = { ...cur, lastActivityAt: new Date().toISOString() };
@@ -288,7 +288,7 @@ export default function Home() {
     setSelectedId(null);
     setChatError(null);
     setChangeSetOpen(false);
-    setHistoryOpen(false);
+    if (!opts?.keepHistoryOpen) setHistoryOpen(false);
     setSaveState("saving");
     setAnnounce("已开始新文章。");
   }, []);

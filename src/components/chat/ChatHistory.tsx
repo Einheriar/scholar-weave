@@ -20,7 +20,7 @@ export type ChatHistoryProps = {
   projects: Project[];
   activeId: string | null;
   onSelect: (id: string) => void;
-  onNew: () => void;
+  onNew: (opts?: { keepHistoryOpen?: boolean }) => void;
   onDelete: (id: string) => void;
   /** 窄屏抽屉是否展开（xl 及以上忽略） */
   open: boolean;
@@ -114,9 +114,9 @@ export function ChatHistory({
 
       {/*
         窄屏抽屉。fixed 元素脱离文档流，放在 flex 行里不会影响布局。
-        面板上的 w-60 必须给：抽屉是 flex 列容器且内容都可收缩，不给宽度就按内容
-        收缩成 ~200px（实测），标题被截得比宽屏左栏还窄；与左栏同宽才一致。
-        max-w-[85vw] 兜住极窄屏，避免 240px 在小屏上占满整屏。
+        面板必须显式给宽度：抽屉是 flex 列容器且内容都可收缩，不给宽度就按内容收缩。
+        w-90（360px）比宽屏左栏 w-60 宽 50%：窄屏一屏只能干一件事，抽屉是主要工作区，宽一点
+        标题/最近活动都不容易被截断；max-w-[85vw] 兜住极窄屏。
       */}
       {(open || closing) && (
         <div
@@ -132,6 +132,7 @@ export function ChatHistory({
         >
           <div
             ref={panelRef}
+            id="history-drawer"
             role="dialog"
             aria-modal="true"
             aria-label="历史记录"
@@ -141,7 +142,7 @@ export function ChatHistory({
               if (closing && e.target === e.currentTarget) endClosing();
             }}
             className={
-              "absolute inset-y-0 left-0 flex w-60 max-w-[85vw] flex-col overflow-y-auto border-r border-border bg-surface pb-28 pl-4 shadow-2xl " +
+              "absolute inset-y-0 left-0 flex w-90 max-w-[85vw] flex-col overflow-y-auto border-r border-border bg-surface pb-28 pl-4 shadow-2xl " +
               (closing ? "animate-drawer-out" : "animate-drawer-in")
             }
           >
@@ -169,24 +170,55 @@ function HistoryList({
   variant = "sidebar",
 }: HistoryListProps & { variant?: "sidebar" | "drawer" }) {
   const drawer = variant === "drawer";
+  const [titleHover, setTitleHover] = useState(false);
   return (
     <>
       {drawer ? (
         // 抽屉形态：升级成真正的面板标题。左侧 pl-14 让出顶栏汉堡按钮（40px + 左缘 16px），
-        // 打开时按钮原地换成叉叉，「叉叉 + 标题」逐像素连成一行。pt-[30px] + h-10 让标题
-        // 与顶栏内垂直居中的按钮中线对齐（实测按钮 top=24/中线 44，h2 行高 28 需 top=30）。
+        // 打开时按钮原地换成叉叉。pt-[24px] + h-10 让叠放层与顶栏内垂直居中的按钮中线对齐
+        // （实测按钮 top=24/中线 44，叠放层 top=24/h-10 中线 44，逐像素对齐）。
         // 数值与顶栏布局绑定，改顶栏要重测（同 AGENTS.md 左栏 100vh-8rem 的约定级别）。
-        <div className="flex flex-col gap-3 px-4 pb-3 pl-14 pt-[30px]">
-          <h2 className="text-lg font-semibold tracking-tight text-foreground">
-            历史记录
-          </h2>
-          <button
-            type="button"
-            onClick={onNew}
-            className={buttonClass("secondary", "sm") + " w-full"}
+        <div className="t-skel-wrap flex flex-col gap-3 px-4 pb-3 pl-14 pt-[24px]">
+          {/*
+            hover 交叉淡入：「历史记录」做成按钮样式与「新文章」等宽，叠在同一位置（group/hover 触发）。
+            历史记录靠右侧（ml-auto），hover 时淡出+模糊，新文章从右侧淡入（同宽，不撑开布局）。
+            动画 250ms（transitions.dev skeleton-reveal 思路，见 globals.css .t-skel-*）。
+          */}
+          <div
+            className="group relative ml-auto inline-flex h-10 items-center"
+            onMouseEnter={() => setTitleHover(true)}
+            onMouseLeave={() => setTitleHover(false)}
           >
-            新文章
-          </button>
+            {/* 层 1：历史记录（hover 时淡出） */}
+            <div
+              role="presentation"
+              className="t-skel-skeleton flex h-10 items-center rounded-lg bg-surface-muted px-3"
+              style={{
+                opacity: titleHover ? 0 : 1,
+                filter: titleHover ? "blur(2px)" : "blur(0px)",
+                transition: "opacity 250ms ease-in-out, filter 250ms ease-in-out",
+              }}
+            >
+              <span className="text-lg font-medium tracking-tight text-foreground">
+                历史记录
+              </span>
+            </div>
+            {/* 层 2：新文章（hover 时淡入，字间距调宽与历史记录同宽；ghost 底 + hover 加深表可点击） */}
+            <button
+              type="button"
+              onClick={() => onNew({ keepHistoryOpen: true })}
+              className={
+                "t-skel-content absolute inset-y-0 right-0 my-auto flex h-10 w-[96.2px] items-center justify-center rounded-lg bg-surface-muted !text-lg font-medium !tracking-[0.3em] text-foreground transition-colors duration-150 hover:bg-border/50 active:scale-[0.98]"
+              }
+              style={{
+                opacity: titleHover ? 1 : 0,
+                filter: titleHover ? "blur(0px)" : "blur(2px)",
+                transition: "opacity 250ms ease-in-out, filter 250ms ease-in-out",
+              }}
+            >
+              新文章
+            </button>
+          </div>
         </div>
       ) : (
         <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-border bg-surface px-3 py-2">
@@ -195,7 +227,7 @@ function HistoryList({
           </h2>
           <button
             type="button"
-            onClick={onNew}
+            onClick={() => onNew()}
             className={buttonClass("secondary", "xs")}
           >
             新文章
@@ -278,13 +310,13 @@ export function ChatHistoryToggle({
   open: boolean;
   onClick: () => void;
 }) {
-  // 冷却：点击后 750ms 内（抽屉动画 250ms + 500ms）忽略同位置再次点击。
+  // 冷却：点击后 500ms 内（抽屉动画 250ms + 250ms）忽略同位置再次点击。
   // 既防抖双击，也顺带挡住「关闭动画中途又点开」的边界；reduced-motion 下没有动画，
-  // 只剩 500ms。CSS 只禁用 transition，冷却要在 JS 层做。
+  // 只剩 250ms。CSS 只禁用 transition，冷却要在 JS 层做。
   const cooldownRef = useRef(0);
   const handleClick = () => {
     const now = Date.now();
-    if (now - cooldownRef.current < 750) return;
+    if (now - cooldownRef.current < 500) return;
     cooldownRef.current = now;
     onClick();
   };
