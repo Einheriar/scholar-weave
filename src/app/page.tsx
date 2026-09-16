@@ -629,6 +629,51 @@ export default function Home() {
     return false;
   }, [activeNode, doc, reviews]);
 
+  /** 规则 19：点时间线端点 → 切到该节点对话并滚动到对应轮次 */
+  const handleJumpToTurn = useCallback(
+    (nodeId: string, turnIndex: number) => {
+      const node = nodes.find((n) => n.id === nodeId);
+      if (!node) return;
+      setActiveNodeId(nodeId);
+      setChatTurns(node.turns);
+      setAnnounce(`已切换到聊天节点。`);
+      // 滚动到对应轮次气泡（data-turn-index）；测试环境/减少动态效果下瞬时定位
+      requestAnimationFrame(() => {
+        const list = document.querySelector(
+          '[aria-label="上下文对话"] [data-turn-index]',
+        )?.parentElement;
+        const target = list?.querySelector(`[data-turn-index="${turnIndex}"]`);
+        if (target instanceof HTMLElement) {
+          const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+          target.scrollIntoView({
+            behavior: reduce || navigator.webdriver ? "instant" : "smooth",
+            block: "center",
+          });
+        }
+      });
+    },
+    [nodes],
+  );
+
+  /** 规则 13：时间线行内删除该节点全部讨论（直接删，不弹确认） */
+  const handleDeleteNode = useCallback(
+    (nodeId: string) => {
+      setNodes((ns) => {
+        const next = ns.filter((n) => n.id !== nodeId);
+        // 删的是当前查看的节点 → 切到剩余的最新节点或清空
+        if (activeNodeId === nodeId) {
+          const last = next[next.length - 1];
+          setActiveNodeId(last?.id ?? null);
+          setChatTurns(last?.turns ?? []);
+        }
+        return next;
+      });
+      setSaveState("saving");
+      setAnnounce("已删除该节点讨论。");
+    },
+    [activeNodeId],
+  );
+
   // ── 按意见生成修改集（opinion → ChangeSet）──
   const applyOpinion = useCallback(
     async (id: string) => {
@@ -940,6 +985,7 @@ export default function Home() {
             <ContextChat
               context={chatContext}
               contextReview={contextReview}
+              nodes={nodes}
               activeNode={activeNode}
               anchorStale={anchorStale}
               turns={chatTurns}
@@ -948,6 +994,8 @@ export default function Home() {
               onSend={sendChat}
               onPreviewChangeSet={(cs) => setActiveChangeSet(cs)}
               onNewChat={handleNewProject}
+              onJumpToTurn={handleJumpToTurn}
+              onDeleteNode={handleDeleteNode}
             />
           </div>
 

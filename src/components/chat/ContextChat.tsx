@@ -10,11 +10,14 @@ import type {
 } from "@/lib/review-schema";
 import { buttonClass } from "@/components/ui/button";
 import { renderMiniMarkdown } from "@/lib/mini-markdown";
+import { NodeTimeline } from "./NodeTimeline";
 
 export type ContextChatProps = {
   context: ChatContext;
   /** 当前上下文对应的建议（context.type==="review" 时） */
   contextReview?: ReviewItem | null;
+  /** 当前项目的全部聊天节点（节点时间线弹层用） */
+  nodes: ChatNode[];
   /** 当前查看的聊天节点（消息列表显示它的轮次；节点化聊天） */
   activeNode: ChatNode | null;
   /** 当前节点锚点是否已失效（原文被改/删，规则 12；由 page 用 canLocateScope 判定） */
@@ -28,6 +31,10 @@ export type ContextChatProps = {
   onPreviewChangeSet: (changeSet: ChangeSet) => void;
   /** 开一篇新文章（当前项目已自动存进左侧历史，不会被丢掉） */
   onNewChat: () => void;
+  /** 点击时间线端点：切到该节点并滚动到对应轮次（规则 19） */
+  onJumpToTurn: (nodeId: string, turnIndex: number) => void;
+  /** 时间线行内删除该节点全部讨论（规则 13） */
+  onDeleteNode: (nodeId: string) => void;
 };
 
 /**
@@ -39,6 +46,7 @@ export type ContextChatProps = {
 export function ContextChat({
   context,
   contextReview,
+  nodes,
   activeNode,
   anchorStale,
   turns,
@@ -47,8 +55,11 @@ export function ContextChat({
   onSend,
   onPreviewChangeSet,
   onNewChat,
+  onJumpToTurn,
+  onDeleteNode,
 }: ContextChatProps) {
   const [draft, setDraft] = useState("");
+  const [timelineOpen, setTimelineOpen] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -71,6 +82,31 @@ export function ContextChat({
     >
       <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2 text-xs">
         <span className="flex min-w-0 items-center gap-1.5 text-text-muted">
+          <button
+            type="button"
+            onClick={() => setTimelineOpen(true)}
+            aria-label="聊天节点历史"
+            title="聊天节点历史"
+            className="shrink-0 rounded-md p-1 text-text-faint transition-colors hover:bg-surface-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring"
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              aria-hidden
+            >
+              <line x1="8" y1="6" x2="21" y2="6" />
+              <line x1="8" y1="12" x2="21" y2="12" />
+              <line x1="8" y1="18" x2="21" y2="18" />
+              <line x1="3" y1="6" x2="3.01" y2="6" />
+              <line x1="3" y1="12" x2="3.01" y2="12" />
+              <line x1="3" y1="18" x2="3.01" y2="18" />
+            </svg>
+          </button>
           {activeNode && (
             <span
               className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand"
@@ -178,6 +214,19 @@ export function ContextChat({
           发送
         </button>
       </div>
+
+      {timelineOpen && (
+        <NodeTimeline
+          nodes={nodes}
+          activeNodeId={activeNode?.id ?? null}
+          onJump={(nodeId, turnIndex) => {
+            setTimelineOpen(false);
+            onJumpToTurn(nodeId, turnIndex);
+          }}
+          onDeleteNode={onDeleteNode}
+          onClose={() => setTimelineOpen(false)}
+        />
+      )}
     </section>
   );
 }
