@@ -69,6 +69,9 @@ export function ContextChat({
 }: ContextChatProps) {
   const [draft, setDraft] = useState("");
   const [timelineOpen, setTimelineOpen] = useState(false);
+  // 抽屉常驻渲染：开之前是未挂载态，首次打开挂上播进入动画；
+  // 关闭动画播完由 NodeTimeline 的 onClosed 卸载，回到未挂载态
+  const [timelineMounted, setTimelineMounted] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   // 拖拽把手：记录起始高度与指针位置，pointermove 时差值调整
   const dragRef = useRef<{ startY: number; startHeight: number } | null>(null);
@@ -124,7 +127,11 @@ export function ContextChat({
         <span className="flex min-w-0 items-center gap-1.5 text-text-muted">
           <button
             type="button"
-            onClick={() => setTimelineOpen((v) => !v)}
+            onClick={() => {
+              // 首次打开才挂载抽屉（之后常驻播进/出动画，closing 播完才卸载）
+              setTimelineMounted(true);
+              setTimelineOpen((v) => !v);
+            }}
             aria-label="聊天节点历史"
             aria-expanded={timelineOpen}
             title="聊天节点历史"
@@ -288,10 +295,13 @@ export function ContextChat({
       </div>
       )}
 
-      {timelineOpen && (
+      {/* 常驻渲染：抽屉靠 open/closing 播进/出动画，closing 播完由 onClosed 卸载 */}
+      {timelineMounted && (
         <NodeTimeline
           nodes={nodes}
           activeNodeId={activeNode?.id ?? null}
+          open={timelineOpen}
+          onClosed={() => setTimelineMounted(false)}
           onJump={(nodeId, turnIndex) => {
             setTimelineOpen(false);
             onJumpToTurn(nodeId, turnIndex);

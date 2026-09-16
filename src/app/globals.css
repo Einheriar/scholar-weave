@@ -177,22 +177,35 @@ body {
   animation: item-fade-in 0.25s ease-out;
 }
 
-/* 聊天节点时间线抽屉：从聊天区顶部向上抽出（translateY 正值 → 0）。
-   有意不做 opacity 淡入——半透明阶段会让抽屉 border 和正文透叠成一条横线，
-   只保留位移滑入。 */
-@keyframes timeline-rise-in {
-  from { transform: translateY(12px); }
-  to { transform: translateY(0); }
+/* 聊天节点时间线抽屉：下拉式浮现（scale 97%→100% + opacity 淡入），
+   锚点在底部中心（从聊天区头部向上展开）。
+   关闭走 timeline-dropdown-closing 的反向过渡（150ms 轻微回缩 + 淡出），
+   需要「closing 状态延迟卸载」——条件渲染会在关闭瞬间卸载节点，过渡根本没机会播。
+   有意沿用 opacity 淡入：抽屉有实底（bg-surface）+ 阴影，不叠加在正文上，
+   半透明阶段不会透叠出横线（此前 translateY 方案才会）。 */
+@keyframes timeline-dropdown-in {
+  from { transform: scale(0.97); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
 }
-.animate-timeline-rise {
-  animation: timeline-rise-in 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
+@keyframes timeline-dropdown-out {
+  from { transform: scale(1); opacity: 1; }
+  to { transform: scale(0.99); opacity: 0; }
+}
+.animate-timeline-dropdown {
+  transform-origin: bottom center;
+  animation: timeline-dropdown-in 250ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.animate-timeline-dropdown-closing {
+  transform-origin: bottom center;
+  animation: timeline-dropdown-out 150ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 @media (prefers-reduced-motion: reduce) {
   html { transition: none; }
   .animate-modal-fade, .animate-modal-pop, .animate-item-in,
   .animate-drawer-in, .animate-drawer-out, .animate-modal-fade-out,
-  .animate-timeline-rise, .animate-tooltip-rise { animation: none; }
+  .animate-timeline-dropdown, .animate-timeline-dropdown-closing,
+  .animate-tooltip-rise { animation: none; }
 }
 
 /* ── 审阅建议的编辑器标记（阶段 2）──────────────────────────────

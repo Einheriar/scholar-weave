@@ -13,6 +13,9 @@ export type NodeTimelineProps = {
   /** 行内删除该节点全部讨论（规则 13，直接删不弹确认） */
   onDeleteNode: (nodeId: string) => void;
   onClose: () => void;
+  /** 抽屉显隐：常驻渲染，靠 className 播进/出动画，closing 播完才卸载 */
+  open: boolean;
+  onClosed: () => void;
 };
 
 type HoverInfo = { row: number; node: ChatNode; content: string };
@@ -39,8 +42,10 @@ export function NodeTimeline({
   onJump,
   onDeleteNode,
   onClose,
+  open,
+  onClosed,
 }: NodeTimelineProps) {
-  const panelRef = useRef<HTMLDivElement>(null);
+  const drawerRef = useRef<HTMLDivElement>(null);
   // 当前 hover 的端点：{row 行索引, 摘要内容}，驱动悬浮 tooltip 与行联动高亮
   const [hover, setHover] = useState<HoverInfo | null>(null);
 
@@ -53,6 +58,23 @@ export function NodeTimeline({
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  // closing 动画播完后才真正卸载（延迟卸载，约定 8/15）；
+  // 打开时清掉残留的 closing 标记，重复开抽屉动画从头播。
+  // 加在抽屉外壳（animate-timeline-dropdown 所在元素）上；effect 同步触发时
+  // 进入动画可能还在播，延迟一帧再切换，避免从进入动画中途硬切到关闭。
+  useEffect(() => {
+    const el = drawerRef.current;
+    if (!el) return;
+    if (open) {
+      el.classList.remove("animate-timeline-dropdown-closing");
+    } else {
+      const raf = requestAnimationFrame(() => {
+        el.classList.add("animate-timeline-dropdown-closing");
+      });
+      return () => cancelAnimationFrame(raf);
+    }
+  }, [open]);
 
   // 按节点创建时间排序（规则 17）
   const sorted = [...nodes].sort((a, b) =>
@@ -67,14 +89,23 @@ export function NodeTimeline({
     // 抽屉 bottom-full 贴住聊天区上沿往上展开、共享聊天区边框（无边缝线）。
     // 头部「聊天节点历史」按钮是 toggle，再按一次收起。
     <div
+      ref={drawerRef}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
-      className="absolute inset-x-0 bottom-full z-30 max-h-[42vh] overflow-y-auto rounded-t-2xl border border-border bg-surface shadow-[0_-10px_24px_-14px_rgb(0_0_0/0.28)] animate-timeline-rise"
+      className="absolute inset-x-0 bottom-full z-30 max-h-[42vh] overflow-y-auto rounded-t-2xl border border-border bg-surface shadow-[0_-10px_24px_-14px_rgb(0_0_0/0.28)] animate-timeline-dropdown"
+      onAnimationEnd={(e) => {
+        if (
+          e.target === e.currentTarget &&
+          e.animationName === "timeline-dropdown-out"
+        ) {
+          onClosed();
+        }
+      }}
       role="dialog"
       aria-label="聊天节点历史"
     >
-      <div ref={panelRef}>
+      <div>
         {/* 标题行：与列表之间不要分割线（抽屉与聊天区已一体，再切一刀是多余的） */}
         <div className="sticky top-0 flex items-center justify-between bg-surface px-4 pt-2.5 pb-1">
           <h2 className="text-xs font-semibold tracking-tight text-text-muted">
