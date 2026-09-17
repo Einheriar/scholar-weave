@@ -114,7 +114,7 @@
   `ChatHistory` 组件；宽屏（≥1280px）常驻左栏、窄屏汉堡抽屉；发送消息时落库、刷新后自动接上最近一条，
   「清空对话」改为「新对话」（保留已保存记录），单条可删除；配套 20 个 Vitest + 8 个 Playwright 用例
 
-## 项目制历史 + 锚点节点聊天（plan/discussion-document-vs-conversation-history.md）
+## 项目制历史 + 锚点节点聊天（plan/archive/discussion-document-vs-conversation-history.md）
 
 - `82abecd` feat: 数据层切项目制 + 左栏项目列表（阶段 1+2）——`Project`/`ChatNode` schema、
   `src/lib/migrations.ts` 旧 documents+conversations → 初始 Project（迁移后删旧表，Dexie v3 仅 projects）、

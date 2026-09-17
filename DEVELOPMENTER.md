@@ -13,6 +13,7 @@
 | [plan/PLAN.md](./plan/PLAN.md) | 产品定义、技术设计与实施计划的定稿（阶段划分的原始依据） |
 | [plan/CHANGELOG.md](./plan/CHANGELOG.md) | 变更记录，条目对应 git 提交，按里程碑分组 |
 | [plan/TODO.md](./plan/TODO.md) | 当前短期任务清单 |
+| [plan/archive/](./plan/archive) | 已完成的方案与讨论文档归档 |
 
 新增计划类文档、或改动达到一个里程碑时，都追加到这个目录里。
 

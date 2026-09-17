@@ -25,7 +25,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 | `plan/CHANGELOG.md` | **永久** | 变更记录，条目对应 git 提交、按里程碑分组 |
 | `plan/TODO.md` | 临时 | 短期任务清单 |
 
-`plan/` 目录专放**计划、变更记录与短期任务清单**；新的计划类文档、每个里程碑的变更记录，以及短期任务清单都放这里。引用时用相对路径（`plan/PLAN.md`、`plan/CHANGELOG.md`、`plan/TODO.md`）。
+`plan/` 目录专放**计划、变更记录与短期任务清单**；已完成且不再作为当前执行依据的方案与讨论文档移入 `plan/archive/`。新的计划类文档、每个里程碑的变更记录，以及短期任务清单都放这里。引用时用相对路径（`plan/PLAN.md`、`plan/CHANGELOG.md`、`plan/TODO.md`）。
 
 规则：
 
