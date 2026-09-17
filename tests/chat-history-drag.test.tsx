@@ -398,3 +398,55 @@ describe("历史列表：拖拽接线", () => {
     expect(liB.className).toContain("t-drag-shift");
   });
 });
+
+describe("历史抽屉标题按钮", () => {
+  it("默认显示历史记录，指针移动后切到新文章并写入倾斜位置", () => {
+    const { container } = render(
+      <ChatHistory
+        projects={[]}
+        activeId={null}
+        onSelect={() => {}}
+        onNew={() => {}}
+        onDelete={() => {}}
+        onReorder={() => {}}
+        justCreatedId={null}
+        onCreatedShown={() => {}}
+        open
+        onOpenChange={() => {}}
+      />,
+    );
+    const dialog = container.querySelector<HTMLElement>('[role="dialog"]')!;
+    const control = container.querySelector<HTMLElement>(".t-drawer-title-control")!;
+    const history = container.querySelector<HTMLElement>(".t-drawer-title-idle")!;
+    const newArticle = container.querySelector<HTMLButtonElement>(".t-drawer-new-button")!;
+    vi.spyOn(control, "getBoundingClientRect").mockReturnValue({
+      top: 20,
+      bottom: 60,
+      height: 40,
+      left: 100,
+      right: 196.2,
+      width: 96.2,
+      x: 100,
+      y: 20,
+      toJSON: () => ({}),
+    } as DOMRect);
+
+    expect(document.activeElement).toBe(dialog);
+    expect(history.style.opacity).toBe("1");
+    expect(newArticle.style.opacity).toBe("0");
+
+    act(() => {
+      fireEvent.pointerMove(control, { clientX: 180, clientY: 28 });
+    });
+    expect(history.style.opacity).toBe("0");
+    expect(newArticle.style.opacity).toBe("1");
+    expect(control.style.getPropertyValue("--tilt-rx")).not.toBe("");
+    expect(control.style.getPropertyValue("--tilt-ry")).not.toBe("");
+
+    act(() => {
+      fireEvent.pointerLeave(control);
+    });
+    expect(history.style.opacity).toBe("1");
+    expect(newArticle.style.opacity).toBe("0");
+  });
+});

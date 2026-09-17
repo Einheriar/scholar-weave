@@ -202,21 +202,82 @@ body {
   transform: scale(var(--drawer-icon-swap-start-scale));
 }
 
-/* 历史抽屉标题行的 hover 交叉淡入（transitions.dev skeleton-reveal 思路）：
-   「历史记录」按钮样式与「新文章」按钮等宽，叠在同一位置；hover 时前者淡出+模糊，
-   后者淡入。纯内联 style 驱动（React 事件），这里只保留过渡缓动变量。 */
+/* 历史抽屉标题行：固定尺寸内做「历史记录 → 新文章」交叉淡入。
+   默认态用极淡主题底色与无方向的环绕柔影提示可按；操作态颜色稍深，并根据指针位置
+   做低幅度 3D 倾斜和跟随高光。外层始终保持平面，命中区域不会随视觉变形漂移。 */
 :root {
   --drawer-skel-dur: 250ms;
   --drawer-skel-blur: 2px;
   --drawer-skel-ease: ease-in-out;
-  /* 「新文章」凸起投影：Tailwind shadow-md 的黑投影在深色底上很弱，凸起主要靠
-     位移（translateY(-1px)）+ 背景抬亮兜底，不额外写 color-mix 提亮投影（方案 a）。 */
-  --new-btn-shadow:
-    0 4px 6px -1px rgb(0 0 0 / 0.1),
-    0 2px 4px -2px rgb(0 0 0 / 0.1);
-  --new-btn-shadow-active:
-    0 1px 3px 0 rgb(0 0 0 / 0.1),
-    0 1px 2px -1px rgb(0 0 0 / 0.1);
+  --tilt-perspective: 720px;
+  --tilt-return: 650ms;
+  --tilt-return-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --tilt-follow: 90ms;
+  --tilt-follow-ease: linear;
+  --tilt-glare-opacity: 0.34;
+}
+.t-drawer-title-control {
+  cursor: pointer;
+  touch-action: manipulation;
+  /* 面板从左侧滑入时会穿过静止指针；先关闭命中，滑入完成后再启用，避免误进 hover。 */
+  pointer-events: none;
+  animation: drawer-title-enable-hit-area 1ms linear 280ms forwards;
+}
+@keyframes drawer-title-enable-hit-area {
+  from { pointer-events: none; }
+  to { pointer-events: auto; }
+}
+.t-drawer-title-idle {
+  background: color-mix(in srgb, var(--brand) 4%, var(--surface));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--brand) 5%, transparent),
+    0 0 11px color-mix(in srgb, var(--foreground) 5%, transparent);
+}
+.t-drawer-new-button {
+  overflow: hidden;
+  background: var(--brand-soft);
+  box-shadow:
+    0 0 0 1px var(--brand-ring),
+    0 0 14px color-mix(in srgb, var(--brand) 10%, transparent);
+  transform:
+    perspective(var(--tilt-perspective))
+    rotateX(var(--tilt-rx, 0deg))
+    rotateY(var(--tilt-ry, 0deg));
+  transform-style: preserve-3d;
+  scale: 1;
+  will-change: transform;
+}
+.t-drawer-title-control.is-tilting .t-drawer-new-button {
+  transition:
+    opacity var(--drawer-skel-dur) var(--drawer-skel-ease),
+    filter var(--drawer-skel-dur) var(--drawer-skel-ease),
+    transform var(--tilt-follow) var(--tilt-follow-ease),
+    scale 140ms ease,
+    background-color 180ms ease,
+    box-shadow 180ms ease !important;
+}
+.t-drawer-new-button:hover {
+  background: var(--brand-soft);
+}
+.t-drawer-new-button:active {
+  scale: 0.97;
+  background: color-mix(in srgb, var(--brand) 19%, var(--surface));
+}
+.t-tilt-glare {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  mix-blend-mode: screen;
+  background:
+    radial-gradient(circle 34px at var(--tilt-gx, 50%) var(--tilt-gy, 50%),
+      rgb(255 255 255 / 0.56), rgb(255 255 255 / 0.10) 52%, transparent 84%),
+    radial-gradient(circle 76px at var(--tilt-gx, 50%) var(--tilt-gy, 50%),
+      color-mix(in srgb, var(--brand) 24%, white), transparent 76%);
+  transition: opacity 280ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.t-drawer-title-control.is-hover .t-tilt-glare {
+  opacity: var(--tilt-glare-opacity);
 }
 
 /* 历史列表新条目出现动画（transitions.dev Toast 思路 + 占位生长）。
@@ -435,6 +496,9 @@ body {
   .animate-timeline-dropdown, .animate-timeline-dropdown-closing,
   .animate-tooltip-rise, .t-success-check, .review-card-collapsible { animation: none; }
   .t-icon-swap .t-icon { transition: none; }
+  .t-drawer-title-control { pointer-events: auto; animation: none; }
+  .t-drawer-new-button { transform: none !important; transition: none !important; }
+  .t-tilt-glare { display: none; }
   .t-toast-rise, .t-toast-rise > .t-toast-content { animation: none; }
   .t-drag-shift, .t-drag-settle { transition: none; }
   .t-success-check { opacity: 1; }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import type { PointerEvent as ReactPointerEvent } from "react";
 import type { Project } from "@/lib/review-schema";
 import {
   deriveProjectTitle,
@@ -88,7 +89,7 @@ export function ChatHistory({
   useEffect(() => {
     if (!open) return;
     const previous = document.activeElement as HTMLElement | null;
-    panelRef.current?.querySelector<HTMLElement>("button")?.focus();
+    panelRef.current?.focus();
     return () => previous?.focus?.();
   }, [open]);
 
@@ -160,6 +161,7 @@ export function ChatHistory({
             role="dialog"
             aria-modal="true"
             aria-label="历史记录"
+            tabIndex={-1}
             // pl-4 与 HistoryList 的 pl-14 配套：标题行让位顶栏汉堡（叉叉），列表行正常缩进
             onAnimationEnd={(e) => {
               // 退出动画（滑出/淡出）播完才真正卸载；进入动画结束时 closing 还是 false，不受影响
@@ -203,6 +205,31 @@ function HistoryList({
 }: HistoryListProps & { variant?: "sidebar" | "drawer" }) {
   const drawer = variant === "drawer";
   const [titleHover, setTitleHover] = useState(false);
+  const handleTitlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    setTitleHover(true);
+    event.currentTarget.classList.add("is-hover");
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return;
+
+    const x = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+    const y = Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height));
+    const rx = (0.5 - y) * 16;
+    const ry = (x - 0.5) * 24;
+
+    event.currentTarget.style.setProperty("--tilt-rx", `${rx.toFixed(2)}deg`);
+    event.currentTarget.style.setProperty("--tilt-ry", `${ry.toFixed(2)}deg`);
+    event.currentTarget.style.setProperty("--tilt-gx", `${(x * 100).toFixed(1)}%`);
+    event.currentTarget.style.setProperty("--tilt-gy", `${(y * 100).toFixed(1)}%`);
+    event.currentTarget.classList.add("is-tilting");
+  };
+  const handleTitlePointerLeave = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.currentTarget.classList.remove("is-hover", "is-tilting");
+    event.currentTarget.style.removeProperty("--tilt-rx");
+    event.currentTarget.style.removeProperty("--tilt-ry");
+    event.currentTarget.style.removeProperty("--tilt-gx");
+    event.currentTarget.style.removeProperty("--tilt-gy");
+    if (!event.currentTarget.matches(":focus-within")) setTitleHover(false);
+  };
   const {
     listRef,
     dragId,
@@ -230,18 +257,19 @@ function HistoryList({
             动画 250ms（transitions.dev skeleton-reveal 思路，见 globals.css .t-skel-*）。
           */}
           <div
-            className="group relative ml-auto inline-flex h-10 items-center"
-            onMouseEnter={() => setTitleHover(true)}
-            onMouseLeave={() => setTitleHover(false)}
+            className="t-drawer-title-control relative ml-auto inline-flex h-10 w-[96.2px] items-center"
+            onPointerMove={handleTitlePointerMove}
+            onPointerLeave={handleTitlePointerLeave}
           >
             {/* 层 1：历史记录（hover 时淡出） */}
             <div
               role="presentation"
-              className="t-skel-skeleton flex h-10 items-center rounded-lg bg-surface-muted px-3"
+              className="t-skel-skeleton t-drawer-title-idle flex h-10 w-[96.2px] items-center justify-center rounded-lg"
               style={{
                 opacity: titleHover ? 0 : 1,
                 filter: titleHover ? "blur(2px)" : "blur(0px)",
-                transition: "opacity 250ms ease-in-out, filter 250ms ease-in-out",
+                transition:
+                  "opacity var(--drawer-skel-dur) var(--drawer-skel-ease), filter var(--drawer-skel-dur) var(--drawer-skel-ease)",
               }}
             >
               <span className="text-lg font-medium tracking-tight text-foreground">
@@ -249,22 +277,28 @@ function HistoryList({
               </span>
             </div>
             {/* 层 2：新文章（hover 时淡入，字间距调宽与历史记录同宽）。
-                「可按下」用扁平凸起三件套表达：背景抬亮到纸面 + 上抬 1px + 软投影；
-                active 把位移/投影收回 + scale 0.98，因果关系完整。投影变量见 globals.css
-                （深色下黑投影弱，位移+抬亮兜底，方案 a）。淡入淡出仍走内联 style。 */}
+                外层保留平面命中区，按钮本体根据指针位置做低幅度 3D 倾斜；高光单独覆盖，
+                不再用向下投影制造悬浮感。淡入淡出仍与「历史记录」同步。 */}
             <button
               type="button"
               disabled={interactionLocked}
               aria-disabled={interactionLocked}
               title={interactionLocked ? lockTitle : "新建文章"}
               onClick={() => onNew({ keepHistoryOpen: true })}
-              className={
-                "t-skel-content absolute inset-y-0 right-0 my-auto flex h-10 w-[96.2px] items-center justify-center rounded-lg bg-surface-muted !text-lg font-medium !tracking-[0.3em] text-foreground transition-[transform,box-shadow,background-color] duration-150 hover:-translate-y-px hover:bg-surface hover:shadow-[var(--new-btn-shadow)] active:translate-y-0 active:bg-border/50 active:shadow-[var(--new-btn-shadow-active)] active:scale-[0.98]"
-              }
+              onFocus={(event) => {
+                setTitleHover(true);
+                event.currentTarget.parentElement?.classList.add("is-hover");
+              }}
+              onBlur={(event) => {
+                setTitleHover(false);
+                event.currentTarget.parentElement?.classList.remove("is-hover", "is-tilting");
+              }}
+              className="t-skel-content t-drawer-new-button absolute inset-0 flex h-10 w-[96.2px] items-center justify-center rounded-lg !text-lg font-medium !tracking-[0.3em] text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring disabled:cursor-not-allowed"
               style={{
                 opacity: titleHover ? 1 : 0,
                 filter: titleHover ? "blur(0px)" : "blur(2px)",
-                transition: "opacity 250ms ease-in-out, filter 250ms ease-in-out",
+                transition:
+                  "opacity var(--drawer-skel-dur) var(--drawer-skel-ease), filter var(--drawer-skel-dur) var(--drawer-skel-ease), transform var(--tilt-return) var(--tilt-return-ease), scale 140ms ease, background-color 180ms ease, box-shadow 180ms ease",
               }}
             >
               {/*
@@ -273,7 +307,8 @@ function HistoryList({
                 （实测左偏 2.708px，右空隙比左大一个完整字距）。负右边距把这截尾随留白拉回，
                 墨迹才真正居中（CSS 通用手法：负边距抵消字距尾随留白）。
               */}
-              <span className="-mr-[0.3em]">新文章</span>
+              <span className="relative z-10 -mr-[0.3em]">新文章</span>
+              <span className="t-tilt-glare" aria-hidden />
             </button>
           </div>
         </div>
