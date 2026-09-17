@@ -59,7 +59,7 @@ export type DocumentEditorProps = {
   selectedReviewId?: string | null;
   /** 点击正文标记时回调（正文→侧栏定位），带标记的视口纵坐标供侧栏对齐 */
   onSelectReview?: (id: string, viewportTop: number | null) => void;
-  /** 选区变化回调：当前选中的（blockId, 文本），无选区时为 null（阶段 5 range 上下文） */
+  /** 用户选区变化回调：当前选中的（blockId, 文本），无选区时为 null；建议定位的程序化选区不会上报 */
   onSelectionChange?: (sel: { blockId: string; text: string } | null) => void;
   /** 聊天节点锚点（阶段 6）：被聊过的文字画点状下划线，点击跳节点 */
   chatNodes?: ChatNode[];
@@ -116,6 +116,11 @@ export const DocumentEditor = forwardRef<
   const onChatAnchorRef = useRef(onSelectChatAnchor);
   const onReviewEditUndoRef = useRef(onReviewEditUndo);
   const onReviewEditUndoUnavailableRef = useRef(onReviewEditUndoUnavailable);
+  /**
+   * 侧栏建议定位也会创建真实的 ProseMirror 文本选区，但它的语义仍是 review，
+   * 不能经 onSelectionUpdate 冒充用户手划的 range 上下文。
+   */
+  const locatingReviewRef = useRef(false);
   /** 惰性持有 editor.view，供 extensions 闭包内访问 DOM（不进 deps，避免重建） */
   const viewRef = useRef<Editor["view"] | null>(null);
   useEffect(() => {
@@ -256,6 +261,7 @@ export const DocumentEditor = forwardRef<
       setCanUndo((current) => (current === nextCanUndo ? current : nextCanUndo));
     },
     onSelectionUpdate({ editor }) {
+      if (locatingReviewRef.current) return;
       const cb = onSelChangeRef.current;
       if (!cb) return;
       const { from, to, empty } = editor.state.selection;
@@ -346,12 +352,17 @@ export const DocumentEditor = forwardRef<
       const size = editor.state.doc.content.size;
       const from = Math.max(0, Math.min(pos.from, size));
       const to = Math.max(from, Math.min(pos.to, size));
-      editor
-        .chain()
-        .focus()
-        .setTextSelection(to > from ? { from, to } : from)
-        .scrollIntoView()
-        .run();
+      locatingReviewRef.current = true;
+      try {
+        editor
+          .chain()
+          .focus()
+          .setTextSelection(to > from ? { from, to } : from)
+          .scrollIntoView()
+          .run();
+      } finally {
+        locatingReviewRef.current = false;
+      }
     },
     revealChatAnchor(node, reviewItem) {
       if (!editor) return false;

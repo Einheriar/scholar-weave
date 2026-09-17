@@ -545,10 +545,24 @@ export default function Home() {
   const [anchorTop, setAnchorTop] = useState<number | null>(null);
   const summaryRef = useRef<HTMLParagraphElement | null>(null);
 
+  /**
+   * 只有用户实际划出的文本才建立 range 上下文。侧栏建议的程序化文本选区
+   * 由 DocumentEditor 抑制回报，因此不会走到这里抢走 review 上下文。
+   */
+  const handleEditorSelectionChange = useCallback((next: Selection) => {
+    setSelection(next);
+    if (next) {
+      setSelectedId(null);
+      setAnchorTop(null);
+    }
+  }, []);
+
   const handleSelect = useCallback(
     (id: string) => {
       // 侧栏发起的选中不带正文锚点；清掉 anchorTop 防止侧栏误用上一轮的旧坐标
       setAnchorTop(null);
+      // 如果此前有人工选区，建议定位从此刻起成为唯一的主上下文。
+      setSelection(null);
       setSelectedId(id);
       const item = reviews.find((r) => r.id === id);
       if (!item) return;
@@ -1537,7 +1551,7 @@ export default function Home() {
               reviewItems={reviews}
               selectedReviewId={selectedId}
               onSelectReview={handleBodySelectAnchor}
-              onSelectionChange={setSelection}
+              onSelectionChange={handleEditorSelectionChange}
               chatNodes={nodes}
               onSelectChatAnchor={handleSelectChatAnchor}
               readOnly={requestLocked}

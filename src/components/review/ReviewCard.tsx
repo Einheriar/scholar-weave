@@ -216,14 +216,20 @@ export function ReviewCard({
                 {item.scope.type === "range" && (
                   <div className="flex gap-1.5">
                     <span className="shrink-0 text-text-faint">原文</span>
-                    <span className="break-all text-red-700 line-through decoration-red-400/60 dark:text-red-400">
+                    <span
+                      data-review-original
+                      className="min-w-0 break-words text-red-700 line-through decoration-red-400/60 dark:text-red-400"
+                    >
                       {item.scope.original}
                     </span>
                   </div>
                 )}
                 <div className="flex gap-1.5">
                   <span className="shrink-0 text-text-faint">改为</span>
-                  <span className="break-all font-medium text-emerald-700 dark:text-emerald-400">
+                  <span
+                    data-review-replacement
+                    className="min-w-0 break-words font-medium text-emerald-700 dark:text-emerald-400"
+                  >
                     {item.replacement}
                   </span>
                 </div>

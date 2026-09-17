@@ -150,10 +150,16 @@ export function ChangeSetPreview({
               aria-label={`选择修改：${r.edit.explanation || r.edit.original}`}
             />
             <div className="min-w-0 flex-1 text-xs">
-              <div className="break-all text-red-700 line-through decoration-red-400/60 dark:text-red-400">
+              <div
+                data-change-original
+                className="min-w-0 break-words text-red-700 line-through decoration-red-400/60 dark:text-red-400"
+              >
                 {r.edit.original}
               </div>
-              <div className="break-all font-medium text-emerald-700 dark:text-emerald-400">
+              <div
+                data-change-replacement
+                className="min-w-0 break-words font-medium text-emerald-700 dark:text-emerald-400"
+              >
                 {r.edit.replacement}
               </div>
               {r.edit.explanation && (

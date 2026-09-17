@@ -6,6 +6,7 @@ import {
   useId,
   useState,
   type FocusEvent,
+  type MouseEvent,
   type PointerEvent,
   type ReactElement,
   type ReactNode,
@@ -21,6 +22,7 @@ type TriggerProps = {
   onPointerLeave?: (event: PointerEvent<HTMLElement>) => void;
   onFocus?: (event: FocusEvent<HTMLElement>) => void;
   onBlur?: (event: FocusEvent<HTMLElement>) => void;
+  onClick?: (event: MouseEvent<HTMLElement>) => void;
 };
 
 type Position = {
@@ -96,6 +98,12 @@ export function Tooltip({
     onBlur: (event: FocusEvent<HTMLElement>) => {
       trigger.props.onBlur?.(event);
       setPosition(null);
+    },
+    onClick: (event: MouseEvent<HTMLElement>) => {
+      // 激活按钮后提示已完成使命。尤其是按钮打开模态框时，触发器仍保持
+      // hover/focus，若不主动收起，portal tooltip 会浮在遮罩上方。
+      setPosition(null);
+      trigger.props.onClick?.(event);
     },
   });
 

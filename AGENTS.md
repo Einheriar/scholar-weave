@@ -106,8 +106,11 @@ tests/e2e/                      # Playwright 用例（helpers.ts 里是 mock 与
 7. **遮罩点击关闭** — 模态框/抽屉"点外部收起"的写法要判断 `e.target === e.currentTarget`（面板是遮罩子元素），照 `src/components/SettingsPanel.tsx:134` 抄。只认"点遮罩空白处"，别用 `document` 上的全局点击，那样在面板内拖动松手会误关。
 8. **本项目没有动画库**，动效一律手写 CSS keyframes（`globals.css`）。由此有一条固定约束：**退出动画必须延迟卸载**——`{open && ...}` 这类条件渲染会在关闭瞬间卸载节点，淡出/滑出根本没机会播放。做法是加一个「closing」状态在动画期间继续渲染，`onAnimationEnd` 后再真正移除。另外新加的 keyframes 必须同时登记到 `globals.css` 的 `prefers-reduced-motion` 覆盖名单里，漏了的话，明明开了「减少动态效果」的用户反而还会看到动画。
 9. **滚动条全局自定义过**（`globals.css`）：细窄（8px）半透明滑块，悬停加深；滑块色用 `color-mix(in srgb, var(--text-faint) 45%, transparent)`、悬停用 `--text-muted`，深浅色自适应。Chrome/Edge/Safari 走 `::-webkit-scrollbar`，Firefox 走 `scrollbar-width: thin` + `scrollbar-color`。新增可滚区域不用单独配，全局生效。**注意**：半透明滑块会叠在内容上，长文滚动有轻微透色，是有意的取舍；别改回不透明的粗条。
-10. **悬浮提示统一用 `src/components/ui/tooltip.tsx` 的 `Tooltip`，不要使用 HTML `title` 属性。** 原生 `title` 是浏览器绘制的黑色提示，无法跟随项目的浅色卡片、深色模式和阴影规范；统一组件通过 portal 渲染，也不会被设置面板、抽屉或侧栏的 `overflow` 裁掉。
+10. **悬浮提示统一用 `src/components/ui/tooltip.tsx` 的 `Tooltip`，不要使用 HTML `title` 属性。** 原生 `title` 是浏览器绘制的黑色提示，无法跟随项目的浅色卡片、深色模式和阴影规范；统一组件通过 portal 渲染，也不会被设置面板、抽屉或侧栏的 `overflow` 裁掉。触发器点击后 `Tooltip` 必须立即收起，并等待指针离开／重新聚焦后才再次出现，否则打开模态框时 portal 提示会残留在遮罩上方。
 11. **当前应用只面向 Windows。** 用户可见的快捷键说明和 `aria-keyshortcuts` 只写 `Ctrl`（例如 `Ctrl+Enter`、`Ctrl+Shift+C`、`Ctrl+Z`），不要写 `Cmd/Ctrl` 或 `Meta`。
+12. **“测试连接”失败反馈由配置名称框承担，测试按钮只发起动作。** 名称框在这里代表整套命名配置，失败时用 `.t-connection-input` 重播 340ms 的高频阻尼 shake（多次往返、幅度逐步衰减，`translate3d` 保证转折流畅），并进入 3 秒错误色；具体服务端错误由邻接的 `role="alert"` 文案淡入，错误态结束后先淡出 280ms 再卸载。输入框与按钮必须等高且顶／底边严格对齐，不要给按钮容器加 `pb-*` 偏移。重复失败必须通过强制 reflow 重播动画；`prefers-reduced-motion` 下禁用位移但保留颜色与文案。
+13. **设置面板的 props→draft 同步只发生在“关闭→打开”时。** `handleSave` 会先写 localStorage，再把同一份 `draft` 通过 `onSettingsChange` 回传；父组件的新 `settings` 引用传回来时不得重置 `saved`，否则第一次点击实际上已保存却看不到“已保存！”，第二次因引用不再变化才显示。连续保存还要清理并重开同一个 2 秒提示计时器。
+14. **审阅卡片与修改集预览中的英文原文／改写不得使用 `break-all`。** 文本 flex 子项统一用 `min-w-0 break-words`：正常句子优先在空格和 Unicode 合法断点换行，只有无空格的超长串才兜底拆分；否则会出现 `receiver` 的最后一个 `r` 单独掉到下一行。
 
 ## 左侧历史（项目制，一篇文章 = 一个项目）
 
@@ -166,7 +169,8 @@ tests/e2e/                      # Playwright 用例（helpers.ts 里是 mock 与
 - 节点时间线（`NodeTimeline`）：聊天区头部「聊天节点历史」按钮**从聊天区顶部向上滑出的抽屉**（第二层抽拉，不是居中弹窗；标题行 `sticky top-0`），按钮是 **toggle**（再按一次收起，带 `aria-expanded`，开态琥珀底高亮）。每行一个节点，行内删除直接删（规则 13，无确认）。**轨道上的端点 = 用户提问，数量恒等于提问次数**（1 次提问 = 1 个端点，单端点居中 left:50%）；行首是**节点身份竖条**（`h-4 w-[3px]`，琥珀）——**不是圆点、不是端点**，2026-09-16 改竖条就是因为圆点会被误认成「多一次提问」；竖条现在也是返回正文锚点的次要入口，但不可扩大成抢眼的主按钮。hover 端点浮出自定义摘要 tooltip（锚点摘要 + 该次提问截断 48 字），**钉在抽屉顶部**（标题栏下）而非底部（底部会盖住节点行）；它是**绝对定位悬浮层**（脱离文档流 + `pointer-events-none`）——放进流内会把行撑开、端点位移、hover 循环闪烁（踩过的坑）。抽屉展开时与聊天区连成一体：聊天区顶部圆角让位（`rounded-b-2xl`）、共享边框无线、抽屉 `max-h-[42vh]` 内部滚动。
 - 聊天区**浮动**（规则 21 sticky-dock）：`sticky bottom-4`，可最小化成窄条（规则 22）。**高度可拖拽**：头部与消息区之间的把手（`aria-label="调整聊天区高度"`）按住上拉/下拖，范围 180–720px，实时持久化到 localStorage `supergrammarly-chat-height`。新建文章**只在左侧历史栏**，聊天区头部不放「新文章」按钮（曾加过又删掉，与左侧入口重复）。
 - 正文锚点标记（`ChatAnchorDecorationExtension`）：range 锚画虚线下划线、block 锚画左侧竖条，点击标记切到对应节点对话。Decoration 是视图层，不序列化进正文。
-- **正文真实选区统一用中性灰底**（`--editor-selection`）：浅色 `#d9dcdf`、深色 `#45494d`，文字保持 `--foreground`。它只表达浏览器／Tiptap 的当前选择，不借用聊天节点琥珀色，避免与 range 锚的琥珀虚线语义冲突；Windows 高对比度模式恢复系统 `Highlight/HighlightText`。
+- **正文真实选区用“灰为主、轻掺主题绿”的底色**（`--editor-selection`）：在浅／深色的中性灰基底中混入 8% `--brand`，文字保持 `--foreground`。它只表达浏览器／Tiptap 的当前选择，不借用聊天节点琥珀色，避免与 range 锚的琥珀虚线语义冲突；Windows 高对比度模式恢复系统 `Highlight/HighlightText`。
+- **审阅定位选区与人工 range 选区必须区分来源**：点击侧栏建议仍用真实 ProseMirror 选区定位文字，但 `DocumentEditor` 在该事务期间不向上回报 range，聊天上下文保持 `review`；其 `::selection` 与 `.rev-selected` 共用 `--review-selection`，视觉只有一层品牌绿填充。用户随后真正划词时才建立 range，并清掉 `selectedId`，切回灰绿的 `--editor-selection`。不要只靠 CSS 遮叠色，否则聊天上下文仍会错误地从建议变成选区。
 - **聊天节点专用琥珀色（`--node-*` 令牌，深浅双套）**：节点系统（时间线竖条/端点、正文锚点标记、聊天区头部指示点、历史按钮开态）统一用琥珀色——与审阅红（待处理）/绿（已接受）、品牌绿（主操作）三层语义错开，比绿色更有层次（2026-09-16 用户拍板换琥珀）。令牌：`--node`（主色 `#b45309` / 深 `#d97706`）、`--node-hover`、`--node-soft`（浅底）、`--node-ring`（光晕），已入 `@theme inline` 映射出 `bg-node` / `bg-node-soft` / `text-node` 等类。**新增节点相关样式一律用 `*-node-*`，别再退回 `bg-brand` 或灰绿。** hover 端点的「专注」效果 = 放大 1.5 倍 + 琥珀光晕（`box-shadow` 双层：`--node-soft` 环 + `--node-ring` 泛光）。
 - **上下文联动（2026-09-16 反馈修订）**：`page.tsx` 有一个 effect——点击侧栏/正文的另一条建议、或正文里划出新选区时，**聊天视图同步切到该上下文对应的节点**（有节点翻过去、没有则清空显示空态待发）。头部「当前上下文」标签与消息列表因此永远一致（看什么就聊什么）。effect 只依赖 `selection`/`selectedId`（**不能依赖 `nodes`**，否则回复到达等节点更新会误触切换）；选区与建议皆空时不动（chatContext 回退链的 activeNode 一级仍在，焦点不丢）。
 

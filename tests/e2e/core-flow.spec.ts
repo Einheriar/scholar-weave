@@ -1,5 +1,11 @@
 import { expect, test } from "@playwright/test";
-import { gotoApp, loadSample, paragraphTexts, scrollCardIntoView } from "./helpers";
+import {
+  gotoApp,
+  loadSample,
+  paragraphTexts,
+  scrollCardIntoView,
+  selectTextInEditor,
+} from "./helpers";
 
 /**
  * 核心交互流程（阶段 6 验收：核心流程在全新浏览器环境无需开发者干预即可完成）。
@@ -17,6 +23,93 @@ function card(page: import("@playwright/test").Page, id: string) {
 }
 
 test.describe("核心流程：三层建议与定位", () => {
+  test("打开设置面板后触发按钮的提示立即收起", async ({ page }) => {
+    await gotoApp(page);
+
+    const settingsButton = page.getByRole("button", { name: "设置" });
+    await settingsButton.hover();
+    await expect(page.getByRole("tooltip")).toHaveText("设置");
+
+    await settingsButton.click();
+    await expect(page.getByRole("dialog", { name: "设置" })).toBeVisible();
+    await expect(page.getByRole("tooltip")).toHaveCount(0);
+  });
+
+  test("测试连接失败时配置框摇晃并显示可恢复的错误提示", async ({ page }) => {
+    await page.route("**/api/test-connection", async (route) => {
+      await route.fulfill({
+        status: 401,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ok: false,
+          error: { message: "认证失败，请检查 API Key。" },
+        }),
+      });
+    });
+    await gotoApp(page);
+
+    await page.getByRole("button", { name: "设置" }).click();
+    const dialog = page.getByRole("dialog", { name: "设置" });
+    await dialog.locator('input[type="password"]').fill("bad-key");
+    const configInput = dialog.getByLabel("配置名称");
+    const testButton = dialog.getByRole("button", { name: /测试连接|测试中/ });
+    const [inputBox, buttonBox] = await Promise.all([
+      configInput.boundingBox(),
+      testButton.boundingBox(),
+    ]);
+    expect(inputBox).not.toBeNull();
+    expect(buttonBox).not.toBeNull();
+    expect(Math.abs(inputBox!.y - buttonBox!.y)).toBeLessThanOrEqual(1);
+    expect(Math.abs(inputBox!.height - buttonBox!.height)).toBeLessThanOrEqual(1);
+    await testButton.click();
+
+    await expect(configInput).toHaveClass(/is-error/);
+    await expect(configInput).toHaveAttribute("aria-invalid", "true");
+    await expect(testButton).not.toHaveClass(/is-error/);
+    await expect(dialog.getByRole("alert")).toHaveText(
+      "认证失败，请检查 API Key。",
+    );
+    await expect
+      .poll(() =>
+        configInput.evaluate((element) =>
+          ({
+            duration: getComputedStyle(element).animationDuration,
+            name: getComputedStyle(element).animationName,
+          }),
+        ),
+      )
+      .toEqual({ duration: "0.34s", name: "t-connection-shake" });
+
+    await expect(configInput).not.toHaveClass(/is-error/, { timeout: 4500 });
+    await expect(configInput).not.toHaveAttribute("aria-invalid", "true");
+    await expect(dialog.getByRole("alert")).toHaveCount(0);
+  });
+
+  test("设置第一次保存即显示成功并写入本地", async ({ page }) => {
+    await gotoApp(page);
+    await page.getByRole("button", { name: "设置" }).click();
+    const dialog = page.getByRole("dialog", { name: "设置" });
+    await dialog.locator('input[type="text"]').first().fill("第一次保存测试");
+
+    await dialog.getByRole("button", { name: "保存", exact: true }).click();
+
+    await expect(dialog.getByText("已保存！")).toBeVisible();
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const raw = localStorage.getItem("supergrammarly-settings");
+          if (!raw) return null;
+          const settings = JSON.parse(raw) as {
+            llm?: { activeId?: string; presets?: Array<{ id: string; name: string }> };
+          };
+          return settings.llm?.presets?.find(
+            (preset) => preset.id === settings.llm?.activeId,
+          )?.name;
+        }),
+      )
+      .toBe("第一次保存测试");
+  });
+
   test("首屏载入样例并展示三层建议分区", async ({ page }) => {
     await gotoApp(page);
     await loadSample(page);
@@ -25,6 +118,24 @@ test.describe("核心流程：三层建议与定位", () => {
     await expect(page.getByRole("region", { name: "全文审阅" })).toBeVisible();
     await expect(page.getByRole("region", { name: "段落意见" })).toBeVisible();
     await expect(page.getByRole("region", { name: "具体修改" })).toBeVisible();
+
+    // 英文审阅原文优先按单词边界换行，不能用 break-all 把 receiver 拆成 receive + r。
+    const originalText = page.locator("[data-review-original]").first();
+    await expect(originalText).toBeVisible();
+    expect(
+      await originalText.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return {
+          minWidth: style.minWidth,
+          overflowWrap: style.overflowWrap,
+          wordBreak: style.wordBreak,
+        };
+      }),
+    ).toEqual({
+      minWidth: "0px",
+      overflowWrap: "break-word",
+      wordBreak: "normal",
+    });
 
     // 三层各至少一条
     await expect(card(page, "review_doc_1")).toBeVisible();
@@ -55,9 +166,15 @@ test.describe("核心流程：三层建议与定位", () => {
     }
   });
 
-  test("侧栏 → 正文：点击局部建议卡片后正文选中对应文本", async ({ page }) => {
+  test("侧栏建议定位保持 review 上下文，人工划词才切换为 range", async ({ page }) => {
     await gotoApp(page);
     await loadSample(page);
+
+    // 先建立一个人工 range，复现“已有选区后再点审阅意见”的真实路径。
+    await selectTextInEditor(page, "upstanding");
+    await expect(page.locator('[aria-label="上下文对话"]')).toContainText(
+      "当前上下文：选区",
+    );
 
     // 侧栏是 sticky + 内部滚动容器，先显式滚进容器可视区再点（见 helpers.scrollCardIntoView）
     await scrollCardIntoView(page, "review_edit_5");
@@ -73,6 +190,35 @@ test.describe("核心流程：三层建议与定位", () => {
     await expect(page.locator(".ProseMirror")).toBeFocused();
     const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
     expect(selected).toBe("overlooking the interpersonal part");
+
+    // 程序化选中文字只是建议定位方式：视觉使用同一层绿色，聊天语义仍是 review。
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const mark = document.querySelector(
+            '[data-review-id="review_edit_5"]',
+          );
+          if (!(mark instanceof HTMLElement)) return false;
+          return (
+            getComputedStyle(mark, "::selection").backgroundColor ===
+            getComputedStyle(mark).backgroundColor
+          );
+        }),
+      )
+      .toBe(true);
+    await expect(page.locator('[aria-label="上下文对话"]')).toContainText(
+      "当前上下文：建议",
+    );
+
+    // 真正的鼠标选区接管主上下文，并退出右侧建议卡片的选中态。
+    await selectTextInEditor(page, "upstanding");
+    await expect(card(page, "review_edit_5")).not.toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    await expect(page.locator('[aria-label="上下文对话"]')).toContainText(
+      "当前上下文：选区",
+    );
   });
 
   test("正文 → 侧栏：点击正文标记后对应卡片被选中", async ({ page }) => {

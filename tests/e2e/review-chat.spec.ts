@@ -198,7 +198,7 @@ test.describe("上下文对话（mock /api/chat）", () => {
         };
       }),
     ).toEqual({
-      backgroundColor: "rgb(217, 220, 223)",
+      backgroundColor: "color(srgb 0.78698 0.845804 0.842196)",
       color: "rgb(26, 36, 32)",
     });
     await expect

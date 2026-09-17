@@ -16,11 +16,12 @@
   --border-strong: #c9d4cf;
   --text-muted: #5f6f68;
   --text-faint: #93a29b;
-  --editor-selection: #d9dcdf; /* 正文真实选区：中性纸面灰，不与聊天琥珀锚点争色 */
+  --editor-selection: color-mix(in srgb, var(--brand) 8%, #d9dcdf); /* 灰色为主，轻掺主题绿 */
   --brand: #0da678;             /* 主操作绿 */
   --brand-hover: #0b9069;
   --brand-soft: #e3f4ee;        /* 浅绿底（选中态等） */
   --brand-ring: #a8dcc9;
+  --review-selection: color-mix(in srgb, var(--brand) 14%, var(--surface));
   /* 聊天节点专用色（琥珀）：与审阅红/绿、品牌绿三层语义错开 */
   --node: #b45309;              /* 琥珀主色（节点竖条 / 端点 / 正文锚点标记） */
   --node-hover: #92400e;        /* 深一号（当前节点） */
@@ -38,11 +39,12 @@
   --border-strong: #3a453f;
   --text-muted: #8fa098;
   --text-faint: #5f6f68;
-  --editor-selection: #45494d;
+  --editor-selection: color-mix(in srgb, var(--brand) 8%, #45494d);
   --brand: #2cc493;
   --brand-hover: #3fd6a5;
   --brand-soft: rgb(44 196 147 / 0.12);
   --brand-ring: rgb(44 196 147 / 0.35);
+  --review-selection: color-mix(in srgb, var(--brand) 18%, var(--surface));
   --node: #d97706;              /* 深色下稍亮，保持辨识度 */
   --node-hover: #f59e0b;
   --node-soft: rgb(217 119 6 / 0.16);
@@ -651,6 +653,8 @@ body {
   .editor-undo-fold, .editor-undo-relief { transition: none; }
   .editor-undo-relief { animation: none !important; }
   .app-tooltip { animation: none !important; }
+  .t-connection-input { animation: none !important; transform: none !important; }
+  .t-connection-error { transition: none !important; }
 }
 
 /* ── 审阅建议的编辑器标记（阶段 2）──────────────────────────────
@@ -714,13 +718,18 @@ body {
 
 /* 选中态：正文标记与侧栏卡片双向高亮（品牌绿） */
 .rev-selected.rev-underline {
-  background-color: rgb(13 166 120 / 0.14);
+  background-color: var(--review-selection);
   outline: 2px solid rgb(13 166 120 / 0.45);
   outline-offset: 1px;
 }
 .dark .rev-selected.rev-underline {
-  background-color: rgb(44 196 147 / 0.18);
   outline-color: rgb(44 196 147 / 0.5);
+}
+.rev-selected.rev-underline::selection,
+.rev-selected.rev-underline *::selection {
+  background: var(--review-selection);
+  color: var(--foreground);
+  text-shadow: none;
 }
 .rev-selected.rev-block-marker {
   background-color: rgb(245 158 11 / 0.14);
@@ -793,6 +802,63 @@ body {
   animation: app-tooltip-in 150ms ease-out both;
 }
 
+/* 测试连接失败：配置名称框代表整套配置，轻摇并暂留错误色；按钮只负责发起测试。 */
+.t-connection-wrap {
+  --connection-revert-duration: 280ms;
+}
+.t-connection-input {
+  transition:
+    border-color 150ms ease-out,
+    background-color 150ms ease-out,
+    color 150ms ease-out,
+    box-shadow 150ms ease-out;
+}
+.t-connection-input.is-error {
+  border-color: #ef4444;
+  background: color-mix(in srgb, #ef4444 7%, var(--surface));
+  color: #dc2626;
+  box-shadow: 0 0 0 2px color-mix(in srgb, #ef4444 18%, transparent);
+  transition-duration: var(--connection-revert-duration);
+}
+.dark .t-connection-input.is-error {
+  border-color: #f87171;
+  color: #fca5a5;
+}
+.t-connection-input.is-shaking {
+  animation: t-connection-shake 340ms cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+  will-change: transform;
+  backface-visibility: hidden;
+}
+.t-connection-error {
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-2px);
+  transition:
+    opacity var(--connection-revert-duration) ease-out,
+    transform var(--connection-revert-duration) ease-out,
+    visibility 0s linear var(--connection-revert-duration);
+}
+.t-connection-wrap.is-error .t-connection-error {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+  transition:
+    opacity var(--connection-revert-duration) ease-out,
+    transform var(--connection-revert-duration) ease-out,
+    visibility 0s linear 0s;
+}
+@keyframes t-connection-shake {
+  0%   { transform: translate3d(0, 0, 0); }
+  12%  { transform: translate3d(-6px, 0, 0); }
+  24%  { transform: translate3d(5.5px, 0, 0); }
+  36%  { transform: translate3d(-4.5px, 0, 0); }
+  48%  { transform: translate3d(4px, 0, 0); }
+  60%  { transform: translate3d(-3px, 0, 0); }
+  72%  { transform: translate3d(2.25px, 0, 0); }
+  84%  { transform: translate3d(-1.25px, 0, 0); }
+  100% { transform: translate3d(0, 0, 0); }
+}
+
 /* 节点时间线的尺子轨道：保留横向滚动（端点溢出时两端箭头卷轴），但隐藏滚动条本身 */
 .timeline-ruler {
   scrollbar-width: none; /* Firefox */
@@ -815,7 +881,9 @@ body {
 }
 @media (forced-colors: active) {
   .ProseMirror::selection,
-  .ProseMirror *::selection {
+  .ProseMirror *::selection,
+  .ProseMirror .rev-selected.rev-underline::selection,
+  .ProseMirror .rev-selected.rev-underline *::selection {
     background: Highlight;
     color: HighlightText;
   }

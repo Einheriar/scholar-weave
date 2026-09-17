@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { buttonClass } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -54,6 +54,12 @@ export function SettingsPanel({
   // 测试连接状态
   const [testStatus, setTestStatus] = useState<"idle" | "testing">("idle");
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [testErrorActive, setTestErrorActive] = useState(false);
+  const [testShakeTick, setTestShakeTick] = useState(0);
+  const testConfigInputRef = useRef<HTMLInputElement | null>(null);
+  const testErrorTimerRef = useRef<number | null>(null);
+  const testResultTimerRef = useRef<number | null>(null);
+  const savedTimerRef = useRef<number | null>(null);
   // 面板每次打开时重置 draft：用“上次同步的 settings”做渲染期比对，
   // 只在引用变化时 setState（React 推荐的 derived-state-from-props 模式）
   const [prevSynced, setPrevSynced] = useState<{ open: boolean; settings: UserSettings }>({
@@ -62,7 +68,9 @@ export function SettingsPanel({
   });
   if (open !== prevSynced.open || settings !== prevSynced.settings) {
     setPrevSynced({ open, settings });
-    if (open) {
+    // 只在真正打开面板时重建草稿。保存后父组件会把同一份新 settings
+    // 传回来；若此时也重置 saved，第一次点击的“已保存”会被立刻抹掉。
+    if (open && !prevSynced.open) {
       setDraft(settings);
       setSaved(false);
     }
@@ -77,6 +85,32 @@ export function SettingsPanel({
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [open, onClose]);
+
+  // 每次失败都重播 shake。class 由 DOM 临时持有，下一次 tick 先移除并强制
+  // reflow，再重新添加；错误色与消息显隐仍完全由 React 状态控制。
+  useEffect(() => {
+    if (testShakeTick === 0) return;
+    const input = testConfigInputRef.current;
+    if (!input) return;
+    input.classList.remove("is-shaking");
+    void input.offsetWidth;
+    input.classList.add("is-shaking");
+  }, [testShakeTick]);
+
+  useEffect(
+    () => () => {
+      if (testErrorTimerRef.current !== null) {
+        window.clearTimeout(testErrorTimerRef.current);
+      }
+      if (testResultTimerRef.current !== null) {
+        window.clearTimeout(testResultTimerRef.current);
+      }
+      if (savedTimerRef.current !== null) {
+        window.clearTimeout(savedTimerRef.current);
+      }
+    },
+    [],
+  );
 
   const updateActivePreset = useCallback((patch: Partial<LLMPreset>) => {
     setDraft((d) => ({
@@ -108,12 +142,44 @@ export function SettingsPanel({
     });
   }, []);
 
+  const clearTestFeedbackTimers = useCallback(() => {
+    if (testErrorTimerRef.current !== null) {
+      window.clearTimeout(testErrorTimerRef.current);
+      testErrorTimerRef.current = null;
+    }
+    if (testResultTimerRef.current !== null) {
+      window.clearTimeout(testResultTimerRef.current);
+      testResultTimerRef.current = null;
+    }
+  }, []);
+
+  const showTestFailure = useCallback(
+    (message: string) => {
+      clearTestFeedbackTimers();
+      setTestResult({ ok: false, message });
+      setTestErrorActive(true);
+      setTestShakeTick((tick) => tick + 1);
+      testErrorTimerRef.current = window.setTimeout(() => {
+        setTestErrorActive(false);
+        // 先让错误文案完成淡出，再卸载，避免瞬间消失。
+        testResultTimerRef.current = window.setTimeout(() => {
+          setTestResult(null);
+          testResultTimerRef.current = null;
+        }, 280);
+        testErrorTimerRef.current = null;
+      }, 3000);
+    },
+    [clearTestFeedbackTimers],
+  );
+
   /** 测试当前选中预设的连接（含代理）：发一个极小的请求探测连通性 */
   const handleTestConnection = useCallback(async () => {
     const preset = getActivePreset(draft);
     if (!preset.apiKey || testStatus === "testing") return;
+    clearTestFeedbackTimers();
     setTestStatus("testing");
     setTestResult(null);
+    setTestErrorActive(false);
     try {
       const res = await fetch("/api/test-connection", {
         method: "POST",
@@ -133,23 +199,21 @@ export function SettingsPanel({
       const data = await res.json();
       if (res.ok && data.ok) {
         setTestResult({ ok: true, message: "连接成功" });
+        testResultTimerRef.current = window.setTimeout(() => {
+          setTestResult(null);
+          testResultTimerRef.current = null;
+        }, 15000);
       } else {
-        setTestResult({
-          ok: false,
-          message: data?.error?.message ?? `连接失败（HTTP ${res.status}）`,
-        });
+        showTestFailure(
+          data?.error?.message ?? `连接失败（HTTP ${res.status}）`,
+        );
       }
     } catch (e) {
-      setTestResult({
-        ok: false,
-        message: e instanceof Error ? e.message : "连接失败。",
-      });
+      showTestFailure(e instanceof Error ? e.message : "连接失败。");
     } finally {
       setTestStatus("idle");
-      // 15 秒后自动清除结果
-      setTimeout(() => setTestResult(null), 15000);
     }
-  }, [draft, testStatus]);
+  }, [clearTestFeedbackTimers, draft, showTestFailure, testStatus]);
 
   const updateReview = useCallback(
     (patch: Partial<UserSettings["review"]>) => {
@@ -162,7 +226,13 @@ export function SettingsPanel({
     saveSettings(draft);
     onSettingsChange(draft);
     setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    if (savedTimerRef.current !== null) {
+      window.clearTimeout(savedTimerRef.current);
+    }
+    savedTimerRef.current = window.setTimeout(() => {
+      setSaved(false);
+      savedTimerRef.current = null;
+    }, 2000);
   }, [draft, onSettingsChange]);
 
   const handleReset = useCallback(() => {
@@ -285,20 +355,40 @@ export function SettingsPanel({
 
               {/* 切换预设时给字段容器一个入场动画，让切换有"内容刷新了"的感知 */}
               <div key={presetSwitchTick} className="animate-item-in space-y-5">
+              <div
+                className={
+                  "t-connection-wrap space-y-2 " +
+                  (testErrorActive ? "is-error" : "")
+                }
+              >
               <div className="flex items-end gap-2">
                 <div className="min-w-0 flex-1">
-                  <label className={labelCls}>配置名称</label>
+                  <label className={labelCls} htmlFor="settings-preset-name">
+                    配置名称
+                  </label>
                   <input
+                    ref={testConfigInputRef}
+                    id="settings-preset-name"
                     type="text"
                     value={activePreset.name}
                     onChange={(e) =>
                       updateActivePreset({ name: e.target.value })
                     }
                     placeholder="例如：DeepSeek 主力号"
-                    className={inputCls}
+                    className={
+                      inputCls +
+                      " t-connection-input" +
+                      (testErrorActive ? " is-error" : "")
+                    }
+                    aria-invalid={testErrorActive || undefined}
+                    aria-describedby={
+                      testResult && !testResult.ok
+                        ? "test-connection-error"
+                        : undefined
+                    }
                   />
                 </div>
-                <div className="flex shrink-0 items-center gap-2 pb-0.5">
+                <div className="flex shrink-0 items-center gap-2">
                   <button
                     type="button"
                     onClick={handleTestConnection}
@@ -309,18 +399,24 @@ export function SettingsPanel({
                   </button>
                 </div>
               </div>
-              {testResult && (
+              {testResult?.ok && (
                 <p
-                  className={
-                    "-mt-3 text-xs " +
-                    (testResult.ok
-                      ? "text-emerald-600 dark:text-emerald-400"
-                      : "text-red-600 dark:text-red-400")
-                  }
+                  role="status"
+                  className="text-xs text-emerald-600 dark:text-emerald-400"
                 >
                   {testResult.message}
                 </p>
               )}
+              {testResult && !testResult.ok && (
+                <p
+                  id="test-connection-error"
+                  role="alert"
+                  className="t-connection-error text-xs text-red-600 dark:text-red-400"
+                >
+                  {testResult.message}
+                </p>
+              )}
+              </div>
               <p className="-mt-3 text-xs text-text-faint">
                 预设会记住各自的 Key / 地址 / 模型 / 代理，切换不会互相覆盖。
               </p>
