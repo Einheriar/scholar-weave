@@ -161,6 +161,27 @@ describe("历史列表：拖拽接线", () => {
     expect(shiftOf(ul, "c")).toBe(`translateY(${-H}px)`);
   });
 
+  it("边缘一接触就让位（不必等拖到邻居中心，这是用户报过的时机问题）", () => {
+    const { ul } = setup();
+    const handle = handleOf(ul, "a"); // 第 1 行，占 TOP..TOP+H
+    // 只往下挪 2px：底边刚进入第 2 行的盒子 → 立刻让位
+    // （旧实现按「中心过半」判定，要推进到约 +H/2 才动作）
+    act(() => {
+      fireEvent(handle, pointer("pointerdown", TOP + 30));
+      fireEvent(handle, pointer("pointermove", TOP + 32));
+    });
+    expect(shiftOf(ul, "b")).toBe(`translateY(${-H}px)`);
+    // 位移为 0（还没接触）时不动作
+    cleanup();
+    const s2 = setup();
+    const h2 = handleOf(s2.ul, "a");
+    act(() => {
+      fireEvent(h2, pointer("pointerdown", TOP + 30));
+      fireEvent(h2, pointer("pointermove", TOP + 30));
+    });
+    expect(shiftOf(s2.ul, "b")).toBeFalsy();
+  });
+
   it("向上拖 → 中间行下移让位", () => {
     const { ul } = setup();
     const handle = handleOf(ul, "c"); // 第 3 行
@@ -185,24 +206,26 @@ describe("历史列表：拖拽接线", () => {
     });
     // 回落动画走完才提交（避免视觉与数据错位）
     act(() => {
-      vi.advanceTimersByTime(300);
+      // 要盖过 SETTLE_MS（回落动画时长 + 余量）
+      vi.advanceTimersByTime(500);
     });
     vi.useRealTimers();
     expect(onReorder).toHaveBeenCalledTimes(1);
     expect(onReorder.mock.calls[0][0]).toEqual(["b", "c", "a"]);
   });
 
-  it("拖回原位松手不提交（没有实际变化）", () => {
+  it("没移动就松手不提交（没有实际变化）", () => {
     vi.useFakeTimers();
     const { ul, onReorder } = setup();
     const handle = handleOf(ul, "b");
     act(() => {
       fireEvent(handle, pointer("pointerdown", TOP + H + 30));
-      fireEvent(handle, pointer("pointermove", TOP + H + 35)); // 仍在原位
-      fireEvent(handle, pointer("pointerup", TOP + H + 35));
+      fireEvent(handle, pointer("pointermove", TOP + H + 30)); // 位移 0 = 仍在原位
+      fireEvent(handle, pointer("pointerup", TOP + H + 30));
     });
     act(() => {
-      vi.advanceTimersByTime(300);
+      // 要盖过 SETTLE_MS（回落动画时长 + 余量）
+      vi.advanceTimersByTime(500);
     });
     vi.useRealTimers();
     expect(onReorder).not.toHaveBeenCalled();

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   deriveProjectTitle,
   dragShifts,
+  dragTargetIndex,
   formatRelativeTime,
   moveId,
   moveProjectToTop,
@@ -132,6 +133,52 @@ describe("项目：排序与 upsert", () => {
   });
 });
 
+describe("拖动落点判定（dragTargetIndex）", () => {
+  const H = 60;
+  // 三行：0..60 / 60..120 / 120..180（列表坐标系）
+  const tops = [0, H, 2 * H];
+
+  it("没位移时落点就是原位", () => {
+    for (const from of [0, 1, 2]) {
+      expect(dragTargetIndex(tops, H, from, 0)).toBe(from);
+    }
+  });
+
+  it("边缘一接触就让位（不是等中心过半）", () => {
+    // 第 1 行(index 0) 下移：底边(0+H+dy)一旦碰到第 2 行顶边(60)就算越过 → 落点 1
+    expect(dragTargetIndex(tops, H, 0, 0)).toBe(0); // 还没接触
+    expect(dragTargetIndex(tops, H, 0, 1)).toBe(1); // 刚接触就让位
+    // 关键：远不到中心（中心过半要 dy≈90）
+    expect(dragTargetIndex(tops, H, 0, 1)).toBeLessThan(2);
+  });
+
+  it("越过几行就前进几位（向下）", () => {
+    expect(dragTargetIndex(tops, H, 0, 1)).toBe(1); // 碰到第 2 行
+    expect(dragTargetIndex(tops, H, 0, H + 1)).toBe(2); // 再碰到第 3 行
+    expect(dragTargetIndex(tops, H, 0, 999)).toBe(2); // 到底不会越界
+  });
+
+  it("向上拖同理（回退几位）", () => {
+    expect(dragTargetIndex(tops, H, 2, -1)).toBe(1);
+    expect(dragTargetIndex(tops, H, 2, -(H + 1))).toBe(0);
+    expect(dragTargetIndex(tops, H, 2, -999)).toBe(0);
+  });
+
+  it("接触边界只切一次，不产生中间态（判定读固定快照，无反馈循环）", () => {
+    expect(dragTargetIndex(tops, H, 0, -0.1)).toBe(0);
+    expect(dragTargetIndex(tops, H, 0, 0)).toBe(0);
+    expect(dragTargetIndex(tops, H, 0, 0.1)).toBe(1);
+    // 同一个 dy 反复求值结果恒定
+    expect(dragTargetIndex(tops, H, 0, 0.1)).toBe(dragTargetIndex(tops, H, 0, 0.1));
+  });
+
+  it("行高为 0 或 from 越界时返回原位（防御）", () => {
+    expect(dragTargetIndex([], 0, 0, 50)).toBe(0);
+    expect(dragTargetIndex(tops, H, -1, 50)).toBe(-1);
+    expect(dragTargetIndex(tops, H, 9, 50)).toBe(9);
+  });
+});
+
 describe("拖动让位几何（dragShifts）", () => {
   const H = 60;
 
@@ -140,29 +187,26 @@ describe("拖动让位几何（dragShifts）", () => {
     expect(dragShifts(3, 5, 0, H, 20)).toEqual([0, 0, 0]);
   });
 
-  it("被拖行位移 = 跟手距离，其余不动（插入位就在原位）", () => {
-    // 第 2 行（index 1）拖动，插入位仍是 1 → 落点还是自己
+  it("落点等于原位时其余行不动，只有被拖行跟手", () => {
     expect(dragShifts(3, 1, 1, H, 25)).toEqual([0, 25, 0]);
-    expect(dragShifts(3, 1, 2, H, 25)).toEqual([0, 25, 0]);
   });
 
   it("向下拖：中间行整体上移一行（腾出位置）", () => {
-    // 第 1 行(index 0) 拖到插入位 3（最末）→ 中间两行各上移一行
-    expect(dragShifts(3, 0, 3, H, 130)).toEqual([130, -H, -H]);
+    expect(dragShifts(3, 0, 2, H, 130)).toEqual([130, -H, -H]);
   });
 
   it("向上拖：中间行整体下移一行", () => {
-    // 末行(index 2) 拖到插入位 0（最前）→ 前两行各下移一行
     expect(dragShifts(3, 2, 0, H, -130)).toEqual([H, H, -130]);
   });
 
-  it("只跨一格时只有相邻那一行让位", () => {
-    expect(dragShifts(4, 1, 3, H, 70)).toEqual([0, 70, -H, 0]);
+  it("跨多格时中间各行都让位（落点是下标，不是插入位）", () => {
+    // 从 1 挪到 3：第 3、4 行（原 index 2、3）各上移一行
+    expect(dragShifts(4, 1, 3, H, 70)).toEqual([0, 70, -H, -H]);
+    // 从 2 挪到 1：只有原 index 1 下移一行
     expect(dragShifts(4, 2, 1, H, -70)).toEqual([0, H, -70, 0]);
   });
 
-  it("插入位越界时不动其余行，只保留跟手位移", () => {
-    // to 落到界外（count 之外）→ 只有被拖行跟着走
+  it("落点越界时不动其余行，只保留跟手位移", () => {
     const out = dragShifts(3, 2, 3, H, 10);
     expect(out[2]).toBe(10);
     expect(out[0]).toBe(0);
@@ -170,7 +214,6 @@ describe("拖动让位几何（dragShifts）", () => {
   });
 
   it("与 moveId 结果一致：让位后落点等于 moveId 的目标位置", () => {
-    // 一致性检查：dragShifts 的落点语义应与 moveId 相同
     for (const [from, to] of [
       [0, 2],
       [2, 0],
@@ -179,9 +222,7 @@ describe("拖动让位几何（dragShifts）", () => {
     ]) {
       const ids = ["a", "b", "c", "d"];
       const moved = moveId(ids, from, to);
-      const insertAt = to > from ? to + 1 : to; // 反推插入位
-      const shifts = dragShifts(4, from, insertAt, H, 0);
-      // 让位方向应与元素移动方向一致：向下拖中间行上移、向上拖中间行下移
+      const shifts = dragShifts(4, from, to, H, 0);
       if (to > from) {
         for (let i = from + 1; i <= to; i++) expect(shifts[i]).toBe(-H);
       } else {
@@ -189,6 +230,15 @@ describe("拖动让位几何（dragShifts）", () => {
       }
       expect(moved[to]).toBe(ids[from]);
     }
+  });
+
+  it("落点判定与让位一致：把 dragTargetIndex 的结果喂给 dragShifts，落点行确实让位", () => {
+    const tops = [0, H, 2 * H];
+    // 第 1 行往下拖一点 → 落点 1 → 第 2 行上移
+    const to = dragTargetIndex(tops, H, 0, 1);
+    const shifts = dragShifts(3, 0, to, H, 1);
+    expect(to).toBe(1);
+    expect(shifts[1]).toBe(-H);
   });
 });
 

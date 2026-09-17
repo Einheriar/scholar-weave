@@ -5,6 +5,7 @@ import type { Project } from "@/lib/review-schema";
 import {
   deriveProjectTitle,
   dragShifts,
+  dragTargetIndex,
   formatRelativeTime,
   moveId,
 } from "@/lib/chat-history";
@@ -313,6 +314,10 @@ function HistoryList({
   );
 }
 
+/** 让位/回落过渡时长（ms）。与 globals.css 的 `.t-drag-shift` transition 配套——
+ *  那边改了时长必须同步这里（提交顺序等的是这段动画播完）。 */
+const SETTLE_MS = 330;
+
 /**
  * 列表拖动排序（Pointer Events，不引第三方库）。
  *
@@ -341,18 +346,21 @@ function useHistoryDrag(
   const [dragId, setDragId] = useState<string | null>(null);
   /** 被拖条目的实时跟手位移（px，相对它本来的位置） */
   const [dragDy, setDragDy] = useState(0);
-  /** 目标插入位（0..n），决定其余条目怎么让位 */
-  const [insertAt, setInsertAt] = useState<number | null>(null);
   /** 松手后的回落中：条目从当前位置过渡到目标槽位，过渡完才 onReorder */
   const [settling, setSettling] = useState(false);
   /** 被拖条目在列表中的原始下标（state 以便渲染期算位移；ref 供事件回调实时读） */
   const [fromIndex, setFromIndex] = useState(-1);
 
-  const insertAtRef = useRef<number | null>(null);
   const fromRef = useRef<number>(-1);
   // 几何快照：拖动开始那一刻每个条目相对列表顶部的偏移与行高。
-  // 拖动期间**保持用这份快照**算槽位，不受自身 transform 影响（否则会自我循环）。
+  // 拖动期间**保持用这份快照**算落点，不受自身 transform 影响（否则会自我循环）。
+  //
+  // 同时存 ref 与 state 两份，各有用途、不能省：
+  // - `geoRef`：事件回调（pointerup 算落点）里要读到**刚刚写入**的值。state 更新要等重渲染，
+  //   在同一个事件处理链里读 state 会拿到旧值（踩过：转成纯 state 后松手时落点算错、不提交）；
+  // - `geoState`：渲染期算每行位移要用，而 ref 不允许在渲染期读（react-hooks/refs 规则）。
   const geoRef = useRef<{ tops: number[]; h: number }>({ tops: [], h: 0 });
+  const [geoState, setGeoState] = useState<{ tops: number[]; h: number }>({ tops: [], h: 0 });
   const pointerStartY = useRef(0);
   const dyRef = useRef(0);
   /** 拖动期间累计的自动滚动量（px），累加进跟手位移 */
@@ -364,17 +372,6 @@ function useHistoryDrag(
   const items = () => Array.from(
     listRef.current?.querySelectorAll<HTMLElement>("li[data-entry-id]") ?? [],
   );
-
-  /** 指针落在第几个「插入位」：条目上半 → 该条目之前，下半 → 之后，末尾之外 → 最末 */
-  const insertIndexAtClientY = (clientY: number, top: number): number => {
-    const { tops, h } = geoRef.current;
-    if (!h) return 0;
-    const y = clientY - top;
-    for (let i = 0; i < tops.length; i++) {
-      if (y < tops[i] + h / 2) return i;
-    }
-    return tops.length;
-  };
 
   /** 靠近上下边缘时自动滚动列表的可滚祖先（抽屉/左栏都是 overflow-y-auto） */
   const autoScroll = (clientY: number) => {
@@ -398,10 +395,12 @@ function useHistoryDrag(
     // 捕获指针：指针移出把手（甚至移出窗口）仍能收到 move/up
     e.currentTarget.setPointerCapture(e.pointerId);
     const listTop = listRef.current!.getBoundingClientRect().top;
-    geoRef.current = {
+    const snapshot = {
       tops: lis.map((li) => li.getBoundingClientRect().top - listTop),
       h: lis[0].getBoundingClientRect().height,
     };
+    geoRef.current = snapshot;
+    setGeoState(snapshot);
     fromRef.current = from;
     setFromIndex(from);
     pointerStartY.current = e.clientY;
@@ -409,8 +408,6 @@ function useHistoryDrag(
     scrolledRef.current = 0;
     setDragDy(0);
     setDragId(id);
-    setInsertAt(from);
-    insertAtRef.current = from;
   };
 
   const moveDrag = (e: React.PointerEvent<HTMLElement>) => {
@@ -421,14 +418,8 @@ function useHistoryDrag(
     if (scrolled) scrolledRef.current += scrolled;
     dyRef.current = e.clientY - pointerStartY.current + scrolledRef.current;
     setDragDy(dyRef.current);
-    const listTop = listRef.current!.getBoundingClientRect().top;
-    // 用条目中心（而不是指针尖）判断落点更符合直觉，减去半个行高
-    const centerY = e.clientY - geoRef.current.h / 2;
-    const at = insertIndexAtClientY(centerY, listTop);
-    if (at !== insertAtRef.current) {
-      insertAtRef.current = at;
-      setInsertAt(at);
-    }
+    // 落点（哪一行该让位）不再单独记 state：它完全由 dy 决定，
+    // 在渲染期用 dragTargetIndex 从几何快照 + dy 推出来即可（少一份会不同步的状态）。
   };
 
   const endDrag = (e: React.PointerEvent<HTMLElement>) => {
@@ -439,14 +430,12 @@ function useHistoryDrag(
       /* 指针已释放 */
     }
     const from = fromRef.current;
-    const at = insertAtRef.current;
-    if (at == null) return finish(null);
-    // insertAt 是「插入位」，元素摘除后其后的下标会左移一位，所以往下拖要 -1
-    const to = at > from ? at - 1 : at;
+    const { tops, h } = geoRef.current;
+    // 用松手时的最终位移重算落点（与渲染期同一条纯函数，保证「看到的落点 = 提交的落点」）
+    const to = dragTargetIndex(tops, h, from, dyRef.current);
     if (to === from) return finish(null);
     // 松手先播回落：条目过渡到目标槽位（tops[to] 就是它换位后的视觉位置），
     // 过渡结束才真正提交顺序；这样动画与数据不会错位。
-    const { tops } = geoRef.current;
     const target = tops[to] ?? tops[from];
     settleDyRef.current = target - tops[from];
     setDragDy(settleDyRef.current);
@@ -454,8 +443,8 @@ function useHistoryDrag(
     clearSettleTimer();
     settleTimer.current = setTimeout(
       () => finish(moveId(projects.map((p) => p.id), from, to)),
-      // 略大于 .t-drag-shift 的 200ms，等过渡真的走完
-      230,
+      // 略大于 .t-drag-shift 的 300ms，等回落过渡真的走完（globals.css 里改了时长要同步这里）
+      SETTLE_MS,
     );
     return;
   };
@@ -464,13 +453,11 @@ function useHistoryDrag(
   function finish(orderedIds: string[] | null) {
     clearSettleTimer();
     setDragId(null);
-    setInsertAt(null);
     setSettling(false);
     setDragDy(0);
     fromRef.current = -1;
     setFromIndex(-1);
     dyRef.current = 0;
-    insertAtRef.current = null;
     if (orderedIds) onReorder(orderedIds);
   }
 
@@ -486,13 +473,11 @@ function useHistoryDrag(
    * 每个条目要做的让位位移（px）：被拖的跟手，其余按插入位让开一行。
    * 几何计算抽到 chat-history 的 `dragShifts` 纯函数，那边有单测守着。
    */
-  const shifts = dragShifts(
-    projects.length,
-    fromIndex,
-    insertAt ?? fromIndex,
-    geoRef.current.h,
-    dragDy,
-  );
+  const toIndex =
+    fromIndex < 0
+      ? fromIndex
+      : dragTargetIndex(geoState.tops, geoState.h, fromIndex, dragDy);
+  const shifts = dragShifts(projects.length, fromIndex, toIndex, geoState.h, dragDy);
   const shiftOf = (index: number): number => shifts[index] ?? 0;
 
   /** 键盘排序：把手聚焦后 ↑/↓ 上下移动一位（纯拖拽对键盘/读屏不可用） */
@@ -521,7 +506,6 @@ function useHistoryDrag(
   return {
     listRef,
     dragId,
-    insertAt,
     dragging,
     settling,
     beginDrag,

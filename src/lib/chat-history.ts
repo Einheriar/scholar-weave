@@ -111,11 +111,53 @@ export function moveId(ids: string[], index: number, to: number): string[] {
 }
 
 /**
- * 拖动中的每行位移（px）：被拖的那行跟着指针走，其余行按目标插入位让开一行。
+ * 拖动触发阈值：被拖行与邻居的**边缘重叠**达到行高的这个比例，就算「越过」它。
+ *
+ * 为什么按边缘而不是「中心过半」：用中心判定时，被拖行要推进到邻居中线才换位，
+ * 画面上两个框已经叠在一起、甚至越过去了，邻居还纹丝不动。用户明确要求
+ * 「刚好盖住的时候就应该开始滑动」，所以取 **0** —— 边缘一接触即刻让位。
+ *
+ * 这里不会抖：判定用的是**拖动开始时**的几何快照（见 useHistoryDrag.geoRef），
+ * 不读邻居被让位后的实时位置，所以同一个位移永远得出同一个落点，不存在反馈循环。
+ */
+export const DRAG_TRIGGER_RATIO = 0;
+
+/**
+ * 拖动中，被拖行最终应落在的下标（同时决定其余行怎么让位、以及松手落在哪）。
+ *
+ * 判定基于**边缘重叠**：被拖行的边进入上方/下方某个邻居的盒子、重叠达到阈值，
+ * 就算越过了它。越过 k 个上方的行 → 下标减 k；越过下方的 → 加 k。
+ * tops 与 dy 都在「列表坐标系」里（dy 已含自动滚动补偿），因此不受滚动影响。
+ */
+export function dragTargetIndex(
+  tops: number[],
+  h: number,
+  from: number,
+  dy: number,
+  ratio: number = DRAG_TRIGGER_RATIO,
+): number {
+  const n = tops.length;
+  if (from < 0 || from >= n || h <= 0) return from;
+  const draggedTop = tops[from] + dy;
+  const need = ratio * h;
+  let above = 0;
+  let below = 0;
+  for (let j = 0; j < n; j++) {
+    if (j === from) continue;
+    // 用**严格大于**：零重叠（刚好贴上）不算越过，一有重叠就算。
+    // 配合列表的行间距，效果就是「两个框刚好盖住时立刻开始让位」。
+    if (j < from && tops[j] + h - draggedTop > need) above++;
+    else if (j > from && draggedTop + h - tops[j] > need) below++;
+  }
+  return Math.max(0, Math.min(n - 1, from - above + below));
+}
+
+/**
+ * 拖动中的每行位移（px）：被拖的那行跟着指针走，其余行按目标落点让开一行。
  *
  * 纯函数便于单测——拖拽的视觉手感依赖真实浏览器，但「谁该让位、让多远」是纯几何，
  * 抽出来就能在 vitest 里守住。约定：
- * - `insertAt` 是**插入位**（0..count）：把被拖行插到第 insertAt 个缝隙；
+ * - `to` 是最终落点下标（由 dragTargetIndex 给出），不是「插入位」；
  * - 被拖行（index === from）位移 = dragDy（跟手距离，松手时传回落距离）；
  * - 中间段行整体让开 `rowH`：向下拖时（from < to）中间行上移，向上拖时下移；
  * - 其余行不动。
@@ -123,15 +165,13 @@ export function moveId(ids: string[], index: number, to: number): string[] {
 export function dragShifts(
   count: number,
   from: number,
-  insertAt: number,
+  to: number,
   rowH: number,
   dragDy: number,
 ): number[] {
   const out = new Array<number>(count).fill(0);
   if (from < 0 || from >= count) return out;
   out[from] = dragDy;
-  // 插入位换算成「最终落点下标」：往下拖时它后面少一格
-  const to = insertAt > from ? insertAt - 1 : insertAt;
   if (to === from || to < 0 || to >= count) return out;
   for (let i = 0; i < count; i++) {
     if (i === from) continue;

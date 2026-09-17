@@ -61,10 +61,15 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
           </em>
         );
       case "code":
+        // 刻意不用等宽：提示词鼓励模型用反引号强调英文术语（不是真代码），等宽字体会
+        // 让夹在中文里的英文换一种字形、字号也缩一号，同一段话里中英观感因此割裂。
+        // 这里只留浅底标记、字体随上下文。必须显式 font-family:inherit ——
+        // Tailwind preflight 给 code/kbd/samp/pre 默认挂了 mono 字体栈，
+        // 只删 font-mono 类是不够的。
         return (
           <code
             key={key}
-            className="rounded bg-surface-muted px-1 py-0.5 font-mono text-[0.85em]"
+            className="rounded bg-surface-muted px-1 py-0.5 [font-family:inherit]"
           >
             {t.text}
           </code>
