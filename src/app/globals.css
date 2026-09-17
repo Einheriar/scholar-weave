@@ -524,7 +524,7 @@ body {
 
 /* 正文纸张右上角的撤销入口。
    默认态只露出一个小折角；可用时悬停或键盘聚焦会向纸面内展开，
-   撤销图案以反向高光和投影形成轻微压印／浮雕质感。 */
+   折角使用与主操作按钮一致的纯品牌色，不加描边、渐变或阴影。 */
 .editor-undo-corner {
   position: absolute;
   z-index: 10;
@@ -558,41 +558,12 @@ body {
   height: 1.55rem;
   clip-path: polygon(0 0, 100% 0, 100% 100%);
   color: #fff;
-  background: linear-gradient(225deg, color-mix(in srgb, var(--brand-soft) 72%, var(--surface)) 0%, color-mix(in srgb, var(--brand) 24%, var(--brand-soft)) 100%);
-  filter: drop-shadow(-1px 2px 2px color-mix(in srgb, var(--brand-hover) 22%, transparent));
+  background-color: color-mix(in srgb, var(--brand) 42%, var(--surface));
   transition:
     width 310ms cubic-bezier(0.22, 0.9, 0.28, 1),
     height 310ms cubic-bezier(0.22, 0.9, 0.28, 1),
-    filter 260ms ease,
-    opacity 180ms ease;
+    background-color 310ms cubic-bezier(0.22, 0.9, 0.28, 1);
   will-change: width, height;
-}
-
-.editor-undo-fold::before {
-  position: absolute;
-  z-index: 1;
-  inset: 0;
-  background:
-    radial-gradient(circle at 78% 17%, rgb(255 255 255 / 0.22) 0 12%, transparent 38%),
-    linear-gradient(225deg, var(--brand) 0%, var(--brand-hover) 100%);
-  content: "";
-  opacity: 0;
-  transition: opacity 190ms ease 45ms;
-}
-
-.editor-undo-fold::after {
-  position: absolute;
-  z-index: 2;
-  top: 50%;
-  left: -21%;
-  width: 142%;
-  height: 2px;
-  background: var(--brand);
-  box-shadow:
-    0 1px 0 color-mix(in srgb, var(--surface) 82%, transparent),
-    0 3px 5px color-mix(in srgb, var(--brand-hover) 20%, transparent);
-  content: "";
-  transform: rotate(45deg);
 }
 
 .editor-undo-relief {
@@ -617,18 +588,7 @@ body {
 .editor-undo-corner-button:not(:disabled):is(:hover, :focus-visible) .editor-undo-fold {
   width: 3.5rem;
   height: 3.5rem;
-  filter: drop-shadow(-5px 7px 7px color-mix(in srgb, var(--foreground) 22%, transparent));
-}
-
-.editor-undo-corner-button:not(:disabled):is(:hover, :focus-visible) .editor-undo-fold::before {
-  opacity: 1;
-}
-
-.editor-undo-corner-button:not(:disabled):is(:hover, :focus-visible) .editor-undo-fold::after {
-  background: color-mix(in srgb, var(--brand-hover) 78%, var(--foreground));
-  box-shadow:
-    0 1px 0 rgb(255 255 255 / 0.3),
-    0 4px 7px color-mix(in srgb, var(--foreground) 20%, transparent);
+  background-color: var(--brand);
 }
 
 .editor-undo-corner-button:not(:disabled):is(:hover, :focus-visible) .editor-undo-relief {
@@ -647,18 +607,9 @@ body {
   100% { opacity: 1; transform: translate(0, 0) scale(1, 1); }
 }
 
-.editor-undo-corner-button:not(:disabled):active .editor-undo-fold {
-  filter: drop-shadow(-1px 2px 2px color-mix(in srgb, var(--foreground) 16%, transparent));
-}
-
 .editor-undo-corner-button:focus-visible .editor-undo-fold {
   outline: 2px solid var(--brand-ring);
   outline-offset: -3px;
-}
-
-.editor-undo-corner-button:disabled .editor-undo-fold {
-  opacity: 0.82;
-  filter: drop-shadow(-1px 2px 2px color-mix(in srgb, var(--brand-hover) 16%, transparent));
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -676,7 +627,7 @@ body {
   .t-success-check { opacity: 1; }
   .t-success-check svg path { stroke-dashoffset: 0; }
   .chat-body { transition: none; }
-  .editor-undo-fold, .editor-undo-fold::before, .editor-undo-relief { transition: none; }
+  .editor-undo-fold, .editor-undo-relief { transition: none; }
   .editor-undo-relief { animation: none !important; }
   .app-tooltip { animation: none !important; }
 }
