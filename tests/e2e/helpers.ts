@@ -137,17 +137,35 @@ export async function mockReviewRoute(page: Page) {
 /**
  * 拦截 POST /api/chat。
  * withChanges=true 时返回 answer_with_changes（附带一个可定位的修改集）；
- * 否则返回纯解释 answer。
+ * withReviewProposal=true 时返回可转入审阅列表的候选意见；否则返回纯解释 answer。
  */
 export async function mockChatRoute(
   page: Page,
-  opts: { withChanges?: boolean } = {},
+  opts: { withChanges?: boolean; withReviewProposal?: boolean } = {},
 ) {
   await page.route("**/api/chat", async (route) => {
     const body = route.request().postDataJSON() as {
       revision: number;
       blocks: Block[];
     };
+    if (opts.withReviewProposal) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          type: "answer_with_review",
+          answer: "这项讨论已经形成一个可以进入审阅流程的方案。",
+          reviewProposal: {
+            id: "proposal_mock",
+            title: "统一脑区缩写形式",
+            explanation: "同一段内应统一使用缩写，以维持并列结构和学术表达的一致性。",
+            category: "consistency",
+            severity: "suggestion",
+          },
+        }),
+      });
+      return;
+    }
     if (!opts.withChanges) {
       await route.fulfill({
         status: 200,

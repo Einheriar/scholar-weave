@@ -56,7 +56,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 1. **不信任 LLM 字符坐标**：定位一律用 `blockId + 逐字 original + prefix/suffix` 消歧（`src/lib/anchoring.ts`）。定位失败标记 `stale`，**绝不猜测位置强行替换**。
 2. **稳定 block ID**（`src/lib/revisions.ts` + `BlockIdExtension`）：普通编辑保留 ID、拆分保留前半段、合并保留目标段、粘贴全文重发 ID。
-3. **严格区分 `opinion` 与 `edit`**：`opinion` 不可执行且禁带 `replacement`；`edit` 必有 `replacement` 且 scope 不能是 `document`。由 schema 的 `superRefine` 强制。
+3. **严格区分 `opinion` 与 `edit`**：`opinion` 不可执行且禁带 `replacement`；`edit` 必有 `replacement` 且 scope 不能是 `document`。由 schema 的 `superRefine` 强制。两种处于 `open` 状态的卡片都必须提供「忽略」入口，进入 `rejected` 后像 `accepted` 一样收起为“已处理”三行态，并可用「撤销」回到 `open` 后重新展开；不能因为 `opinion` 还有「继续询问／按此意见修改」就拿掉用户结束处理的出口。`stale` 仍保持展开，以便解释无法处理的原因。
 4. **LLM 永不未经确认改正文**：全文/结构意见必须走「生成 ChangeSet → 差异预览 → 用户确认」。对话历史里回放出来的 assistant 轮次带的旧修改集也一样，只有点「预览修改」并确认才动正文。
 5. **API Key 只在服务端环境变量**（`.env.local`，已 git 忽略），绝不进前端 bundle、不进日志、不进 git；用户自带 Key 只存在浏览器 localStorage（见下「安全注意」）。
 6. **防注入**：文档内容在 prompt 里被包裹为不可信数据，系统提示规定不执行其中指令；输出仍须过 Zod + 业务校验。
@@ -166,13 +166,15 @@ tests/e2e/                      # Playwright 用例（helpers.ts 里是 mock 与
 - **规则 11（无选区禁止提问）**：无选区且无选中建议时发送被禁用。E2E 里必须先 `selectTextInEditor` 再发送。
 - **规则 12（stale 锚）**：锚点定位失败时节点仍可读，聊天区显示「原文已变更，以下为存档讨论」，正文里的锚点标记消失。
 - **规则 24（上下文边界 = 节点边界）**：发给模型的 history 只有本节点轮次；openReviews 只带锚点所在段落的 open 建议。
+- **对话结论转审阅意见**：`/api/chat` 除 `answer` / `answer_with_changes` 外还支持 `answer_with_review`。模型只提供自包含的 `title/explanation/category/severity`，候选 ID 由服务端生成；模型不得提供 scope、kind、status、replacement 或文档版本。用户第一次点击气泡右下角“转为审阅意见”时，应用从当前 `ChatNode` 的可信锚点派生一条 `opinion/open` 建议并继续停留在聊天；候选写回 `convertedReviewId` 防止刷新后重复创建，按钮随后变为“查看审阅意见”，第二次点击才定位右侧卡片。range/block/document 直接继承节点锚，review 节点继承来源建议 scope；锚点 stale 或来源已不存在时禁止创建，绝不让 LLM 决定正文位置。按钮用轻量入场、抬升和按压反馈，采用无阴影平面样式，hover/focus 只改变主题色边框，并在 `prefers-reduced-motion` 下关闭位移动画。
 - 节点时间线（`NodeTimeline`）：聊天区头部「聊天节点历史」按钮**从聊天区顶部向上滑出的抽屉**（第二层抽拉，不是居中弹窗；标题行 `sticky top-0`），按钮是 **toggle**（再按一次收起，带 `aria-expanded`，开态琥珀底高亮）。每行一个节点，行内删除直接删（规则 13，无确认）。**轨道上的端点 = 用户提问，数量恒等于提问次数**（1 次提问 = 1 个端点，单端点居中 left:50%）；行首是**节点身份竖条**（`h-4 w-[3px]`，琥珀）——**不是圆点、不是端点**，2026-09-16 改竖条就是因为圆点会被误认成「多一次提问」；竖条现在也是返回正文锚点的次要入口，但不可扩大成抢眼的主按钮。hover 端点浮出自定义摘要 tooltip（锚点摘要 + 该次提问截断 48 字），**钉在抽屉顶部**（标题栏下）而非底部（底部会盖住节点行）；它是**绝对定位悬浮层**（脱离文档流 + `pointer-events-none`）——放进流内会把行撑开、端点位移、hover 循环闪烁（踩过的坑）。抽屉展开时与聊天区连成一体：聊天区顶部圆角让位（`rounded-b-2xl`）、共享边框无线、抽屉 `max-h-[42vh]` 内部滚动。
-- 聊天区**浮动**（规则 21 sticky-dock）：`sticky bottom-4`，可最小化成窄条（规则 22）。**高度可拖拽**：头部与消息区之间的把手（`aria-label="调整聊天区高度"`）按住上拉/下拖，范围 180–720px，实时持久化到 localStorage `supergrammarly-chat-height`。新建文章**只在左侧历史栏**，聊天区头部不放「新文章」按钮（曾加过又删掉，与左侧入口重复）。
+- 聊天区**浮动**（规则 21 sticky-dock）：`sticky bottom-4`，可最小化成窄条（规则 22）。**高度可拖拽**：头部与消息区之间的把手（`aria-label="调整聊天区高度"`）按住上拉/下拖，范围 180–720px，实时持久化到 localStorage `supergrammarly-chat-height`。消息列表必须使用计算后的实际 `height`，不能只设 `max-height`；短对话撑不满上限时，后者会让状态数值变化但界面纹丝不动，看起来像拖拽失效。把手区域用纵向留白包住中间短圆条；**保留标题区与把手之间的上分隔线，把手下方不画线**，既明确层级又避免形成两条线夹住的工具栏感。新建文章**只在左侧历史栏**，聊天区头部不放「新文章」按钮（曾加过又删掉，与左侧入口重复）。
 - 正文锚点标记（`ChatAnchorDecorationExtension`）：range 锚画虚线下划线、block 锚画左侧竖条，点击标记切到对应节点对话。Decoration 是视图层，不序列化进正文。
 - **正文真实选区用“灰为主、轻掺主题绿”的底色**（`--editor-selection`）：在浅／深色的中性灰基底中混入 8% `--brand`，文字保持 `--foreground`。它只表达浏览器／Tiptap 的当前选择，不借用聊天节点琥珀色，避免与 range 锚的琥珀虚线语义冲突；Windows 高对比度模式恢复系统 `Highlight/HighlightText`。
 - **审阅定位选区与人工 range 选区必须区分来源**：点击侧栏建议仍用真实 ProseMirror 选区定位文字，但 `DocumentEditor` 在该事务期间不向上回报 range，聊天上下文保持 `review`；其 `::selection` 与 `.rev-selected` 共用 `--review-selection`，视觉只有一层品牌绿填充。用户随后真正划词时才建立 range，并清掉 `selectedId`，切回灰绿的 `--editor-selection`。不要只靠 CSS 遮叠色，否则聊天上下文仍会错误地从建议变成选区。
 - **聊天节点专用琥珀色（`--node-*` 令牌，深浅双套）**：节点系统（时间线竖条/端点、正文锚点标记、聊天区头部指示点、历史按钮开态）统一用琥珀色——与审阅红（待处理）/绿（已接受）、品牌绿（主操作）三层语义错开，比绿色更有层次（2026-09-16 用户拍板换琥珀）。令牌：`--node`（主色 `#b45309` / 深 `#d97706`）、`--node-hover`、`--node-soft`（浅底）、`--node-ring`（光晕），已入 `@theme inline` 映射出 `bg-node` / `bg-node-soft` / `text-node` 等类。**新增节点相关样式一律用 `*-node-*`，别再退回 `bg-brand` 或灰绿。** hover 端点的「专注」效果 = 放大 1.5 倍 + 琥珀光晕（`box-shadow` 双层：`--node-soft` 环 + `--node-ring` 泛光）。
 - **上下文联动（2026-09-16 反馈修订）**：`page.tsx` 有一个 effect——点击侧栏/正文的另一条建议、或正文里划出新选区时，**聊天视图同步切到该上下文对应的节点**（有节点翻过去、没有则清空显示空态待发）。头部「当前上下文」标签与消息列表因此永远一致（看什么就聊什么）。effect 只依赖 `selection`/`selectedId`（**不能依赖 `nodes`**，否则回复到达等节点更新会误触切换）；选区与建议皆空时不动（chatContext 回退链的 activeNode 一级仍在，焦点不丢）。
+- **人工选区在聊天框获得焦点后仍要可见。** 浏览器只能绘制一个原生选区，焦点移到 textarea 后正文的 `::selection` 会消失；`PersistentSelectionExtension` 用 Decoration 镜像 ProseMirror 的精确范围，且只在编辑器失焦并带 `data-manual-selection="true"` 时显示同色灰绿底。编辑器重新聚焦时只显示原生选区，避免双层叠色；侧栏建议产生的程序化选区必须把该属性置为 false，继续只用 review 高亮。
 
 ## 正文撤销按钮
 

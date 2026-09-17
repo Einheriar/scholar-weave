@@ -6,6 +6,7 @@ import {
 import { buildChatMessages } from "@/lib/llm/chat-prompts";
 import { apiError, callLLMStructured } from "@/lib/llm/server-helpers";
 import {
+  ChatReviewProposalSchema,
   ChangeSetSchema,
   type ChangeSet,
 } from "@/lib/review-schema";
@@ -15,7 +16,7 @@ import type { DocumentState } from "@/lib/review-schema";
 /**
  * POST /api/chat（PLAN 12）。
  * 输入聊天上下文、必要文档片段、关联建议与消息历史；
- * 输出纯解释（answer）或解释 + 待预览修改集（answer_with_changes）。
+ * 输出纯解释、候选审阅意见或待预览修改集。
  * 任何回复都不直接改正文；修改集只返回待预览形态。
  */
 
@@ -63,6 +64,22 @@ export async function POST(request: Request) {
 
   if (llm.type === "answer") {
     return NextResponse.json({ type: "answer", answer: llm.answer });
+  }
+
+  if (llm.type === "answer_with_review") {
+    const proposal = ChatReviewProposalSchema.safeParse({
+      ...llm.reviewProposal,
+      // 不信任模型 ID。候选意见身份由服务端生成，供持久化去重使用。
+      id: `proposal_${crypto.randomUUID()}`,
+    });
+    if (!proposal.success) {
+      return apiError(502, "llm_schema_mismatch", "候选审阅意见结构不合法。");
+    }
+    return NextResponse.json({
+      type: "answer_with_review",
+      answer: llm.answer,
+      reviewProposal: proposal.data,
+    });
   }
 
   // answer_with_changes：校验每条 edit 能定位，填充 ChangeSet 完整字段

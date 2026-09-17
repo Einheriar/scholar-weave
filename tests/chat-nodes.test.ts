@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { deriveNodeTitle, findNodeByAnchor } from "@/lib/chat-nodes";
-import type { ChatContext, ChatNode } from "@/lib/review-schema";
+import {
+  deriveNodeTitle,
+  findNodeByAnchor,
+  reviewScopeFromNode,
+} from "@/lib/chat-nodes";
+import type { ChatContext, ChatNode, ReviewItem } from "@/lib/review-schema";
 
 /** 构造一个最小节点，只关心 anchor / originalText */
 function node(id: string, anchor: ChatContext, originalText = ""): ChatNode {
@@ -71,5 +75,49 @@ describe("节点标题派生（时间线 hover 摘要）", () => {
     expect(deriveNodeTitle(node("n", { type: "block" }))).toBe("段落讨论");
     expect(deriveNodeTitle(node("n", { type: "review" }))).toBe("建议讨论");
     expect(deriveNodeTitle(node("n", { type: "document" }))).toBe("全文讨论");
+  });
+});
+
+describe("候选审阅意见继承聊天锚点", () => {
+  const sourceReview: ReviewItem = {
+    id: "rev_source",
+    documentRevision: 1,
+    scope: { type: "block", blockId: "p_review" },
+    kind: "opinion",
+    category: "logic",
+    severity: "suggestion",
+    title: "来源意见",
+    explanation: "说明",
+    status: "open",
+  };
+
+  it("range/block/document 都只复用节点保存的可信锚点", () => {
+    expect(
+      reviewScopeFromNode(
+        node("range", {
+          type: "range",
+          blockId: "p_1",
+          selectedText: "exact text",
+        }),
+        [],
+      ),
+    ).toEqual({ type: "range", blockId: "p_1", original: "exact text" });
+    expect(
+      reviewScopeFromNode(node("block", { type: "block", blockId: "p_2" }), []),
+    ).toEqual({ type: "block", blockId: "p_2" });
+    expect(reviewScopeFromNode(node("doc", { type: "document" }), [])).toEqual({
+      type: "document",
+    });
+  });
+
+  it("review 节点继承原建议 scope，来源不存在则拒绝转换", () => {
+    const reviewNode = node("review", {
+      type: "review",
+      reviewId: sourceReview.id,
+    });
+    expect(reviewScopeFromNode(reviewNode, [sourceReview])).toEqual(
+      sourceReview.scope,
+    );
+    expect(reviewScopeFromNode(reviewNode, [])).toBeNull();
   });
 });

@@ -131,6 +131,34 @@ test.describe("LLM 审阅（mock /api/review）", () => {
     );
   });
 
+  test("审阅意见可以忽略并撤销回待处理状态", async ({ page }) => {
+    await mockReviewRoute(page);
+    await gotoApp(page);
+    await page.getByRole("button", { name: "开始审阅" }).click();
+
+    const opinion = card(page, "m_doc");
+    await expect(opinion.getByRole("button", { name: "忽略" })).toBeVisible();
+    const expandedHeight = (await opinion.boundingBox())!.height;
+    await opinion.getByRole("button", { name: "忽略" }).click();
+
+    await expect(opinion.getByLabel("状态：已忽略")).toBeVisible();
+    await expect(opinion.locator(".review-card-collapsible")).toHaveClass(
+      /collapsed/,
+    );
+    await expect
+      .poll(async () => (await opinion.boundingBox())?.height ?? 0)
+      .toBeLessThan(expandedHeight);
+    await expect(opinion.getByRole("button", { name: "继续询问" })).toHaveCount(0);
+    await expect(opinion.getByRole("button", { name: "按此意见修改" })).toHaveCount(0);
+
+    await opinion.getByRole("button", { name: "撤销", exact: true }).click();
+    await expect(opinion.getByLabel("状态：待处理")).toBeVisible();
+    await expect(opinion.locator(".review-card-collapsible")).not.toHaveClass(
+      /collapsed/,
+    );
+    await expect(opinion.getByRole("button", { name: "忽略" })).toBeVisible();
+  });
+
   test("审阅结果与处理状态会持久化，刷新后仍可恢复", async ({ page }) => {
     await mockReviewRoute(page);
     await gotoApp(page);
@@ -165,6 +193,110 @@ test.describe("上下文对话（mock /api/chat）", () => {
     // 没有任何“预览修改”入口，正文不变
     await expect(page.getByRole("button", { name: /预览修改/ })).toHaveCount(0);
     expect(await paragraphTexts(page)).toEqual(before);
+  });
+
+  test("讨论结论可转为审阅意见，刷新后可再次定位", async ({ page }) => {
+    await mockChatRoute(page, { withReviewProposal: true });
+    await gotoApp(page);
+    await loadSample(page);
+    await selectTextInEditor(page, "upstanding");
+    await sendChatMessage(page, "把刚才讨论出的方案记成一条审阅意见");
+
+    await expect(
+      page.getByText("这项讨论已经形成一个可以进入审阅流程的方案。"),
+    ).toBeVisible();
+    const convertButton = page.getByRole("button", {
+      name: "转为审阅意见",
+    });
+    await expect(convertButton).toBeVisible();
+    expect(
+      await convertButton.evaluate((element) => ({
+        animationName: getComputedStyle(element).animationName,
+        boxShadow: getComputedStyle(element).boxShadow,
+      })),
+    ).toEqual({
+      animationName: "review-proposal-action-in",
+      boxShadow: "none",
+    });
+
+    await convertButton.click();
+    const createdCard = page
+      .locator("[data-review-card]")
+      .filter({ hasText: "统一脑区缩写形式" });
+    await expect(createdCard).toHaveCount(1);
+    await expect(createdCard.getByLabel("状态：待处理")).toBeVisible();
+    await expect(createdCard.getByText("同一段内应统一使用缩写", { exact: false })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "查看审阅意见" }),
+    ).toBeVisible();
+    await expect(page.getByRole("status").first()).toContainText("已保存到本地");
+
+    await page.reload();
+    await expect(page.locator(".ProseMirror")).toBeVisible();
+    const restoredCard = page
+      .locator("[data-review-card]")
+      .filter({ hasText: "统一脑区缩写形式" });
+    await expect(restoredCard).toHaveCount(1);
+    const viewButton = page.getByRole("button", { name: "查看审阅意见" });
+    await expect(viewButton).toBeVisible();
+    await viewButton.click();
+    await expect(restoredCard).toHaveAttribute("aria-current", "true");
+    await expect(restoredCard).toHaveCount(1);
+  });
+
+  test("拖拽把手会直接改变聊天消息区高度", async ({ page }) => {
+    await mockChatRoute(page, { withChanges: false });
+    await gotoApp(page);
+    await loadSample(page);
+    await selectTextInEditor(page, "upstanding");
+    await sendChatMessage(page, "解释一下这个词");
+    await expect(
+      page.getByText("这是纯解释回复（mock），不包含任何正文修改。"),
+    ).toBeVisible();
+
+    const handle = page.getByRole("button", { name: "调整聊天区高度" });
+    const messageList = page.locator("[data-chat-message-list]");
+    const handleBox = await handle.boundingBox();
+    const before = await messageList.boundingBox();
+    expect(handleBox).not.toBeNull();
+    expect(before).not.toBeNull();
+    expect(handleBox!.height).toBeGreaterThanOrEqual(20);
+    expect(
+      await handle.evaluate((element) => ({
+        borderTopWidth: getComputedStyle(element).borderTopWidth,
+        borderBottomWidth: getComputedStyle(element).borderBottomWidth,
+        headerBorderBottomWidth: getComputedStyle(
+          element.closest('[aria-label="上下文对话"]')!.firstElementChild!,
+        ).borderBottomWidth,
+      })),
+    ).toEqual({
+      borderTopWidth: "0px",
+      borderBottomWidth: "0px",
+      headerBorderBottomWidth: "1px",
+    });
+
+    await page.mouse.move(
+      handleBox!.x + handleBox!.width / 2,
+      handleBox!.y + handleBox!.height / 2,
+    );
+    await page.mouse.down();
+    await page.mouse.move(
+      handleBox!.x + handleBox!.width / 2,
+      handleBox!.y + handleBox!.height / 2 - 96,
+      { steps: 8 },
+    );
+    await page.mouse.up();
+
+    await expect
+      .poll(async () => (await messageList.boundingBox())?.height ?? 0)
+      .toBeGreaterThan(before!.height + 80);
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          Number(window.localStorage.getItem("supergrammarly-chat-height")),
+        ),
+      )
+      .toBeGreaterThan(400);
   });
 
   test("当前上下文标签与节点竖条都能定位回正文锚点", async ({ page }) => {
@@ -296,7 +428,8 @@ test.describe("上下文对话（mock /api/chat）", () => {
       .toContain("overlooking the interpersonal dimension");
 
     // 编辑器的撤销栈：批量应用是一次事务，Ctrl+Z 应逐字还原
-    await page.locator(".ProseMirror").click();
+    // 聊天区是 sticky 浮层，可能覆盖编辑器几何中心；直接聚焦后验证快捷键。
+    await page.locator(".ProseMirror").focus();
     await page.keyboard.press("Control+z");
 
     await expect

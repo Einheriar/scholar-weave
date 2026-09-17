@@ -221,6 +221,38 @@ test.describe("核心流程：三层建议与定位", () => {
     );
   });
 
+  test("聚焦聊天输入框后仍保留人工选区的替身高亮与上下文", async ({ page }) => {
+    await gotoApp(page);
+    await loadSample(page);
+    await selectTextInEditor(page, "upstanding");
+
+    const editor = page.locator(".ProseMirror");
+    const chatInput = page.getByLabel("对话输入框");
+    await expect(editor).toHaveAttribute("data-manual-selection", "true");
+
+    await chatInput.focus();
+    await expect(chatInput).toBeFocused();
+    await expect(editor).not.toBeFocused();
+    await expect(page.locator('[aria-label="上下文对话"]')).toContainText(
+      "当前上下文：选区",
+    );
+
+    const persisted = editor.locator(
+      '[data-manual-selection-highlight="true"]',
+    );
+    await expect(persisted).toContainText("upstanding");
+    await expect
+      .poll(() =>
+        persisted.evaluate(
+          (element) => getComputedStyle(element).backgroundColor,
+        ),
+      )
+      .not.toBe("rgba(0, 0, 0, 0)");
+
+    await chatInput.fill("解释这个词");
+    await expect(page.getByRole("button", { name: "发送" })).toBeEnabled();
+  });
+
   test("正文 → 侧栏：点击正文标记后对应卡片被选中", async ({ page }) => {
     await gotoApp(page);
     await loadSample(page);

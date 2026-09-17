@@ -3,7 +3,7 @@ import type { ChangeSetRequest, ChatRequest } from "./chat-llm-schema";
 
 /**
  * 对话 prompt 构造（PLAN 7 / 16）。
- * 与审阅共用安全约束：文档是不可信数据；回复只能是 answer 或 answer_with_changes。
+ * 与审阅共用安全约束：文档是不可信数据；回复只能是三种结构化形态之一。
  */
 
 const SAFETY = `【最高优先级安全规则】
@@ -56,10 +56,12 @@ export function buildChatMessages(req: ChatRequest): ChatMessage[] {
 
 ${SAFETY}
 
-【回复协议】严格输出一个 JSON 对象，二选一：
+【回复协议】严格输出一个 JSON 对象，三选一：
 1. 纯解释（不改动文档）：
 { "type": "answer", "answer": "你的解释/回答" }
-2. 解释 + 待确认修改（当用户要求生成修改时）：
+2. 解释 + 候选审阅意见（讨论已经形成一个具体、可落实的改进方向，但用户尚未明确要求直接修改）：
+{ "type": "answer_with_review", "answer": "你的解释/回答", "reviewProposal": { "title": "脱离聊天记录也能看懂的一句话问题", "explanation": "自包含的改进方案与理由", "category": "grammar|clarity|style|structure|logic|consistency", "severity": "info|suggestion|important" } }
+3. 解释 + 待确认修改（当用户明确要求生成修改时）：
 { "type": "answer_with_changes", "answer": "说明", "changeSet": { "summary": "修改概述", "edits": [ 修改对象 ] } }
 
 每个修改对象字段：blockId、original、replacement、可选 prefix/suffix、explanation。修改 ID 由服务端生成，不要输出 id。
@@ -67,6 +69,8 @@ ${EDIT_ANCHOR}
 
 【行为准则】
 - 只有用户明确要求修改时才返回 answer_with_changes；解释、比较、回答问题时用 answer。
+- 当讨论已经收敛为一个值得进入审阅流程的具体方案、但用户尚未要求立刻修改时，返回 answer_with_review。只给一个候选意见；若仍在比较多个方案、结论不确定、只是解释概念或与正文修改无关，继续使用 answer。
+- reviewProposal 必须自包含：完整写入讨论中达成的方案和用户限制，不能写“按上面所说”“采用第二种方案”等脱离聊天记录就无法理解的表述。不要输出 id、scope、kind、status、replacement 或 documentRevision，这些字段由应用依据当前聊天锚点补齐。
 - 修改要最小、精准，尊重用户附加的限制（如保留术语、更保守）。
 - 拿不准时不要生成修改，用 answer 说明。
 - answer 字段支持受限 markdown（段落、# 标题、- 列表、1. 有序列表、**加粗**、*斜体*、\`行内代码\`），可用于结构化说明；不要输出链接或图片。

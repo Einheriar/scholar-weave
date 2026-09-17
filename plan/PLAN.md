@@ -173,12 +173,14 @@
 - 选中一条建议：发送建议内容、对应原文、所在段落、模型理由及必要上下文。
 - 选中一段文字：针对该文本范围。
 
-LLM 回复有两种合法形态：
+LLM 回复有三种合法形态：
 
 1. `answer`：解释、比较或回答问题，不包含可执行修改。
-2. `answer_with_changes`：包含解释和一个待预览的修改集。
+2. `answer_with_review`：讨论已经收敛为一个具体方案时，包含解释和一条可由用户转入审阅列表的候选意见。
+3. `answer_with_changes`：包含解释和一个待预览的修改集。
 
-任何对话回复都不能直接改变正文。用户必须点击“预览修改”，再逐条接受或接受全部。
+任何对话回复都不能直接改变正文。候选意见必须由用户点击“转为审阅意见”后才进入审阅流程；
+修改集必须点击“预览修改”，再逐条接受或接受全部。
 
 对话应支持的典型请求：
 
@@ -434,7 +436,7 @@ type ChatContext = {
 
 ### `POST /api/chat`
 
-输入当前聊天上下文、必要文档片段、关联建议和消息历史；输出纯解释或解释加修改集。
+输入当前聊天上下文、必要文档片段、关联建议和消息历史；输出纯解释、候选审阅意见或解释加修改集。
 
 ### `POST /api/change-set`
 
@@ -687,4 +689,3 @@ MVP 验证成功后，再按真实使用需求选择：
 - Next.js Server and Client Components：<https://nextjs.org/docs/app/getting-started/server-and-client-components>
 - Tauri Frontend Configuration：<https://v2.tauri.app/start/frontend/>
 - OpenAI Developer Quickstart：<https://platform.openai.com/docs/quickstart/make-your-first-api-request>
-

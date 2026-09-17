@@ -33,6 +33,8 @@ export type ContextChatProps = {
   onSend: (message: string) => void;
   /** 打开某条回复附带的修改集预览 */
   onPreviewChangeSet: (changeSet: ChangeSet) => void;
+  /** 将 assistant 轮次的候选意见转入审阅列表；已转换时定位到对应卡片 */
+  onUseReviewProposal: (nodeId: string, turnIndex: number) => void;
   /** 聊天区当前高度 px（顶部拖拽把手可调；page 持久化到 localStorage） */
   panelHeight: number;
   onResize: (height: number) => void;
@@ -52,7 +54,8 @@ export type ContextChatProps = {
  * 头部：历史按钮（节点时间线抽屉）+ 当前上下文标签 + 最小化/展开。
  * 新建文章只走左栏「新文章」，这里不放（避免意义不明的重复入口）。
  * 顶部有一条拖拽把手，按住上/下拖可调聊天区高度（用户可控大小）。
- * LLM 回复若带修改集，只显示“预览修改”入口，绝不直接改正文。
+ * LLM 回复若带修改集，只显示“预览修改”入口；若带候选意见，则显示
+ * “转为审阅意见”入口。两者都绝不直接改正文。
  */
 export function ContextChat({
   context,
@@ -67,6 +70,7 @@ export function ContextChat({
   onToggleMinimize,
   onSend,
   onPreviewChangeSet,
+  onUseReviewProposal,
   panelHeight,
   onResize,
   onJumpToTurn,
@@ -109,7 +113,7 @@ export function ContextChat({
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
   }, [turns, busy]);
 
-  // 拖拽调高：在 window 上监听 pointermove/up，松手结束
+  // 拖拽调高：在 window 上监听 pointermove/up，松手或取消时结束
   useEffect(() => {
     const onMove = (e: PointerEvent) => {
       const d = dragRef.current;
@@ -123,9 +127,11 @@ export function ContextChat({
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
     return () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
     };
   }, [onResize]);
 
@@ -263,12 +269,14 @@ export function ContextChat({
           <Tooltip label="按住上下拖动，调整聊天区高度">
             <button
               type="button"
+              data-chat-resize-handle
               onPointerDown={(e) => {
+                e.preventDefault();
                 dragRef.current = { startY: e.clientY, startHeight: panelHeight };
                 e.currentTarget.setPointerCapture?.(e.pointerId);
               }}
               aria-label="调整聊天区高度"
-              className="group flex w-full cursor-ns-resize touch-none items-center justify-center border-b border-border py-1 transition-colors hover:bg-surface-muted"
+              className="group flex w-full cursor-ns-resize touch-none items-center justify-center py-2 transition-colors hover:bg-surface-muted"
             >
               <span className="h-1 w-10 rounded-full bg-border-strong transition-colors group-hover:bg-text-faint" />
             </button>
@@ -283,8 +291,9 @@ export function ContextChat({
           {turns.length > 0 && (
             <div
               ref={listRef}
+              data-chat-message-list
               className="flex-1 space-y-2.5 overflow-y-auto px-3.5 py-3"
-              style={{ minHeight: 0, maxHeight: Math.max(120, panelHeight - 160) }}
+              style={{ minHeight: 0, height: Math.max(120, panelHeight - 160) }}
             >
               {turns.map((t, i) => (
                 <div
@@ -300,20 +309,76 @@ export function ContextChat({
                   <div className="break-words leading-relaxed">
                     {renderMiniMarkdown(t.content)}
                   </div>
-                  {t.changeSet && (
-                    <button
-                      type="button"
-                  onClick={() => onPreviewChangeSet(t.changeSet!)}
-                  className={
-                    "mt-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors " +
-                    (t.role === "user"
-                      ? "border-white/40 text-white hover:bg-white/15 dark:text-neutral-950"
-                      : "border-brand-ring bg-surface text-brand hover:bg-brand-soft")
-                  }
-                >
-                  预览修改（{t.changeSet.edits.length} 处）
-                </button>
-              )}
+                  {(t.changeSet || t.reviewProposal) && (
+                    <div className="mt-2 flex flex-wrap justify-end gap-2">
+                      {t.changeSet && (
+                        <button
+                          type="button"
+                          onClick={() => onPreviewChangeSet(t.changeSet!)}
+                          className="rounded-lg border border-brand-ring bg-surface px-2.5 py-1 text-xs font-medium text-brand transition-colors hover:bg-brand-soft"
+                        >
+                          预览修改（{t.changeSet.edits.length} 处）
+                        </button>
+                      )}
+                      {t.reviewProposal && (
+                        <Tooltip
+                          label={
+                            !t.reviewProposal.convertedReviewId && anchorStale
+                              ? "原文已变化，无法转为审阅意见"
+                              : undefined
+                          }
+                          side="top"
+                          align="end"
+                        >
+                          <button
+                            type="button"
+                            data-review-proposal-button
+                            data-converted={
+                              t.reviewProposal.convertedReviewId ? "true" : "false"
+                            }
+                            disabled={
+                              busy ||
+                              !activeNode ||
+                              (!t.reviewProposal.convertedReviewId && anchorStale)
+                            }
+                            onClick={() => {
+                              if (activeNode) onUseReviewProposal(activeNode.id, i);
+                            }}
+                            className={`${buttonClass("secondary", "xs")} t-review-proposal-action gap-1.5`}
+                          >
+                            <svg
+                              width="14"
+                              height="14"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              aria-hidden="true"
+                            >
+                              {t.reviewProposal.convertedReviewId ? (
+                                <>
+                                  <path d="M5 12h14" />
+                                  <path d="m13 6 6 6-6 6" />
+                                </>
+                              ) : (
+                                <>
+                                  <path d="M5 4h10l4 4v12H5z" />
+                                  <path d="M15 4v4h4" />
+                                  <path d="M9 13h6" />
+                                  <path d="M12 10v6" />
+                                </>
+                              )}
+                            </svg>
+                            {t.reviewProposal.convertedReviewId
+                              ? "查看审阅意见"
+                              : "转为审阅意见"}
+                          </button>
+                        </Tooltip>
+                      )}
+                    </div>
+                  )}
             </div>
           ))}
           {busy && (

@@ -22,6 +22,7 @@ import {
   chatAnchorDecorationKey,
   type ChatAnchorDecorationConfig,
 } from "./ChatAnchorDecorationExtension";
+import { PersistentSelectionExtension } from "./PersistentSelectionExtension";
 import {
   docToTiptap,
   textToPMContent,
@@ -157,6 +158,7 @@ export const DocumentEditor = forwardRef<
         horizontalRule: false,
       }),
       BlockIdExtension,
+      PersistentSelectionExtension,
       ReviewDecorationExtension.configure({
         getConfig: (): ReviewDecorationConfig => ({
           items: reviewRef.current,
@@ -203,6 +205,7 @@ export const DocumentEditor = forwardRef<
         class:
           "prose max-w-none focus:outline-none min-h-[60vh] py-7 pl-8 pr-16 leading-relaxed sm:py-9 sm:pl-10 sm:pr-16",
         "aria-label": "文档编辑器",
+        "data-manual-selection": "false",
       },
       handleKeyDown(_view, event) {
         if (
@@ -262,9 +265,10 @@ export const DocumentEditor = forwardRef<
     },
     onSelectionUpdate({ editor }) {
       if (locatingReviewRef.current) return;
+      const { from, to, empty } = editor.state.selection;
+      editor.view.dom.dataset.manualSelection = empty ? "false" : "true";
       const cb = onSelChangeRef.current;
       if (!cb) return;
-      const { from, to, empty } = editor.state.selection;
       if (empty) {
         cb(null);
         return;
@@ -354,6 +358,7 @@ export const DocumentEditor = forwardRef<
       const to = Math.max(from, Math.min(pos.to, size));
       locatingReviewRef.current = true;
       try {
+        editor.view.dom.dataset.manualSelection = "false";
         editor
           .chain()
           .focus()
@@ -377,6 +382,8 @@ export const DocumentEditor = forwardRef<
       const size = editor.state.doc.content.size;
       const from = Math.max(0, Math.min(pos.from, size));
       const to = Math.max(from, Math.min(pos.to, size));
+      editor.view.dom.dataset.manualSelection =
+        pos.selectRange && to > from ? "true" : "false";
       editor
         .chain()
         .focus(undefined, { scrollIntoView: false })

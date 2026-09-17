@@ -50,6 +50,13 @@ export const ReviewCategorySchema = z.enum([
 ]);
 export type ReviewCategory = z.infer<typeof ReviewCategorySchema>;
 
+export const ReviewSeveritySchema = z.enum([
+  "info",
+  "suggestion",
+  "important",
+]);
+export type ReviewSeverity = z.infer<typeof ReviewSeveritySchema>;
+
 export const ReviewStatusSchema = z.enum([
   "open",
   "accepted",
@@ -70,7 +77,7 @@ export const ReviewItemSchema = z
     scope: ReviewScopeSchema,
     kind: z.enum(["opinion", "edit"]),
     category: ReviewCategorySchema,
-    severity: z.enum(["info", "suggestion", "important"]),
+    severity: ReviewSeveritySchema,
     title: z.string(),
     explanation: z.string(),
     replacement: z.string().optional(),
@@ -144,6 +151,22 @@ export const ChatContextSchema = z.object({
 export type ChatContext = z.infer<typeof ChatContextSchema>;
 
 /**
+ * 对话回复中由模型提出、但尚未进入审阅列表的候选意见。
+ * id 由服务端生成；转换后的 reviewId 写回候选，防止刷新后重复创建。
+ * scope / kind / status / documentRevision 一律由客户端依据聊天节点和当前文档补齐，
+ * 不信任模型生成锚点或执行语义。
+ */
+export const ChatReviewProposalSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().trim().min(1).max(200),
+  explanation: z.string().trim().min(1).max(10_000),
+  category: ReviewCategorySchema,
+  severity: ReviewSeveritySchema,
+  convertedReviewId: z.string().min(1).optional(),
+});
+export type ChatReviewProposal = z.infer<typeof ChatReviewProposalSchema>;
+
+/**
  * 一轮对话（用户提问或模型回复）。
  * assistant 轮可以挂一个修改集，点击可重新打开预览——正文不会被隐式修改，
  * 修改集里定位不到的条目由 ChangeSetPreview 在渲染时判定为不可应用。
@@ -152,6 +175,20 @@ export const ChatTurnSchema = z.object({
   role: z.enum(["user", "assistant"]),
   content: z.string(),
   changeSet: ChangeSetSchema.optional(),
+  reviewProposal: ChatReviewProposalSchema.optional(),
+}).superRefine((turn, ctx) => {
+  if (turn.role === "user" && (turn.changeSet || turn.reviewProposal)) {
+    ctx.addIssue({
+      code: "custom",
+      message: "user 轮次不能携带修改集或候选审阅意见",
+    });
+  }
+  if (turn.changeSet && turn.reviewProposal) {
+    ctx.addIssue({
+      code: "custom",
+      message: "同一轮回复不能同时携带修改集和候选审阅意见",
+    });
+  }
 });
 export type ChatTurn = z.infer<typeof ChatTurnSchema>;
 

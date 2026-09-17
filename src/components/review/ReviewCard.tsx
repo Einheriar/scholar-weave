@@ -34,12 +34,13 @@ export type ReviewCardProps = {
 
 /**
  * 单条建议卡片（PLAN 6.2）。
- * opinion：主要操作是"继续询问"和"按此意见修改"（阶段 2 暂以占位按钮呈现，阶段 5 接入对话）。
+ * opinion：可"继续询问"、"按此意见修改"或"忽略"。
  * edit：显示原文/替换内容/理由，以及"接受""忽略"。
  *
- * 「接受」动画（2026-09-16 反馈修订）：
+ * 「接受／忽略」后的收起（2026-09-16 反馈修订）：
  *   accepting 态 → 覆盖全卡的勾号过场（模糊化背景内容）→ 散去 → 高度收起（grid-template-rows 0fr）
  *   → 终态 = 三行（头部 + 标题 + 按钮），视觉弱化（bg-surface-muted opacity-75）。
+ *   忽略不播放成功勾号，但同样收起为三行；撤销后重新展开。
  *   交互锁定到收起完成（onCollapseDone），期间不响应点击。
  */
 export function ReviewCard({
@@ -65,8 +66,10 @@ export function ReviewCard({
   // 用户撤销 → item.status 翻回 open → derived-state 同步 collapsed=false（展开）
   const [accepting, setAccepting] = useState(false);
   const [checkState, setCheckState] = useState<"hidden" | "in" | "out">("hidden");
-  // 初次挂载时如果已是 accepted（刷新场景），直接收起（不播动画）
-  const [collapsed, setCollapsed] = useState(() => item.status === "accepted");
+  // 初次挂载时如果已经处理完（刷新场景），直接收起（不播动画）
+  const [collapsed, setCollapsed] = useState(
+    () => item.status === "accepted" || item.status === "rejected",
+  );
   const checkTimerRef = useRef<number | null>(null);
   const collapseTimerRef = useRef<number | null>(null);
 
@@ -102,11 +105,11 @@ export function ReviewCard({
   );
 
   // derived-state：item.status 变化时同步 collapsed
-  // 初次挂载时如果 item.status 已是 accepted（刷新场景），直接初始化 collapsed=true
+  // 初次挂载时如果 item.status 已处理完（刷新场景），直接初始化 collapsed=true
   const [prevStatus, setPrevStatus] = useState(item.status);
   if (prevStatus !== item.status) {
     setPrevStatus(item.status);
-    if (item.status === "accepted") {
+    if (item.status === "accepted" || item.status === "rejected") {
       if (!collapsed) setCollapsed(true);
     }
     if (item.status === "open") {
@@ -116,9 +119,10 @@ export function ReviewCard({
     }
   }
 
-  // 视觉状态：collapsed（收起完成后）→ 用 accepted 视觉（灰底弱化）
-  // accepting 期间（勾号过场）保持原视觉，不收起不变灰
-  const visualStatus = collapsed ? "accepted" : item.status;
+  // accepting 的收起事务会先于父级提交 accepted 状态，短暂以 accepted 视觉衔接；
+  // rejected 则始终保留自己的「已忽略」状态标签与配色。
+  const visualStatus =
+    collapsed && item.status === "open" ? "accepted" : item.status;
   const visualSt = STATUS_META[visualStatus];
   // accepted / rejected / stale 都算「终态弱化」：灰底 + opacity-75
   const visualInactive = visualStatus !== "open";
@@ -294,6 +298,19 @@ export function ReviewCard({
                   }}
                 >
                   {applyingOpinion ? "生成中…" : "按此意见修改"}
+                </button>
+              </Tooltip>
+              <Tooltip label={interactionLocked ? "请求处理中，请等待完成" : undefined}>
+                <button
+                  type="button"
+                  disabled={interactionLocked}
+                  className={buttonClass("secondary", "xs")}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onReject(item.id);
+                  }}
+                >
+                  忽略
                 </button>
               </Tooltip>
             </>

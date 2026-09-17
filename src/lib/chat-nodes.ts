@@ -1,4 +1,9 @@
-import type { ChatContext, ChatNode } from "./review-schema";
+import type {
+  ChatContext,
+  ChatNode,
+  ReviewItem,
+  ReviewScope,
+} from "./review-schema";
 
 /**
  * 聊天节点的纯函数工具（项目制聊天 / 锚点节点）。
@@ -64,6 +69,39 @@ export function deriveNodeTitle(node: ChatNode, max = 12): string {
       return "建议讨论";
     case "document":
       return "全文讨论";
+  }
+}
+
+/**
+ * 把聊天节点的可信锚点转换成新审阅意见的 scope。
+ * review 节点继承原建议 scope；其余节点只复用应用自己保存的锚点，
+ * 绝不接受 LLM 返回的 blockId、original 或字符坐标。
+ */
+export function reviewScopeFromNode(
+  node: ChatNode,
+  reviews: ReviewItem[],
+): ReviewScope | null {
+  const anchor = node.anchor;
+  switch (anchor.type) {
+    case "document":
+      return { type: "document" };
+    case "block":
+      return anchor.blockId
+        ? { type: "block", blockId: anchor.blockId }
+        : null;
+    case "range":
+      return anchor.blockId && anchor.selectedText
+        ? {
+            type: "range",
+            blockId: anchor.blockId,
+            original: anchor.selectedText,
+          }
+        : null;
+    case "review": {
+      const source = reviews.find((item) => item.id === anchor.reviewId);
+      if (!source) return null;
+      return { ...source.scope };
+    }
   }
 }
 

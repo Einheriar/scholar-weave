@@ -41,7 +41,7 @@ import {
   reorderProjects,
   upsertProject,
 } from "@/lib/chat-history";
-import { findNodeByAnchor } from "@/lib/chat-nodes";
+import { findNodeByAnchor, reviewScopeFromNode } from "@/lib/chat-nodes";
 import {
   clearAllProjects,
   deleteProject as deleteStoredProject,
@@ -932,7 +932,13 @@ export default function Home() {
                 content: data.answer,
                 changeSet: data.changeSet,
               }
-            : { role: "assistant", content: data.answer ?? "" };
+            : data.type === "answer_with_review" && data.reviewProposal
+              ? {
+                  role: "assistant",
+                  content: data.answer,
+                  reviewProposal: data.reviewProposal,
+                }
+              : { role: "assistant", content: data.answer ?? "" };
         const nodeWithReply: ChatNode = {
           ...nodeWithUser,
           turns: [...nodeWithUser.turns, reply],
@@ -978,6 +984,96 @@ export default function Home() {
       persistProjectNow,
       requestLocked,
       announceRequestLock,
+    ],
+  );
+
+  /**
+   * 把 assistant 轮次里的候选意见转入右侧审阅列表。
+   * 第一次点击只创建并留在当前聊天；按钮随后变成“查看审阅意见”。
+   * 再点击才定位卡片，避免创建瞬间切走当前讨论。
+   */
+  const handleUseReviewProposal = useCallback(
+    (nodeId: string, turnIndex: number) => {
+      if (requestLocked) {
+        announceRequestLock();
+        return;
+      }
+      const current = latestRef.current;
+      const currentDoc = current.doc;
+      const node = current.nodes.find((entry) => entry.id === nodeId);
+      const turn = node?.turns[turnIndex];
+      const proposal = turn?.reviewProposal;
+      if (!currentDoc || !node || !proposal) return;
+
+      if (proposal.convertedReviewId) {
+        const existing = current.reviews.find(
+          (item) => item.id === proposal.convertedReviewId,
+        );
+        if (!existing) {
+          setChatError("对应的审阅意见已不存在，无法定位。");
+          return;
+        }
+        handleSelect(existing.id);
+        return;
+      }
+
+      const scope = reviewScopeFromNode(node, current.reviews);
+      if (!scope || !canLocateScope(currentDoc, scope)) {
+        setChatError("正文已变化，无法把这条回复转为审阅意见。");
+        setAnnounce("正文已变化，无法转为审阅意见。");
+        return;
+      }
+
+      const review: ReviewItem = {
+        id: `review_${crypto.randomUUID()}`,
+        documentRevision: currentDoc.revision,
+        scope,
+        kind: "opinion",
+        category: proposal.category,
+        severity: proposal.severity,
+        title: proposal.title,
+        explanation: proposal.explanation,
+        status: "open",
+      };
+      const nextReviews = [...current.reviews, review];
+      const nextNodes = current.nodes.map((entry) =>
+        entry.id === nodeId
+          ? {
+              ...entry,
+              turns: entry.turns.map((candidate, index) =>
+                index === turnIndex && candidate.reviewProposal
+                  ? {
+                      ...candidate,
+                      reviewProposal: {
+                        ...candidate.reviewProposal,
+                        convertedReviewId: review.id,
+                      },
+                    }
+                  : candidate,
+              ),
+            }
+          : entry,
+      );
+
+      latestRef.current.reviews = nextReviews;
+      latestRef.current.nodes = nextNodes;
+      setReviews(nextReviews);
+      setNodes(nextNodes);
+      if (activeNodeIdRef.current === nodeId) {
+        setChatTurns(
+          nextNodes.find((entry) => entry.id === nodeId)?.turns ?? [],
+        );
+      }
+      setChatError(null);
+      setSaveState("saving");
+      setAnnounce(`已创建审阅意见：${review.title}。`);
+      void persistProjectNow(nextNodes);
+    },
+    [
+      requestLocked,
+      announceRequestLock,
+      handleSelect,
+      persistProjectNow,
     ],
   );
 
@@ -1598,6 +1694,7 @@ export default function Home() {
                 onToggleMinimize={() => setChatMinimized((v) => !v)}
                 onSend={sendChat}
                 onPreviewChangeSet={openChangeSet}
+                onUseReviewProposal={handleUseReviewProposal}
                 panelHeight={chatHeight}
                 onResize={handleChatResize}
                 onJumpToTurn={handleJumpToTurn}

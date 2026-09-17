@@ -5,7 +5,7 @@ import type { LLMProvider } from "@/lib/llm/provider";
 
 /**
  * /api/chat 的服务端测试（PLAN 7 / 12）。
- * 重点：两种回复形态、修改集只返回待预览、定位不到的 edit 被剔除、
+ * 重点：三种回复形态、修改集只返回待预览、定位不到的 edit 被剔除、
  * 不直接改正文（服务端只返回数据）。
  */
 
@@ -53,6 +53,41 @@ describe("POST /api/chat", () => {
     expect(data.type).toBe("answer");
     expect(data.answer).toBe("这是解释。");
     expect(data.changeSet).toBeUndefined();
+  });
+
+  it("answer_with_review：返回服务端编号的候选审阅意见", async () => {
+    vi.spyOn(providerMod, "getProviderFromEnv").mockReturnValue(
+      mockProvider(
+        JSON.stringify({
+          type: "answer_with_review",
+          answer: "讨论已经收敛为一个可执行的建议。",
+          reviewProposal: {
+            id: "model-controlled-id",
+            title: "统一脑区缩写形式",
+            explanation: "同一段内应统一使用缩写，以维持并列结构。",
+            category: "consistency",
+            severity: "suggestion",
+          },
+        }),
+      ),
+    );
+
+    const res = await POST(makeReq(validBody()));
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data).toMatchObject({
+      type: "answer_with_review",
+      answer: "讨论已经收敛为一个可执行的建议。",
+      reviewProposal: {
+        title: "统一脑区缩写形式",
+        explanation: "同一段内应统一使用缩写，以维持并列结构。",
+        category: "consistency",
+        severity: "suggestion",
+      },
+    });
+    expect(data.reviewProposal.id).toMatch(/^proposal_/);
+    expect(data.reviewProposal.id).not.toBe("model-controlled-id");
+    expect(data.reviewProposal.convertedReviewId).toBeUndefined();
   });
 
   it("answer_with_changes：返回待预览修改集，含可定位的 edit", async () => {

@@ -1,5 +1,9 @@
 import { z } from "zod";
-import { ChatContextSchema, ReviewCategorySchema } from "../review-schema";
+import {
+  ChatContextSchema,
+  ReviewCategorySchema,
+  ReviewSeveritySchema,
+} from "../review-schema";
 
 /**
  * 对话与修改集接口的 wire schema（PLAN 7 / 11 / 12）。
@@ -31,15 +35,30 @@ export const LLMChangeSetSchema = z.object({
 });
 export type LLMChangeSet = z.infer<typeof LLMChangeSetSchema>;
 
+/** 模型提出的候选审阅意见；锚点、kind、状态和 ID 由应用补齐。 */
+export const LLMReviewProposalSchema = z.object({
+  title: z.string().trim().min(1).max(200),
+  explanation: z.string().trim().min(1).max(10_000),
+  category: ReviewCategorySchema,
+  severity: ReviewSeveritySchema,
+});
+export type LLMReviewProposal = z.infer<typeof LLMReviewProposalSchema>;
+
 /**
- * 对话回复的两种合法形态（PLAN 7）：
+ * 对话回复的三种合法形态（PLAN 7）：
  * - answer：纯解释，不含可执行修改
+ * - answer_with_review：解释 + 可由用户转入审阅列表的候选意见
  * - answer_with_changes：解释 + 待预览修改集
  */
 export const LLMChatResponseSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("answer"),
     answer: z.string(),
+  }),
+  z.object({
+    type: z.literal("answer_with_review"),
+    answer: z.string(),
+    reviewProposal: LLMReviewProposalSchema,
   }),
   z.object({
     type: z.literal("answer_with_changes"),
