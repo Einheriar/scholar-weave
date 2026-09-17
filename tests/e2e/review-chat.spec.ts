@@ -238,9 +238,27 @@ test.describe("上下文对话（mock /api/chat）", () => {
       .filter({ hasText: "统一脑区缩写形式" });
     await expect(restoredCard).toHaveCount(1);
     const viewButton = page.getByRole("button", { name: "查看审阅意见" });
+    const chat = page.getByLabel("上下文对话");
+    const messageCollapse = page.locator("[data-chat-message-collapse]");
+    expect(
+      await messageCollapse.evaluate(
+        (element) => getComputedStyle(element).transitionDuration,
+      ),
+    ).toBe("0.44s");
     await expect(viewButton).toBeVisible();
     await viewButton.click();
+    await expect(chat).toHaveAttribute("data-chat-context-transition", "out");
     await expect(restoredCard).toHaveAttribute("aria-current", "true");
+    expect(
+      await restoredCard.evaluate(
+        (element) => getComputedStyle(element, "::after").animationName,
+      ),
+    ).toBe("review-card-focus-arrive");
+    await expect(chat).toHaveAttribute("data-chat-context-transition", "idle");
+    await expect(messageCollapse).toHaveAttribute("data-open", "false");
+    await expect
+      .poll(async () => (await messageCollapse.boundingBox())?.height ?? -1)
+      .toBe(0);
     await expect(restoredCard).toHaveCount(1);
   });
 

@@ -456,6 +456,54 @@ body {
   overflow: hidden;
 }
 
+/* 聊天上下文切换：旧消息先退出，再让消息视口平滑收起或展开。
+   输入框与外框保持在场，避免“查看审阅意见”时整块界面闪断。 */
+.chat-message-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 440ms cubic-bezier(0.4, 0, 0.2, 1);
+  will-change: grid-template-rows;
+}
+.chat-message-collapse-open {
+  grid-template-rows: 1fr;
+}
+.chat-message-collapse > div {
+  min-height: 0;
+  overflow: hidden;
+}
+@keyframes chat-context-message-out {
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0.88; transform: translateY(10px); }
+}
+@keyframes chat-context-message-in {
+  from { opacity: 0; transform: translateY(5px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.chat-message-transition[data-phase="out"] {
+  animation: chat-context-message-out 300ms cubic-bezier(0.4, 0, 0.2, 1) both;
+  pointer-events: none;
+}
+.chat-message-transition[data-phase="in"] {
+  animation: chat-context-message-in 190ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* 上下文定位完成后，用一次无阴影的品牌色边框扩散接住视觉重心。 */
+@keyframes review-card-focus-arrive {
+  0%   { opacity: 0; transform: scale(0.985); }
+  34%  { opacity: 0.78; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.025); }
+}
+.t-review-card-focus-arrive::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  z-index: 2;
+  border: 2px solid var(--brand);
+  border-radius: inherit;
+  pointer-events: none;
+  animation: review-card-focus-arrive 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
 /* 对话结论 → 审阅意见：按钮出现时轻抬进入；保持无阴影的平面样式，
    hover/focus 只用位移和主题色边框反馈，避免在长回复中抢正文。 */
 @keyframes review-proposal-action-in {
@@ -674,6 +722,9 @@ body {
   .t-success-check { opacity: 1; }
   .t-success-check svg path { stroke-dashoffset: 0; }
   .chat-body { transition: none; }
+  .chat-message-collapse { transition: none; }
+  .chat-message-transition { animation: none !important; transform: none !important; }
+  .t-review-card-focus-arrive::after { display: none; animation: none !important; }
   .editor-undo-fold, .editor-undo-relief { transition: none; }
   .editor-undo-relief { animation: none !important; }
   .app-tooltip { animation: none !important; }

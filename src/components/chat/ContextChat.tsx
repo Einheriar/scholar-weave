@@ -80,6 +80,9 @@ export function ContextChat({
 }: ContextChatProps) {
   const [draft, setDraft] = useState("");
   const [timelineOpen, setTimelineOpen] = useState(false);
+  const [contextSwitchPhase, setContextSwitchPhase] = useState<
+    "idle" | "out" | "in"
+  >("idle");
   // 抽屉常驻渲染：开之前是未挂载态，首次打开挂上播进入动画；
   // 退出动画播完再卸载（详见 closing 推导）。
   const [timelineMounted, setTimelineMounted] = useState(false);
@@ -106,12 +109,26 @@ export function ContextChat({
     setTimelineOpen(false);
   };
   const listRef = useRef<HTMLDivElement>(null);
+  const contextSwitchTimerRef = useRef<number | null>(null);
+  const contextSwitchEndTimerRef = useRef<number | null>(null);
   // 拖拽把手：记录起始高度与指针位置，pointermove 时差值调整
   const dragRef = useRef<{ startY: number; startHeight: number } | null>(null);
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
   }, [turns, busy]);
+
+  useEffect(
+    () => () => {
+      if (contextSwitchTimerRef.current) {
+        clearTimeout(contextSwitchTimerRef.current);
+      }
+      if (contextSwitchEndTimerRef.current) {
+        clearTimeout(contextSwitchEndTimerRef.current);
+      }
+    },
+    [],
+  );
 
   // 拖拽调高：在 window 上监听 pointermove/up，松手或取消时结束
   useEffect(() => {
@@ -142,10 +159,50 @@ export function ContextChat({
     onSend(text);
   };
 
+  /**
+   * “查看审阅意见”会把聊天上下文切到一条尚无对话的新建议。
+   * 先让旧消息退场，再执行定位；新上下文进入时消息区平滑收起，
+   * 避免旧节点的 turns 被父级替换后在一帧内消失。
+   */
+  const handleReviewProposal = (
+    nodeId: string,
+    turnIndex: number,
+    alreadyConverted: boolean,
+  ) => {
+    if (!alreadyConverted) {
+      onUseReviewProposal(nodeId, turnIndex);
+      return;
+    }
+    if (contextSwitchPhase !== "idle") return;
+    if (
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      onUseReviewProposal(nodeId, turnIndex);
+      return;
+    }
+
+    setContextSwitchPhase("out");
+    // 卡片在抽屉收拢早期就开始定位，让视觉重心自然接到右栏。
+    contextSwitchTimerRef.current = window.setTimeout(() => {
+      onUseReviewProposal(nodeId, turnIndex);
+    }, 90);
+    contextSwitchEndTimerRef.current = window.setTimeout(() => {
+      setContextSwitchPhase("in");
+      contextSwitchTimerRef.current = window.setTimeout(() => {
+        setContextSwitchPhase("idle");
+      }, 190);
+    }, 300);
+  };
+
   const contextLabel = describeContext(context, contextReview);
+  const hasMessageContent = turns.length > 0 || busy;
+  const messageDrawerOpen =
+    hasMessageContent && contextSwitchPhase !== "out";
 
   return (
     <section
+      data-chat-context-transition={contextSwitchPhase}
       className={
         "relative flex flex-col border border-border bg-surface shadow-sm " +
         // 时间线抽屉展开时它贴在聊天区上沿，顶部圆角让位给抽屉（视觉上连成一体）。
@@ -288,14 +345,27 @@ export function ContextChat({
             </p>
           )}
 
-          {turns.length > 0 && (
-            <div
-              ref={listRef}
-              data-chat-message-list
-              className="flex-1 space-y-2.5 overflow-y-auto px-3.5 py-3"
-              style={{ minHeight: 0, height: Math.max(120, panelHeight - 160) }}
-            >
-              {turns.map((t, i) => (
+          <div
+            data-chat-message-collapse
+            data-open={messageDrawerOpen ? "true" : "false"}
+            className={
+              "chat-message-collapse" +
+              (messageDrawerOpen ? " chat-message-collapse-open" : "")
+            }
+          >
+            <div>
+              <div
+                data-chat-message-transition
+                data-phase={contextSwitchPhase}
+                className="chat-message-transition"
+              >
+                <div
+                  ref={listRef}
+                  data-chat-message-list
+                  className="flex-1 space-y-2.5 overflow-y-auto px-3.5 py-3"
+                  style={{ minHeight: 0, height: Math.max(120, panelHeight - 160) }}
+                >
+                  {turns.map((t, i) => (
                 <div
                   key={i}
                   data-turn-index={i}
@@ -342,8 +412,15 @@ export function ContextChat({
                               (!t.reviewProposal.convertedReviewId && anchorStale)
                             }
                             onClick={() => {
-                              if (activeNode) onUseReviewProposal(activeNode.id, i);
+                              if (activeNode) {
+                                handleReviewProposal(
+                                  activeNode.id,
+                                  i,
+                                  Boolean(t.reviewProposal?.convertedReviewId),
+                                );
+                              }
                             }}
+                            aria-busy={contextSwitchPhase !== "idle"}
                             className={`${buttonClass("secondary", "xs")} t-review-proposal-action gap-1.5`}
                           >
                             <svg
@@ -379,20 +456,22 @@ export function ContextChat({
                       )}
                     </div>
                   )}
+                </div>
+              ))}
+              {busy && (
+                <p className="animate-item-in mr-10 flex items-center gap-2 rounded-2xl rounded-bl-sm bg-surface-muted px-3 py-2 text-sm text-text-faint">
+                  <span className="inline-flex gap-1" aria-hidden>
+                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-text-faint [animation-delay:-0.3s]" />
+                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-text-faint [animation-delay:-0.15s]" />
+                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-text-faint" />
+                  </span>
+                  正在思考…
+                </p>
+              )}
+                </div>
+              </div>
             </div>
-          ))}
-          {busy && (
-            <p className="animate-item-in mr-10 flex items-center gap-2 rounded-2xl rounded-bl-sm bg-surface-muted px-3 py-2 text-sm text-text-faint">
-              <span className="inline-flex gap-1" aria-hidden>
-                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-text-faint [animation-delay:-0.3s]" />
-                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-text-faint [animation-delay:-0.15s]" />
-                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-text-faint" />
-              </span>
-              正在思考…
-            </p>
-          )}
-            </div>
-          )}
+          </div>
 
           <div className="flex items-end gap-2 border-t border-border p-2.5">
             <textarea

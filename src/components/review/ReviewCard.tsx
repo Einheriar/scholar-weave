@@ -143,7 +143,7 @@ export function ReviewCard({
                 ? "border-foreground/40 ring-1 ring-foreground/20"
                 : "border-border")
             : selected
-              ? "border-brand bg-brand-soft shadow-md ring-1 ring-brand-ring"
+              ? "t-review-card-focus-arrive border-brand bg-brand-soft shadow-md ring-1 ring-brand-ring"
               : "border-border bg-surface hover:-translate-y-px hover:border-border-strong hover:shadow-md")
         }
         onClick={() => {
