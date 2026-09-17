@@ -21,19 +21,124 @@ export function deriveProjectTitle(doc: DocumentState): string {
   return first.length > TITLE_MAX ? `${first.slice(0, TITLE_MAX)}…` : first;
 }
 
-/** 项目按最近活动（lastActivityAt）新到旧排序，不改动入参数组 */
-export function sortProjects(list: Project[]): Project[] {
-  return [...list].sort((a, b) =>
-    a.lastActivityAt < b.lastActivityAt ? 1 : a.lastActivityAt > b.lastActivityAt ? -1 : 0,
-  );
+/**
+ * 列表顺序是**显式**的（`order` 升序，越小越靠前），不再是按时间派生——
+ * 用户可手动拖动排序，只有「活动」才会把项目提到最前（见 moveProjectToTop）。
+ *
+ * 旧数据可能没有 `order`（Dexie v4 之前写入的），一律排到最后并按活动时间兜底，
+ * 这样即便迁移没跑到，显示顺序也稳定、不会乱跳。
+ */
+function orderOf(p: Project): number {
+  return p.order ?? Number.MAX_SAFE_INTEGER;
 }
 
-/** 按 id 覆盖或插入一个项目，返回重新排好序的新列表（不就地修改入参） */
+/** 按显式 order 升序，不改动入参数组；缺 order 的排末尾（内部按活动时间新到旧） */
+export function sortProjects(list: Project[]): Project[] {
+  return [...list].sort((a, b) => {
+    const d = orderOf(a) - orderOf(b);
+    if (d !== 0) return d;
+    return a.lastActivityAt < b.lastActivityAt ? 1 : a.lastActivityAt > b.lastActivityAt ? -1 : 0;
+  });
+}
+
+/**
+ * 按 id 覆盖或插入一个项目，**位置语义**：
+ * - 已有 id：原地替换（保留它当前的 order，不动位置）；
+ * - 新 id：插到最前。
+ * 不按活动时间重排——「置顶」是独立动作，由 moveProjectToTop 显式做。
+ */
 export function upsertProject(list: Project[], project: Project): Project[] {
-  return sortProjects([
-    project,
-    ...list.filter((p) => p.id !== project.id),
-  ]);
+  const idx = list.findIndex((p) => p.id === project.id);
+  if (idx === -1) {
+    return [{ ...project, order: topOrder(list) }, ...list];
+  }
+  const next = [...list];
+  next[idx] = { ...project, order: list[idx].order };
+  return next;
+}
+
+/**
+ * 下一批置顶要用的 order = 当前最小值 - 1（列表为空给 0）。
+ *
+ * 刻意**不重编号**其余项目：置顶发生在每次「活动」（编辑/回复）上，重编号会让每次
+ * 保存都要写回全表；只改被移动项一行，写回也就一行。order 因此不保证连续，
+ * 只在显式拖动排序（reorderProjects）时才压回 0..n-1。
+ */
+function topOrder(list: Project[]): number {
+  if (list.length === 0) return 0;
+  return Math.min(...list.map(orderOf)) - 1;
+}
+
+/** 把某个项目移到列表最前（「活动置顶」）；其余保持相对顺序。找不到则原样返回 */
+export function moveProjectToTop(list: Project[], id: string): Project[] {
+  const idx = list.findIndex((p) => p.id === id);
+  if (idx === -1) return list;
+  // 只改这一项，且只在它本来就不在顶部时才动（省掉无谓的 order 变动与写回）
+  if (list[0].id === id) return list;
+  const next = [...list];
+  const [target] = next.splice(idx, 1);
+  next.unshift({ ...target, order: topOrder(list) });
+  return next;
+}
+
+/**
+ * 按给定 id 顺序密集重编号（显式拖动 / 键盘移动后调用），返回 order = 0..n-1 的新列表。
+ * `orderedIds` 里没有的项目按原顺序追加到末尾，避免因状态不同步丢条目。
+ */
+export function reorderProjects(list: Project[], orderedIds: string[]): Project[] {
+  const byId = new Map(list.map((p) => [p.id, p]));
+  const next: Project[] = [];
+  for (const id of orderedIds) {
+    const p = byId.get(id);
+    if (p) {
+      next.push(p);
+      byId.delete(id);
+    }
+  }
+  for (const p of list) if (byId.has(p.id)) next.push(p);
+  return next.map((p, i) => ({ ...p, order: i }));
+}
+
+/** 把 ids 里 index 处的元素移动到 to 位置并返回新数组（键盘/拖拽共用） */
+export function moveId(ids: string[], index: number, to: number): string[] {
+  if (to < 0 || to >= ids.length || index < 0 || index >= ids.length || to === index) {
+    return ids;
+  }
+  const next = [...ids];
+  const [it] = next.splice(index, 1);
+  next.splice(to, 0, it);
+  return next;
+}
+
+/**
+ * 拖动中的每行位移（px）：被拖的那行跟着指针走，其余行按目标插入位让开一行。
+ *
+ * 纯函数便于单测——拖拽的视觉手感依赖真实浏览器，但「谁该让位、让多远」是纯几何，
+ * 抽出来就能在 vitest 里守住。约定：
+ * - `insertAt` 是**插入位**（0..count）：把被拖行插到第 insertAt 个缝隙；
+ * - 被拖行（index === from）位移 = dragDy（跟手距离，松手时传回落距离）；
+ * - 中间段行整体让开 `rowH`：向下拖时（from < to）中间行上移，向上拖时下移；
+ * - 其余行不动。
+ */
+export function dragShifts(
+  count: number,
+  from: number,
+  insertAt: number,
+  rowH: number,
+  dragDy: number,
+): number[] {
+  const out = new Array<number>(count).fill(0);
+  if (from < 0 || from >= count) return out;
+  out[from] = dragDy;
+  // 插入位换算成「最终落点下标」：往下拖时它后面少一格
+  const to = insertAt > from ? insertAt - 1 : insertAt;
+  if (to === from || to < 0 || to >= count) return out;
+  for (let i = 0; i < count; i++) {
+    if (i === from) continue;
+    if (from < to && i > from && i <= to) out[i] = -rowH;
+    else if (from > to && i >= to && i < from) out[i] = rowH;
+  }
+  return out;
 }
 
 /** 列表里标题的字符上限，超出截断加省略号 */

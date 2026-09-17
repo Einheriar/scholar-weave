@@ -252,6 +252,35 @@ body {
   animation: toast-rise-content 350ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+/* ── 历史列表拖动排序 ─────────────────────────────────────────
+   做法是「跟手位移 + 槽位让位」，拖动期间**不改 DOM 顺序**：
+   - 被拖条目浮起（放大 + 阴影 + 抬到最上层），其 translateY 由 JS 直写内联样式跟着指针走；
+   - 其余条目按各自让位距离做 translateY，靠这里的 transition 平滑滑开（「哗哗哗」的来源）。
+   用 transform 而不是改 margin/top：transform 走合成层，不触发布局重排。
+   内联样式里只写 translateY，缩放/阴影这类静态视觉放在类里，避免两者互相覆盖。 */
+.t-drag-lift {
+  position: relative;
+  z-index: 30;
+  cursor: grabbing;
+  /* 用独立的 scale 属性而不是写进 transform：transform 已被 JS 拿去写跟手位移，
+     两者是相互独立的属性、会自行合成，不会互相覆盖。 */
+  scale: 1.03;
+  border-radius: 0.75rem;
+  /* 抬起感：投影 + 略提亮（深色下黑投影弱，靠 scale + 提亮兜底） */
+  background-color: var(--surface);
+  box-shadow:
+    0 12px 28px -8px rgb(0 0 0 / 0.3),
+    0 4px 10px -4px rgb(0 0 0 / 0.2);
+}
+.t-drag-shift {
+  transition: transform 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+/* 拖动中不要选中文字（触屏长按会弹选择菜单），也不要让整行 hover 背景闪烁 */
+.t-drag-list {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 /* 列表条目淡入（筛选切换 / 审阅结果到达） */
 @keyframes item-fade-in {
   from { opacity: 0; transform: translateY(4px); }
@@ -386,6 +415,7 @@ body {
   .animate-tooltip-rise, .t-success-check, .review-card-collapsible { animation: none; }
   .t-icon-swap .t-icon { transition: none; }
   .t-toast-rise, .t-toast-rise > .t-toast-content { animation: none; }
+  .t-drag-shift { transition: none; }
   .t-success-check { opacity: 1; }
   .t-success-check svg path { stroke-dashoffset: 0; }
   .review-card-collapsible { grid-template-rows: 0fr; }

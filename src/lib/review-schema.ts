@@ -180,8 +180,16 @@ export type ChatNode = z.infer<typeof ChatNodeSchema>;
 
 /**
  * 项目：一篇文章的完整工作现场（正文 + 审阅建议状态 + 聊天节点列表）。
- * 左侧「历史记录」列表的单位；lastActivityAt 驱动排序（最近编辑/聊天/审阅在最上）。
+ * 左侧「历史记录」列表的单位。
+ *
+ * 列表顺序由显式的 `order` 决定（升序、越小越靠前）：用户可手动拖动排序，
+ * 任何一次「活动」（编辑正文 / 审阅出结果 / 聊天回复）会把该项目移到最前。
+ * 单纯点开查看**不算**活动，不改变位置。
  * title 取正文首段截断（见 chat-history.ts 的 deriveProjectTitle）。
+ *
+ * `order` 刻意是 **optional**：`listProjects` 用 safeParse 读旧数据，必填会让缺字段的
+ * 既有项目校验失败、被整条丢弃（看起来像历史全没了）。旧数据在 Dexie v4 的 upgrade
+ * 回填，读入路径另有兜底（见 storage/projects.ts）。
  */
 export const ProjectSchema = z.object({
   id: z.string().min(1),
@@ -190,5 +198,6 @@ export const ProjectSchema = z.object({
   reviews: z.array(ReviewItemSchema),
   nodes: z.array(ChatNodeSchema),
   lastActivityAt: z.string(),
+  order: z.number().int().optional(),
 });
 export type Project = z.infer<typeof ProjectSchema>;

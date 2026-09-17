@@ -166,3 +166,34 @@
   `activeProjRef` 快照会丢掉这不到 500ms 的编辑）且**不再刷新 `lastActivityAt`**——
   「离开」不是活动，原先刷新会让该条目跳到列表顶部（实测旧项目时间戳保持冻结不再跳动）。
   实测（含防抖窗口内编辑后立刻新建、刷新后核对）数据零丢失
+
+## 历史列表手动排序（拖动 + 键盘）
+
+- `—`       feat: 项目列表支持手动拖动排序（活动置顶优先）——
+  ① 顺序从「按时间派生」改为**显式 `order` 字段**（Zod `.optional()` 防 safeParse 丢旧数据）；
+  Dexie 升 **v4** 并回填既有项目的 order（按升级前显示顺序，观感不变）；
+  ② 语义：**一次活动（编辑正文/改标题/审阅/聊天）把该项目移到最前**，**点开查看不算活动**；
+  手动拖动/键盘移动直接改写顺序。置顶只改一行（order = 最小值 − 1，不重编号全表），
+  拖动排序才密集压回 `0..n-1`；
+  ③ `chat-history.ts` 拆分语义：`upsertProject` 改为「原地替换、不动 order」，
+  新增 `moveProjectToTop` / `reorderProjects` / `moveId`；
+  ④ 交互用 **Pointer Events**（不引依赖）：独立拖拽把手（整行是「点开」按钮、内嵌删除按钮，
+  拖动挂整行会打架）+ `touch-action:none`，触屏可用；边缘自动滚动；
+  键盘 `↑/↓` 移动 + `aria-live` 播报（纯拖拽对键盘/读屏不可用）；
+  ⑤ 顺带修既有 bug：**改标题不落库**（`onChange` 只 `setDoc`，没置 saving，
+  改完刷新即丢、且不算活动）——补 `setSaveState("saving")`；
+  ⑥ 测试：`chat-history` 21 例（含「缺 order 排末尾」「置顶保持相对顺序」「moveId 边界」）、
+  `projects` 13 例（order 读回、批量写回、缺字段不丢行），并验证过往用例能抓回归。
+  全套 153 Vitest 通过；浏览器实测拖动换位/落库/刷新保持/键盘排序/点开不改序/编辑置顶
+- `—`       feat: 拖动排序换成「浮起跟手 + 其余项滑开」的手感（替换上一版的插入指示线）——
+  ① 被拖条目挂 `.t-drag-lift`：独立 `scale: 1.03`（**不写进 transform**，transform 已被 JS
+  占用做跟手位移，两者是独立属性可自行合成）+ 投影 + 背景提亮 + `z-index:30`；
+  ② 其余条目按插入位让开一行高（`dragShifts`），靠 `.t-drag-shift` 的 CSS transition
+  平滑滑开——「哗哗哗滑过去」的来源；拖动期间**不改 DOM 顺序**，只改 transform，
+  避免行在指针下跳位与每帧 React 重排；
+  ③ 松手先播回落（过渡到目标槽位）再提交顺序，视觉与数据不错位；拖动中禁选中文字；
+  ④ 让位几何抽成 `dragShifts` 纯函数（含「与 moveId 落点一致」的一致性检查），
+  新增 `tests/chat-history-drag.test.tsx` 12 例守住接线（jsdom mock 几何 + 指针捕获）；
+  ⑤ 用 Playwright（系统 Chrome）真渲染实测：跟手位移逐步递增、其余行 ±57px 让位、
+  浮起行 z=30 + shadow、松手回落、落库顺序正确；深色模式与 reduced-motion 均验证。
+  全套 172 Vitest 通过

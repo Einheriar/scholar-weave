@@ -124,8 +124,20 @@ tests/e2e/                      # Playwright 用例（helpers.ts 里是 mock 与
 - 历史条目按钮带 `data-project-id`（同 `data-review-card` 的约定）。**写测试时别按标题模糊匹配**：删除按钮的 `aria-label` 是「删除文章：<标题>」，也含标题，会同时命中两个。
 - **建档时机 = 首次审阅或发聊天**（规则 1）：那之前 `activeProjId` 为 null，防抖保存时才 `newProjectId()` 分配 id。切换/新建文章前会先把当前项目**立即落库**，避免防抖未跑导致旧文章丢失——落库用的是 `latestRef`（最新现场，含防抖窗口内刚敲的字），**不是** `activeProjRef`（它是「上次保存的快照」，用它会把不到 500ms 的编辑丢掉）。「新文章」清空现场但**已保存的项目留在列表里**，随时点回——不要改回「清空对话」。
 - **点「新文章」时同步建档（分配 id + 插入列表），不能挂在防抖落库路径上。** 分配 id 只是个 `crypto.randomUUID()`、不需要任何 I/O，早先却要等 500ms 防抖保存跑到 `persistProjectNow` 才发生，于是「点」与「新行蹦出来」之间空出约一秒（用户反馈「先看到旧项目刷新，约 1s 后新项目才蹦出来」）。现在 `handleNewProject` 在点击那一帧就 `newProjectId()` + `upsertProject` + `setJustCreatedId(id)`，出现动画因此与点击因果相连；`latestRef` 也同步推进到新项目（否则随后的防抖保存/聊天回复落库会把旧文章内容写进新 id）。
-- **「离开」一篇不算它的活动：切换/新建时落库旧项目不要刷新 `lastActivityAt`。** 列表按 `lastActivityAt` 倒序排（`upsertProject` 内部调 `sortProjects`），把被离开的项目刷成 `now` 会让它**跳到列表顶部**（点开 B 结果 A 上去了；点「新文章」时表现为「旧项目突然刷新一下」）。只有真正的编辑/回复（走 `persistProjectNow`）才更新它。
+- **「离开」一篇不算它的活动：切换/新建时落库旧项目不要刷新 `lastActivityAt`。** 只有真正的编辑/回复（走 `persistProjectNow`）才更新它。
+- **列表顺序是显式的 `order`（升序），不是按时间派生**（2026-09-16 起支持手动拖动排序）。规则：**一次「活动」把该项目移到最前**，**单纯点开查看不算活动、不改变位置**；手动拖动/键盘移动则直接改写顺序。要点：
+  - 「活动」= 编辑正文 / 改标题 / 审阅出结果 / 聊天回复——它们的共同出口是 `persistProjectNow`，置顶就接在这里（`moveProjectToTop`）。点开与「新文章」的旧项目落库走的是 `upsertProject`（**原地替换、不动 order**），别改成置顶。
+  - **`upsertProject` 不再是「重排」**：已有 id 只覆盖内容并保留原 order，新 id 才插到最前。历史测试里那套「按 lastActivityAt 重排」的断言已作废（见 `tests/chat-history.test.ts` 的注释与新用例）。
+  - 置顶**只改被移动项一行**（order = 当前最小值 − 1），不重编号其余项目——否则每次编辑都要写回全表。因此 order **不保证连续**，只在显式拖动排序（`reorderProjects`）和删除后压回 `0..n-1`。排序时同值由 `lastActivityAt` 兜底，结果稳定。
+  - 手动排好的顺序会被后续编辑逐步冲掉（编辑过的都会往顶上跑），这是「活动置顶优先」的既定语义、不是 bug。
+  - `order` 在 Zod 里是 **`.optional()`**：`listProjects` 用 `safeParse` 读旧数据，必填会让缺字段的既有项目校验失败、被整条丢弃（看起来像历史全没了）。旧数据由 Dexie **v4** 的 upgrade 按当时的显示顺序回填；`listProjects` 用 `toArray()` 而非 `orderBy("order")` 也是同理——索引会**跳过**缺该字段的行。
+- **拖动排序的视觉是「浮起跟手 + 其余项滑开」，两条容易踩的线**：
+  - **被拖条目的跟手位移写在 `transform: translateY()` 内联样式里，浮起的放大必须用独立的 `scale` 属性**——如果把 `scale()` 也写进 transform，JS 每帧重写 transform 时会把缩放覆盖掉。
+  - 拖动期间**只改 transform、不改 DOM 顺序**：边拖边重排会让行在指针下跳位，也会每帧触发 React 重渲染。其余条目让位一行高，靠 `.t-drag-shift` 的 transition 平滑滑开；松手先播回落再提交顺序（视觉与数据不错位）。让位几何是纯函数 `dragShifts`（`chat-history.ts`），有单测与一致性检查守着。
+  - 拖动把手是**独立的小把手**（不是整行）：整行是「点开文章」按钮、内嵌删除按钮，拖动挂整行会和点击语义打架；把手带 `touch-action:none`，列表其余位置因此仍能正常滚动。
+- **`listProjects` 的排序依据是 `order`，`loadLatestProject` = 列表第一条**（不再是「最近活动时间最新」的那条）。改动排序语义时这两个函数要一起看。
 - **项目落库是防抖的**（编辑触发 500ms），但**聊天回复到达会立即落库**（`persistProjectNow(repliedNodes)`），免得用户在防抖窗口内刷新丢消息。
+- **改标题也必须 `setSaveState("saving")`**：它是一次内容编辑，不置 saving 就不触发防抖保存——标题既不落库（改完刷新就丢）、也不算活动（不置顶）。它不走 `handleDocChange` 是为了跳过锚点校验（标题不参与 block 定位）。
 - **项目标题派生**：`deriveProjectTitle` 优先取文档手动标题，否则首段截断（24 字符），兜底「未命名文章」。
 
 ### 聊天节点（ChatNode）与锚点

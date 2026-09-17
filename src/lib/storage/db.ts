@@ -47,6 +47,22 @@ export class SuperGrammarlyDB extends Dexie {
           await tx.table("projects").bulkPut(projects);
         }
       });
+    // v4：列表顺序改为显式 order 字段（支持手动拖动排序 + 活动置顶），加索引。
+    // upgrade 给既有项目按当前显示顺序（lastActivityAt 新到旧）回填 order——
+    // 与升级前的观感一致。Projects 常驻内存、篇数有限，逐条 update 足够。
+    this.version(4)
+      .stores({
+        projects: "id, doc.updatedAt, order",
+      })
+      .upgrade(async (tx) => {
+        const rows = (await tx.table("projects").toArray()) as Project[];
+        const byActivity = [...rows].sort((a, b) =>
+          a.lastActivityAt < b.lastActivityAt ? 1 : a.lastActivityAt > b.lastActivityAt ? -1 : 0,
+        );
+        await Promise.all(
+          byActivity.map((p, i) => tx.table("projects").update(p.id, { order: i })),
+        );
+      });
   }
 }
 

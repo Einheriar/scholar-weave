@@ -2,7 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Project } from "@/lib/review-schema";
-import { deriveProjectTitle, formatRelativeTime } from "@/lib/chat-history";
+import {
+  deriveProjectTitle,
+  dragShifts,
+  formatRelativeTime,
+  moveId,
+} from "@/lib/chat-history";
 import { buttonClass } from "@/components/ui/button";
 
 /**
@@ -22,6 +27,9 @@ export type ChatHistoryProps = {
   onSelect: (id: string) => void;
   onNew: (opts?: { keepHistoryOpen?: boolean }) => void;
   onDelete: (id: string) => void;
+  /** 手动拖动 / 键盘移动后提交新的顺序（完整 id 列表，从前往后）。
+   *  message 供无障碍播报（走 page 的 aria-live），省略时用默认文案。 */
+  onReorder: (orderedIds: string[], message?: string) => void;
   /** 刚由「新文章」创建、尚未播过出现动画的项目 id；播完由 onCreatedShown 清掉。
    *  按事件钉 id 而不是按时间取最新：列表里永远有一条最新，初次加载/切回旧项目/
    *  筛选变化都会误触发「蹦」动画。 */
@@ -40,6 +48,7 @@ export function ChatHistory({
   onSelect,
   onNew,
   onDelete,
+  onReorder,
   justCreatedId,
   onCreatedShown,
   open,
@@ -116,6 +125,7 @@ export function ChatHistory({
           onSelect={onSelect}
           onNew={onNew}
           onDelete={onDelete}
+          onReorder={onReorder}
           justCreatedId={justCreatedId}
           onCreatedShown={onCreatedShown}
         />
@@ -161,6 +171,7 @@ export function ChatHistory({
               onSelect={onSelect}
               onNew={onNew}
               onDelete={onDelete}
+              onReorder={onReorder}
               justCreatedId={justCreatedId}
               onCreatedShown={onCreatedShown}
               variant="drawer"
@@ -178,12 +189,24 @@ function HistoryList({
   onSelect,
   onNew,
   onDelete,
+  onReorder,
   justCreatedId,
   onCreatedShown,
   variant = "sidebar",
 }: HistoryListProps & { variant?: "sidebar" | "drawer" }) {
   const drawer = variant === "drawer";
   const [titleHover, setTitleHover] = useState(false);
+  const {
+    listRef,
+    dragId,
+    dragging,
+    settling,
+    beginDrag,
+    moveDrag,
+    endDrag,
+    moveByKey,
+    shiftOf,
+  } = useHistoryDrag(projects, onReorder);
   return (
     <>
       {drawer ? (
@@ -257,26 +280,256 @@ function HistoryList({
         </div>
       )}
 
-      <ul className="space-y-1 p-2">
+      <ul
+        ref={listRef}
+        className={"space-y-1 p-2" + (dragging ? " t-drag-list" : "")}
+      >
         {projects.length === 0 && (
           <li className="px-2 py-3 text-xs leading-relaxed text-text-faint">
             还没有文章。开始审阅或发送第一条消息后会自动保存到这里。
           </li>
         )}
-        {projects.map((p) => (
+        {projects.map((p, i) => (
           <HistoryEntry
             key={p.id}
             project={p}
+            draggable={projects.length > 1}
+            dragging={dragId === p.id}
+            shift={shiftOf(i)}
+            animated={dragId !== p.id || settling}
             active={p.id === activeId}
             justCreated={p.id === justCreatedId}
             onSelect={onSelect}
             onDelete={onDelete}
             onCreatedShown={onCreatedShown}
+            onHandlePointerDown={beginDrag}
+            onHandlePointerMove={moveDrag}
+            onHandlePointerUp={endDrag}
+            onHandleKeyDown={moveByKey}
           />
         ))}
       </ul>
     </>
   );
+}
+
+/**
+ * 列表拖动排序（Pointer Events，不引第三方库）。
+ *
+ * 为什么用 Pointer 而不是 HTML5 DnD：这个列表有窄屏抽屉形态，触屏场景真实存在，
+ * 而 HTML5 拖放在触屏上基本不可用；Pointer Events 一套同时覆盖鼠标/触屏/触控笔。
+ *
+ * 交互挂在**独立的拖拽把手**上（不是整行按钮）：行本身是「点开文章」的 button，
+ * 在里面还嵌了删除 button，把拖动挂在整行会让点击语义打架。把手带 `touch-action:none`
+ * 防止触屏滚动抢走手势——**列表其他地方仍可正常滚动**（这正是保留把手而非整行拖的收益）。
+ *
+ * 拖动期间的视觉（「浮起 + 其余项滑开」）：
+ * - **不改 DOM 顺序**，只改 transform。被拖条目的 translateY 由 JS 直写内联样式跟手走，
+ *   并挂 `.t-drag-lift` 浮起（放大 + 阴影 + z-index）；
+ * - 其余条目按各自「让位距离」做 translateY，靠 `.t-drag-shift` 的 CSS transition 平滑滑开。
+ *   让位距离 = 目标槽位与自己原位置之间的行高差 —— 这就是「哗哗哗滑过去」的来源。
+ * 边拖边真重排数组会让行在指针下跳位、且每帧触发 React 重渲染，所以不做。
+ *
+ * 松手：把浮起条目 transition 到目标槽位（回落动画），过渡结束才提交顺序，
+ * 视觉与数据不会错位。
+ */
+function useHistoryDrag(
+  projects: Project[],
+  onReorder: ChatHistoryProps["onReorder"],
+) {
+  const listRef = useRef<HTMLUListElement>(null);
+  const [dragId, setDragId] = useState<string | null>(null);
+  /** 被拖条目的实时跟手位移（px，相对它本来的位置） */
+  const [dragDy, setDragDy] = useState(0);
+  /** 目标插入位（0..n），决定其余条目怎么让位 */
+  const [insertAt, setInsertAt] = useState<number | null>(null);
+  /** 松手后的回落中：条目从当前位置过渡到目标槽位，过渡完才 onReorder */
+  const [settling, setSettling] = useState(false);
+  /** 被拖条目在列表中的原始下标（state 以便渲染期算位移；ref 供事件回调实时读） */
+  const [fromIndex, setFromIndex] = useState(-1);
+
+  const insertAtRef = useRef<number | null>(null);
+  const fromRef = useRef<number>(-1);
+  // 几何快照：拖动开始那一刻每个条目相对列表顶部的偏移与行高。
+  // 拖动期间**保持用这份快照**算槽位，不受自身 transform 影响（否则会自我循环）。
+  const geoRef = useRef<{ tops: number[]; h: number }>({ tops: [], h: 0 });
+  const pointerStartY = useRef(0);
+  const dyRef = useRef(0);
+  /** 拖动期间累计的自动滚动量（px），累加进跟手位移 */
+  const scrolledRef = useRef(0);
+  /** 松手回落的目标位移，交给内联样式用 transition 过渡 */
+  const settleDyRef = useRef(0);
+  const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const items = () => Array.from(
+    listRef.current?.querySelectorAll<HTMLElement>("li[data-entry-id]") ?? [],
+  );
+
+  /** 指针落在第几个「插入位」：条目上半 → 该条目之前，下半 → 之后，末尾之外 → 最末 */
+  const insertIndexAtClientY = (clientY: number, top: number): number => {
+    const { tops, h } = geoRef.current;
+    if (!h) return 0;
+    const y = clientY - top;
+    for (let i = 0; i < tops.length; i++) {
+      if (y < tops[i] + h / 2) return i;
+    }
+    return tops.length;
+  };
+
+  /** 靠近上下边缘时自动滚动列表的可滚祖先（抽屉/左栏都是 overflow-y-auto） */
+  const autoScroll = (clientY: number) => {
+    let el: HTMLElement | null = listRef.current?.parentElement ?? null;
+    while (el && el.scrollHeight <= el.clientHeight) el = el.parentElement;
+    if (!el) return 0;
+    const r = el.getBoundingClientRect();
+    const EDGE = 36;
+    let delta = 0;
+    if (clientY < r.top + EDGE) delta = -10;
+    else if (clientY > r.bottom - EDGE) delta = 10;
+    if (delta) el.scrollTop += delta;
+    return delta;
+  };
+
+  const beginDrag = (e: React.PointerEvent<HTMLElement>, id: string) => {
+    if (projects.length < 2 || settling) return;
+    const lis = items();
+    const from = projects.findIndex((p) => p.id === id);
+    if (from < 0 || lis.length === 0) return;
+    // 捕获指针：指针移出把手（甚至移出窗口）仍能收到 move/up
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const listTop = listRef.current!.getBoundingClientRect().top;
+    geoRef.current = {
+      tops: lis.map((li) => li.getBoundingClientRect().top - listTop),
+      h: lis[0].getBoundingClientRect().height,
+    };
+    fromRef.current = from;
+    setFromIndex(from);
+    pointerStartY.current = e.clientY;
+    dyRef.current = 0;
+    scrolledRef.current = 0;
+    setDragDy(0);
+    setDragId(id);
+    setInsertAt(from);
+    insertAtRef.current = from;
+  };
+
+  const moveDrag = (e: React.PointerEvent<HTMLElement>) => {
+    if (fromRef.current < 0 || settling) return;
+    // 自动滚动会让条目的「基准位置」随内容上移；把滚动量累加进位移，
+    // 浮起的条目才会一直待在指针下面，而不是被滚走。
+    const scrolled = autoScroll(e.clientY);
+    if (scrolled) scrolledRef.current += scrolled;
+    dyRef.current = e.clientY - pointerStartY.current + scrolledRef.current;
+    setDragDy(dyRef.current);
+    const listTop = listRef.current!.getBoundingClientRect().top;
+    // 用条目中心（而不是指针尖）判断落点更符合直觉，减去半个行高
+    const centerY = e.clientY - geoRef.current.h / 2;
+    const at = insertIndexAtClientY(centerY, listTop);
+    if (at !== insertAtRef.current) {
+      insertAtRef.current = at;
+      setInsertAt(at);
+    }
+  };
+
+  const endDrag = (e: React.PointerEvent<HTMLElement>) => {
+    if (fromRef.current < 0) return;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      /* 指针已释放 */
+    }
+    const from = fromRef.current;
+    const at = insertAtRef.current;
+    if (at == null) return finish(null);
+    // insertAt 是「插入位」，元素摘除后其后的下标会左移一位，所以往下拖要 -1
+    const to = at > from ? at - 1 : at;
+    if (to === from) return finish(null);
+    // 松手先播回落：条目过渡到目标槽位（tops[to] 就是它换位后的视觉位置），
+    // 过渡结束才真正提交顺序；这样动画与数据不会错位。
+    const { tops } = geoRef.current;
+    const target = tops[to] ?? tops[from];
+    settleDyRef.current = target - tops[from];
+    setDragDy(settleDyRef.current);
+    setSettling(true);
+    clearSettleTimer();
+    settleTimer.current = setTimeout(
+      () => finish(moveId(projects.map((p) => p.id), from, to)),
+      // 略大于 .t-drag-shift 的 200ms，等过渡真的走完
+      230,
+    );
+    return;
+  };
+
+  /** 收尾：清空拖动视觉并（可选）提交新顺序 */
+  function finish(orderedIds: string[] | null) {
+    clearSettleTimer();
+    setDragId(null);
+    setInsertAt(null);
+    setSettling(false);
+    setDragDy(0);
+    fromRef.current = -1;
+    setFromIndex(-1);
+    dyRef.current = 0;
+    insertAtRef.current = null;
+    if (orderedIds) onReorder(orderedIds);
+  }
+
+  function clearSettleTimer() {
+    if (settleTimer.current) {
+      clearTimeout(settleTimer.current);
+      settleTimer.current = null;
+    }
+  }
+  useEffect(() => clearSettleTimer, []);
+
+  /**
+   * 每个条目要做的让位位移（px）：被拖的跟手，其余按插入位让开一行。
+   * 几何计算抽到 chat-history 的 `dragShifts` 纯函数，那边有单测守着。
+   */
+  const shifts = dragShifts(
+    projects.length,
+    fromIndex,
+    insertAt ?? fromIndex,
+    geoRef.current.h,
+    dragDy,
+  );
+  const shiftOf = (index: number): number => shifts[index] ?? 0;
+
+  /** 键盘排序：把手聚焦后 ↑/↓ 上下移动一位（纯拖拽对键盘/读屏不可用） */
+  const moveByKey = (e: React.KeyboardEvent<HTMLElement>, id: string) => {
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+    const ids = projects.map((p) => p.id);
+    const from = ids.indexOf(id);
+    if (from < 0) return;
+    const to = e.key === "ArrowUp" ? from - 1 : from + 1;
+    if (to < 0 || to >= ids.length) return;
+    e.preventDefault();
+    const title = deriveProjectTitle(projects[from].doc);
+    onReorder(moveId(ids, from, to), `「${title}」已移到第 ${to + 1} 位。`);
+  };
+
+  // 拖动中禁止选中文字（触屏长按会弹选择菜单）
+  const dragging = dragId !== null;
+  useEffect(() => {
+    if (!dragging) return;
+    document.body.style.userSelect = "none";
+    return () => {
+      document.body.style.userSelect = "";
+    };
+  }, [dragging]);
+
+  return {
+    listRef,
+    dragId,
+    insertAt,
+    dragging,
+    settling,
+    beginDrag,
+    moveDrag,
+    endDrag,
+    moveByKey,
+    shiftOf,
+  };
 }
 
 /** 单条历史项目。刚创建（点「新文章」）的那一条播 toast-rise 出现动画：
@@ -285,18 +538,36 @@ function HistoryList({
  *  会动的这一条上（曾经无条件挂给所有 li，结果没动画类的条目行高塌成 0、整列看不见）。 */
 function HistoryEntry({
   project: p,
+  draggable,
+  dragging,
+  shift,
+  animated,
   active,
   justCreated,
   onSelect,
   onDelete,
   onCreatedShown,
+  onHandlePointerDown,
+  onHandlePointerMove,
+  onHandlePointerUp,
+  onHandleKeyDown,
 }: {
   project: Project;
+  draggable: boolean;
+  dragging: boolean;
+  /** 本条目的纵向位移（px）：被拖的跟手、其余按需让位滑开 */
+  shift: number;
+  /** 位移是否走过渡（被拖的那个跟手时不能过渡，松手回落时才有） */
+  animated: boolean;
   active: boolean;
   justCreated: boolean;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
   onCreatedShown: () => void;
+  onHandlePointerDown: (e: React.PointerEvent<HTMLElement>, id: string) => void;
+  onHandlePointerMove: (e: React.PointerEvent<HTMLElement>) => void;
+  onHandlePointerUp: (e: React.PointerEvent<HTMLElement>) => void;
+  onHandleKeyDown: (e: React.KeyboardEvent<HTMLElement>, id: string) => void;
 }) {
   // 渲染期 derived state（React 官方模式，同外层 closing 的写法）：justCreated 在防抖建档
   // （~500ms 后）才变 true，在渲染体内 setState、同渲染内立即重跑，使条目「首次挂载」时就
@@ -310,6 +581,41 @@ function HistoryEntry({
   const title = deriveProjectTitle(p.doc);
   const body = (
     <>
+      {/* 拖拽把手：独立的小把手而不是整行——行本身是「点开」按钮、内嵌删除按钮，
+          拖动挂在整行会和点击语义打架。touch-action-none 防止触屏滚动抢走手势
+          （列表其余位置的滚动因此不受影响，这是保留把手换来的）。
+          键盘排序也在这里（纯拖拽对键盘/读屏不可用）。 */}
+      {draggable && (
+        <button
+          type="button"
+          aria-label={`调整「${title}」顺序`}
+          title="拖动排序（也可用 ↑/↓ 键）"
+          onPointerDown={(e) => onHandlePointerDown(e, p.id)}
+          onPointerMove={onHandlePointerMove}
+          onPointerUp={onHandlePointerUp}
+          onPointerCancel={onHandlePointerUp}
+          onKeyDown={(e) => onHandleKeyDown(e, p.id)}
+          // 把手在行按钮之外（兄弟节点），点它不会触发行的 onClick；
+          // 但仍要吞掉 click，免得将来把手挪进按钮内部时误开文章。
+          onClick={(e) => e.stopPropagation()}
+          className="absolute left-0 top-1/2 z-10 -translate-y-1/2 cursor-grab touch-none rounded-md p-1 text-text-faint opacity-0 transition-opacity hover:text-foreground active:cursor-grabbing focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring group-hover/entry:opacity-100"
+        >
+          <svg
+            width="12"
+            height="14"
+            viewBox="0 0 12 14"
+            fill="currentColor"
+            aria-hidden
+          >
+            <circle cx="3" cy="3" r="1.3" />
+            <circle cx="9" cy="3" r="1.3" />
+            <circle cx="3" cy="7" r="1.3" />
+            <circle cx="9" cy="7" r="1.3" />
+            <circle cx="3" cy="11" r="1.3" />
+            <circle cx="9" cy="11" r="1.3" />
+          </svg>
+        </button>
+      )}
       <button
         type="button"
         data-project-id={p.id}
@@ -317,6 +623,7 @@ function HistoryEntry({
         aria-current={active ? "true" : undefined}
         className={
           "block w-full rounded-xl border px-2.5 py-2 pr-8 text-left transition-colors " +
+          (draggable ? "pl-6 " : "") +
           (active
             ? "border-brand-ring bg-brand-soft"
             : "border-transparent hover:bg-surface-muted")
@@ -359,7 +666,16 @@ function HistoryEntry({
   );
   return (
     <li
-      className={"relative" + (rising ? " t-toast-rise" : "")}
+      data-entry-id={p.id}
+      // 位移走 transform（合成层，不触发布局）：被拖的跟手时不要过渡，否则会拖泥带水；
+      // 其余条目让位、以及松手回落时才挂 .t-drag-shift 让 CSS 平滑过渡。
+      style={shift !== 0 || dragging ? { transform: `translateY(${shift}px)` } : undefined}
+      className={
+        "group/entry relative" +
+        (rising ? " t-toast-rise" : "") +
+        (dragging ? " t-drag-lift" : "") +
+        (animated && shift !== 0 ? " t-drag-shift" : "")
+      }
       onAnimationEnd={(e) => {
         // 行高关键帧播完即视为出现动画完成（只认外层那条动画，内容层的不算）
         if (e.target === e.currentTarget && e.animationName === "toast-rise-rows")

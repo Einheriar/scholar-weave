@@ -6,19 +6,22 @@ import {
   loadLatestProject,
   loadProject,
   saveProject,
+  saveProjects,
 } from "@/lib/storage/projects";
 import { migrateToProjects } from "@/lib/migrations";
+import { reorderProjects } from "@/lib/chat-history";
 import type { Conversation, DocumentState, Project } from "@/lib/review-schema";
 
 /**
  * 项目持久化（Dexie / IndexedDB，tests/setup.ts 装了 fake-indexeddb）。
  *
  * 守护点：v3 升项目制后，projects 表可读写、旧 documents/conversations
- * 已删（合并语义下删表显式写 null，见 AGENTS.md 第 13 条）。
+ * 已删（合并语义下删表显式写 null，见 AGENTS.md 第 13 条）；
+ * v4 加 order 字段后列表按显式顺序读回。
  * 存储测试共享一个 fake-indexeddb、只 clear() 不清库，v3 upgrade 只跑一次。
  */
 
-function makeProject(id: string, lastActivityAt: string): Project {
+function makeProject(id: string, lastActivityAt: string, order?: number): Project {
   return {
     id,
     title: `文章 ${id}`,
@@ -33,6 +36,7 @@ function makeProject(id: string, lastActivityAt: string): Project {
     reviews: [],
     nodes: [],
     lastActivityAt,
+    ...(order === undefined ? {} : { order }),
   };
 }
 
@@ -99,6 +103,40 @@ describe("项目持久化", () => {
     const broken = { id: "p_bad", title: "缺字段" } as unknown as Project;
     await expect(saveProject(broken)).rejects.toThrow();
     expect(await listProjects()).toEqual([]);
+  });
+
+  // ── v4：显式 order 顺序 ──
+  it("按显式 order 读回顺序，与 lastActivityAt 无关", async () => {
+    // order 与活动时间刻意相反：列表应听 order 的
+    await saveProject(makeProject("p_old", "2026-09-15T09:00:00.000Z", 0));
+    await saveProject(makeProject("p_new", "2026-09-15T11:00:00.000Z", 1));
+
+    const all = await listProjects();
+    expect(all.map((p) => p.id)).toEqual(["p_old", "p_new"]);
+    // loadLatestProject 现在是「列表最上面那条」，不再是活动时间最新
+    expect((await loadLatestProject())?.id).toBe("p_old");
+  });
+
+  it("saveProjects 批量写回新顺序后，读回来就是新顺序", async () => {
+    await saveProject(makeProject("p_1", "2026-09-15T09:00:00.000Z", 0));
+    await saveProject(makeProject("p_2", "2026-09-15T10:00:00.000Z", 1));
+    await saveProject(makeProject("p_3", "2026-09-15T11:00:00.000Z", 2));
+
+    const all = await listProjects();
+    // 把最后一条拖到最前
+    const reordered = reorderProjects(all, ["p_3", "p_1", "p_2"]);
+    await saveProjects(reordered);
+
+    expect((await listProjects()).map((p) => p.id)).toEqual(["p_3", "p_1", "p_2"]);
+  });
+
+  it("没有 order 的旧数据仍能读出且排在末尾（不因缺字段被丢弃）", async () => {
+    // 模拟 v4 之前写入的行：schema 的 order 是 optional，不能被 safeParse 丢掉
+    await saveProject(makeProject("p_legacy", "2026-09-15T23:00:00.000Z"));
+    await saveProject(makeProject("p_ordered", "2026-09-15T09:00:00.000Z", 0));
+
+    const all = await listProjects();
+    expect(all.map((p) => p.id)).toEqual(["p_ordered", "p_legacy"]);
   });
 });
 

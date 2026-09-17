@@ -35,7 +35,9 @@ import { createDocument } from "@/lib/revisions";
 import { APP_VERSION } from "@/lib/version";
 import {
   deriveProjectTitle,
+  moveProjectToTop,
   newProjectId,
+  reorderProjects,
   upsertProject,
 } from "@/lib/chat-history";
 import { findNodeByAnchor } from "@/lib/chat-nodes";
@@ -45,6 +47,7 @@ import {
   listProjects,
   loadLatestProject,
   saveProject,
+  saveProjects,
 } from "@/lib/storage/projects";
 
 type ReviewUiState =
@@ -124,6 +127,15 @@ export default function Home() {
    * 以及建档时机（首次审阅/发聊天才分配 id）——在事件回调/异步里写，不在渲染期写。
    */
   const activeProjRef = useRef<Project | null>(null);
+  /**
+   * 与 `projects` 同步的镜像 ref。用于在事件回调里同步读写列表顺序——
+   * 「活动置顶」「拖动排序」都要先算出确定的数组再 setState + 落库，
+   * 不能依赖 setState updater 的执行时机（AGENTS.md 第 21 条）。
+   */
+  const projectsRef = useRef<Project[]>([]);
+  useEffect(() => {
+    projectsRef.current = projects;
+  }, [projects]);
 
   // 设置面板
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -159,6 +171,7 @@ export default function Home() {
       if (cancelled) return;
       setDoc(latest ? latest.doc : buildSampleDocument().doc);
       setProjects(all);
+      projectsRef.current = all;
       if (latest) {
         // 接着上次的项目继续：恢复正文 + 建议 + 聊天现场
         activeProjRef.current = latest;
@@ -226,9 +239,17 @@ export default function Home() {
     if (curId === null) {
       setActiveProjId(id);
     }
-    activeProjRef.current = project;
-    setProjects((list) => upsertProject(list, project));
-    await saveProject(project);
+    // 走到这里就是一次「活动」（编辑正文 / 审阅出结果 / 聊天回复），把该项目置顶。
+    // 单纯点开查看不走此函数，因此不会改变位置（用户认可的语义）。
+    // 置顶只改这一项的 order、不动其余项目，所以只需写回这一行。
+    // 用 ref 同步算出结果、同一个数组既 setState 又落库——不依赖 setState 的 updater
+    // 什么时候执行（AGENTS.md 第 21 条：updater 里做副作用不可靠）。
+    const nextList = moveProjectToTop(upsertProject(projectsRef.current, project), id);
+    const toSave = nextList.find((p) => p.id === id) ?? project;
+    projectsRef.current = nextList;
+    activeProjRef.current = toSave;
+    setProjects(nextList);
+    await saveProject(toSave);
     setSaveState("saved");
   }, []);
 
@@ -265,7 +286,10 @@ export default function Home() {
           reviews: curReviews,
           nodes: curNodes,
         };
-        setProjects((list) => upsertProject(list, persisted));
+        // 原地替换、不动顺序：「点开另一篇」不是活动，当前这篇不该因此置顶
+        const nextList = upsertProject(projectsRef.current, persisted);
+        projectsRef.current = nextList;
+        setProjects(nextList);
         void saveProject(persisted);
       }
       activeProjRef.current = proj;
@@ -314,7 +338,10 @@ export default function Home() {
         reviews: curReviews,
         nodes: curNodes,
       };
-      setProjects((list) => upsertProject(list, persisted));
+      // 原地替换、不动顺序：「离开」当前这篇去新建不是它的活动，不该因此置顶
+      const prevList = upsertProject(projectsRef.current, persisted);
+      projectsRef.current = prevList;
+      setProjects(prevList);
       void saveProject(persisted);
     }
 
@@ -330,7 +357,10 @@ export default function Home() {
     };
     activeProjRef.current = blank;
     setActiveProjId(id);
-    setProjects((list) => upsertProject(list, blank));
+    // 新项目插到最前（upsertProject 对新 id 就这语义）
+    const nextList = upsertProject(projectsRef.current, blank);
+    projectsRef.current = nextList;
+    setProjects(nextList);
     // 出现动画按事件钉住这一条，播完由 onCreatedShown 清掉（不按「时间最新」取，
     // 否则初次加载/切回旧项目都会误触发）
     setJustCreatedId(id);
@@ -350,6 +380,15 @@ export default function Home() {
     setAnnounce("已开始新文章。");
   }, []);
 
+  /** 手动拖动 / 键盘移动后的新顺序：密集重编号、立即落库（显式操作，允许全表写回） */
+  const handleReorderProjects = useCallback((orderedIds: string[], message?: string) => {
+    const next = reorderProjects(projectsRef.current, orderedIds);
+    projectsRef.current = next;
+    setProjects(next);
+    void saveProjects(next);
+    setAnnounce(message ?? "已调整文章顺序。");
+  }, []);
+
   const handleDeleteProject = useCallback(
     async (id: string) => {
       const target = projects.find((p) => p.id === id);
@@ -360,7 +399,11 @@ export default function Home() {
         return;
       }
       await deleteStoredProject(id);
-      setProjects((list) => list.filter((p) => p.id !== id));
+      // 删除后其余项目**相对顺序不变**，只把 order 压回 0..n-1（避免遗留空洞）
+      const rest = projectsRef.current.filter((p) => p.id !== id);
+      const densified = reorderProjects(rest, rest.map((p) => p.id));
+      projectsRef.current = densified;
+      setProjects(densified);
       if (activeProjId === id) {
         activeProjRef.current = null;
         setActiveProjId(null);
@@ -996,6 +1039,7 @@ export default function Home() {
     setActiveNodeId(null);
     setChatTurns([]);
     setProjects([]);
+    projectsRef.current = [];
     activeProjRef.current = null;
     setActiveProjId(null);
     setChangeSetOpen(false);
@@ -1072,7 +1116,13 @@ export default function Home() {
         />
         <input
           value={doc.title}
-          onChange={(e) => setDoc({ ...doc, title: e.target.value })}
+          // 改标题也是一次内容编辑：必须同样置 saving（否则防抖保存不触发，
+          // 标题既不落库、也不算「活动」——改完刷新就丢，且不会把文章置顶）。
+          // 不走 handleDocChange 是为了跳过多余的锚点校验：标题不参与 block 定位。
+          onChange={(e) => {
+            setDoc({ ...doc, title: e.target.value });
+            setSaveState("saving");
+          }}
           className="w-72 shrink-0 rounded-lg border border-transparent bg-transparent px-2 py-1 text-lg font-semibold tracking-tight transition-colors hover:border-border focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand-ring"
           aria-label="文档标题"
         />
@@ -1166,6 +1216,7 @@ export default function Home() {
           onSelect={handleSelectProject}
           onNew={handleNewProject}
           onDelete={handleDeleteProject}
+          onReorder={handleReorderProjects}
           justCreatedId={justCreatedId}
           onCreatedShown={() => setJustCreatedId(null)}
           open={historyOpen}
