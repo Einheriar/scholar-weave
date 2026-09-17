@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
  *
  * 注意：产物含平台专属的原生依赖（sharp），**必须在目标操作系统上打包**。
  * Linux 上打的包不能直接拷到 Windows 运行。
+ * 对外分发时使用 `npm run package:app -- --without-env`，避免复制本机密钥。
  */
 
 // 用 fileURLToPath 而不是 import.meta.dirname：后者要 Node 20.11+，
@@ -26,6 +27,7 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dist = path.join(root, "dist");
 const appDir = path.join(dist, "app");
+const withoutEnv = process.argv.includes("--without-env");
 
 /** 跨平台启动器：起 Next 服务并打开浏览器 */
 const LAUNCHER = `import { spawn } from "node:child_process";
@@ -184,7 +186,7 @@ await chmod(path.join(dist, "start.sh"), 0o755);
 
 // 有真实配置就带上（本地使用方便）；否则放一份模板
 const envLocal = path.join(root, ".env.local");
-if (existsSync(envLocal)) {
+if (!withoutEnv && existsSync(envLocal)) {
   await cp(envLocal, path.join(appDir, ".env.local"));
   log("已复制 .env.local（含密钥，勿外传）");
 } else {
@@ -193,7 +195,9 @@ if (existsSync(envLocal)) {
     path.join(appDir, ".env.local.example"),
   );
   log(
-    "未找到 .env.local，已放入 .env.local.example，首次运行前请照它创建 .env.local",
+    withoutEnv
+      ? "已按 --without-env 排除 .env.local，并放入配置模板"
+      : "未找到 .env.local，已放入 .env.local.example，首次运行前请照它创建 .env.local",
   );
 }
 
