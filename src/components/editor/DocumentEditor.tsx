@@ -6,6 +6,7 @@ import {
   useImperativeHandle,
   useMemo,
   useRef,
+  useState,
 } from "react";
 import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
@@ -85,6 +86,7 @@ export const DocumentEditor = forwardRef<
   },
   ref,
 ) {
+  const [canUndo, setCanUndo] = useState(false);
   // 用 ref 持有最新的回调与文档，避免闭包过期；在 effect 中同步，不在渲染期写 ref
   const onChangeRef = useRef(onDocumentChange);
   const docRef = useRef(document);
@@ -164,9 +166,12 @@ export const DocumentEditor = forwardRef<
     editorProps: {
       attributes: {
         class:
-          "prose max-w-none focus:outline-none min-h-[60vh] px-8 py-7 sm:px-10 sm:py-9 leading-relaxed",
+          "prose max-w-none focus:outline-none min-h-[60vh] py-7 pl-8 pr-12 leading-relaxed sm:py-9 sm:pl-10 sm:pr-14",
         "aria-label": "文档编辑器",
       },
+    },
+    onCreate() {
+      setCanUndo(false);
     },
     onUpdate({ editor }) {
       const json = editor.getJSON() as PMDocNode;
@@ -199,6 +204,10 @@ export const DocumentEditor = forwardRef<
       docRef.current = next;
       onChangeRef.current(next);
     },
+    onTransaction({ editor }) {
+      const nextCanUndo = editor.can().undo();
+      setCanUndo((current) => (current === nextCanUndo ? current : nextCanUndo));
+    },
     onSelectionUpdate({ editor }) {
       const cb = onSelChangeRef.current;
       if (!cb) return;
@@ -220,7 +229,7 @@ export const DocumentEditor = forwardRef<
       const text = editor.state.doc.textBetween(from, to, " ", " ");
       cb(blockId ? { blockId, text } : null);
     },
-  });
+  }, [document.id]);
 
   // readOnly 可能在编辑器实例创建后变化，使用 Tiptap API 同步编辑能力。
   useEffect(() => {
@@ -242,15 +251,6 @@ export const DocumentEditor = forwardRef<
     const tr = editor.state.tr.setMeta(chatAnchorDecorationKey, true);
     editor.view.dispatch(tr);
   }, [editor, chatNodes]);
-
-  // 外部文档（例如从 IndexedDB 恢复）变化时刷新编辑器内容
-  const lastLoadedId = useRef<string | null>(null);
-  useEffect(() => {
-    if (!editor) return;
-    if (lastLoadedId.current === document.id) return;
-    lastLoadedId.current = document.id;
-    editor.commands.setContent(docToTiptap(document) as PMDocNode);
-  }, [editor, document]);
 
   useImperativeHandle(ref, () => ({
     revealItem(item) {
@@ -290,6 +290,9 @@ export const DocumentEditor = forwardRef<
           { from: pos.from, to: pos.to },
           textToPMContent(item.replacement) ?? [],
         )
+        // The review card owns this operation and its persisted safe undo state.
+        // Keep it out of native history so Ctrl+Z cannot desync text and status.
+        .setMeta("addToHistory", false)
         .run();
       return true;
     },
@@ -307,7 +310,40 @@ export const DocumentEditor = forwardRef<
   return (
     /* 纸张式编辑器：白卡片浮在页面底色上，内边距在编辑器本体上，
        让文本选区/光标留边一致（PLAN 布局美化） */
-    <div className="rounded-2xl border border-border bg-surface shadow-sm transition-shadow duration-200 focus-within:shadow-md">
+    <div className="relative rounded-2xl border border-border bg-surface shadow-sm transition-shadow duration-200 focus-within:shadow-md">
+      <span className="group absolute right-3 top-3 z-10">
+        <button
+          type="button"
+          aria-label="撤销正文编辑"
+          aria-describedby="editor-undo-tooltip"
+          aria-keyshortcuts="Control+Z Meta+Z"
+          disabled={readOnly || !canUndo}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => editor?.commands.undo()}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-text-muted transition-colors hover:border-border hover:bg-surface-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring disabled:cursor-default disabled:opacity-30 disabled:hover:border-transparent disabled:hover:bg-transparent disabled:hover:text-text-muted motion-reduce:transition-none"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="h-4 w-4"
+            aria-hidden="true"
+          >
+            <path d="m9 8-4 4 4 4" />
+            <path d="M5 12h8a5 5 0 0 1 5 5" />
+          </svg>
+        </button>
+        <span
+          id="editor-undo-tooltip"
+          role="tooltip"
+          className="pointer-events-none absolute right-0 top-full mt-1.5 whitespace-nowrap rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-muted opacity-0 shadow-md transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 motion-reduce:transition-none"
+        >
+          撤销 / Ctrl+Z
+        </span>
+      </span>
       <EditorContent editor={editor} />
     </div>
   );
@@ -361,6 +397,7 @@ function blockStartPosition(editor: Editor, blockId: string): number | null {
 function replaceBlockTexts(
   editor: Editor | null,
   textByBlock: Map<string, string>,
+  addToHistory = true,
 ): boolean {
   if (!editor || textByBlock.size === 0) return false;
 
@@ -395,6 +432,7 @@ function replaceBlockTexts(
       },
     );
   }
+  if (!addToHistory) chain = chain.setMeta("addToHistory", false);
   chain.run();
   return true;
 }
@@ -434,7 +472,7 @@ function revertSingleEdit(
     const blockId = item.scope.blockId;
     const block = currentDoc.blocks.find((entry) => entry.id === blockId);
     if (!snapshot || !block || block.text !== snapshot.after) return false;
-    return replaceBlockTexts(editor, new Map([[blockId, snapshot.before]]));
+    return replaceBlockTexts(editor, new Map([[blockId, snapshot.before]]), false);
   }
   if (item.scope.type !== "range") return false;
   const reverseScope = {
@@ -453,6 +491,7 @@ function revertSingleEdit(
       { from: blockStart + 1 + hit.start, to: blockStart + 1 + hit.end },
       textToPMContent(item.scope.original) ?? [],
     )
+    .setMeta("addToHistory", false)
     .run();
   return true;
 }

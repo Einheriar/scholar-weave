@@ -106,6 +106,8 @@ test.describe("核心流程：接受、撤销与复制", () => {
     await gotoApp(page);
     await loadSample(page);
 
+    const editorUndo = page.getByRole("button", { name: "撤销正文编辑" });
+    await expect(editorUndo).toBeDisabled();
     const before = await paragraphTexts(page);
     expect(before[4]).toContain("may already been decided");
     expect(before[4]).not.toContain("may already have been decided");
@@ -117,6 +119,8 @@ test.describe("核心流程：接受、撤销与复制", () => {
       .click();
 
     await expect(card(page, "review_edit_1").getByText("已接受")).toBeVisible();
+    // 单条建议由卡片自己的安全撤销负责，不污染普通正文撤销栈。
+    await expect(editorUndo).toBeDisabled();
     await expect
       .poll(async () => (await paragraphTexts(page))[4])
       .toContain("may already have been decided");
@@ -134,6 +138,25 @@ test.describe("核心流程：接受、撤销与复制", () => {
 
     // 逐字还原：整篇文本与接受前完全一致
     expect(await paragraphTexts(page)).toEqual(before);
+  });
+
+  test("右上角按钮可撤销当前会话中的正文编辑", async ({ page }) => {
+    await gotoApp(page);
+    await loadSample(page);
+
+    const before = await paragraphTexts(page);
+    const editor = page.locator(".ProseMirror");
+    const undo = page.getByRole("button", { name: "撤销正文编辑" });
+    await expect(undo).toBeDisabled();
+    await expect(page.getByRole("tooltip")).toHaveText("撤销 / Ctrl+Z");
+
+    await editor.press("Control+Home");
+    await editor.type("x");
+    await expect(undo).toBeEnabled();
+
+    await undo.click();
+    await expect.poll(() => paragraphTexts(page)).toEqual(before);
+    await expect(undo).toBeDisabled();
   });
 
   test("点击“复制全文”把整篇文本写入剪贴板", async ({ page }) => {

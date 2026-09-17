@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createRef } from "react";
-import { render, waitFor } from "@testing-library/react";
+import { act, render, waitFor } from "@testing-library/react";
 import {
   DocumentEditor,
   type DocumentEditorHandle,
@@ -23,7 +23,7 @@ function setup(initial: string[]) {
   const doc = createDocument("t", initial);
   const ref = createRef<DocumentEditorHandle>();
   let latest: DocumentState = doc;
-  render(
+  const view = render(
     <DocumentEditor
       ref={ref}
       document={doc}
@@ -32,10 +32,52 @@ function setup(initial: string[]) {
       }}
     />,
   );
-  return { doc, ref, getLatest: () => latest };
+  return { doc, ref, getLatest: () => latest, view };
 }
 
 describe("DocumentEditor 批量应用与撤销（阶段 4）", () => {
+  it("右上角撤销按钮反映正文历史并展示快捷键提示", async () => {
+    const { doc, ref, getLatest, view } = setup(["before"]);
+    const button = view.getByRole("button", { name: "撤销正文编辑" });
+    expect(button).toBeDisabled();
+    expect(view.getByRole("tooltip")).toHaveTextContent("撤销 / Ctrl+Z");
+
+    act(() => {
+      expect(
+        ref.current!.applyBlockTexts(new Map([[doc.blocks[0].id, "after"]])),
+      ).toBe(true);
+    });
+    await waitFor(() => {
+      expect(getLatest().blocks[0].text).toBe("after");
+      expect(button).toBeEnabled();
+    });
+  });
+
+  it("单条建议修改由卡片负责，不进入普通正文撤销栈", async () => {
+    const { doc, ref, getLatest, view } = setup(["hello world."]);
+    const item: ReviewItem = {
+      id: "review-native-history",
+      documentRevision: doc.revision,
+      scope: {
+        type: "range",
+        blockId: doc.blocks[0].id,
+        original: "world",
+        suffix: ".",
+      },
+      kind: "edit",
+      category: "grammar",
+      severity: "suggestion",
+      title: "test",
+      explanation: "test",
+      replacement: "earth",
+      status: "open",
+    };
+
+    expect(ref.current!.applyEdit(item)).toBe(true);
+    await waitFor(() => expect(getLatest().blocks[0].text).toBe("hello earth."));
+    expect(view.getByRole("button", { name: "撤销正文编辑" })).toBeDisabled();
+  });
+
   it("readOnly 会同步到 Tiptap，禁止输入但保留编辑器内容", async () => {
     const doc = createDocument("t", ["locked"]);
     const { container, rerender } = render(
