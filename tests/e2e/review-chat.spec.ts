@@ -186,6 +186,21 @@ test.describe("上下文对话（mock /api/chat）", () => {
         page.evaluate(() => (window.getSelection()?.toString() ?? "").trim()),
       )
       .toBe("upstanding");
+    expect(
+      await page.evaluate(() => {
+        const selection = window.getSelection();
+        const element = selection?.anchorNode?.parentElement;
+        if (!element) return null;
+        const style = getComputedStyle(element, "::selection");
+        return {
+          backgroundColor: style.backgroundColor,
+          color: style.color,
+        };
+      }),
+    ).toEqual({
+      backgroundColor: "rgb(217, 220, 223)",
+      color: "rgb(26, 36, 32)",
+    });
     await expect
       .poll(() =>
         page.evaluate(() => {

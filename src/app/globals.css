@@ -16,6 +16,7 @@
   --border-strong: #c9d4cf;
   --text-muted: #5f6f68;
   --text-faint: #93a29b;
+  --editor-selection: #d9dcdf; /* 正文真实选区：中性纸面灰，不与聊天琥珀锚点争色 */
   --brand: #0da678;             /* 主操作绿 */
   --brand-hover: #0b9069;
   --brand-soft: #e3f4ee;        /* 浅绿底（选中态等） */
@@ -37,6 +38,7 @@
   --border-strong: #3a453f;
   --text-muted: #8fa098;
   --text-faint: #5f6f68;
+  --editor-selection: #45494d;
   --brand: #2cc493;
   --brand-hover: #3fd6a5;
   --brand-soft: rgb(44 196 147 / 0.12);
@@ -804,6 +806,19 @@ body {
   font-size: 1.125rem; /* 18px，比 UI 基准大一号，阅读更松 */
   line-height: 1.8;
   word-spacing: 0.3px; /* 英文词间距微宽；中文不受 word-spacing 影响 */
+}
+.ProseMirror::selection,
+.ProseMirror *::selection {
+  background: var(--editor-selection);
+  color: var(--foreground);
+  text-shadow: none;
+}
+@media (forced-colors: active) {
+  .ProseMirror::selection,
+  .ProseMirror *::selection {
+    background: Highlight;
+    color: HighlightText;
+  }
 }
 .ProseMirror p {
   margin: 0 0 0.9em;
