@@ -91,6 +91,10 @@ For implementation conventions, architecture notes, packaging details, and troub
 
 Issues, design feedback, and focused pull requests are welcome. Please read [DEVELOPMENTER.md](./DEVELOPMENTER.md) before changing the data model, anchoring rules, LLM protocol, or persistence layer.
 
+## License
+
+This project is released under the [MIT License](./LICENSE). Third-party dependencies, fonts, and sample content may have their own licenses and are not relicensed by this project.
+
 ---
 
 中文简介：ScholarAnchor 是一个面向学术论文的本地优先写作工作台，将选区锚定、AI 审阅、上下文对话和可控修改放在同一条工作流中。所有正文修改都需要先预览、再由用户确认。
