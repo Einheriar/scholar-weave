@@ -1179,7 +1179,7 @@ export default function Home() {
 
   const discardChangeSet = useCallback(() => closeChangeSet(), [closeChangeSet]);
 
-  // ── 复制全文 / 清空数据 ──
+  // ── 复制全文 / 清空当前项目 / 清空全部数据 ──
   const copyAll = useCallback(async () => {
     if (!doc) return;
     const text = doc.blocks.map((b) => b.text).join("\n\n");
@@ -1191,6 +1191,51 @@ export default function Home() {
       setChatError("复制失败，请检查浏览器剪贴板权限。");
     }
   }, [doc]);
+
+  const clearCurrentProject = useCallback(async () => {
+    if (requestLocked) {
+      announceRequestLock();
+      return;
+    }
+    if (
+      !window.confirm(
+        "确定要清空当前项目吗？标题、正文、审阅建议和对话记录都会被清除，其他历史项目不受影响。此操作不可撤销。",
+      )
+    ) {
+      return;
+    }
+
+    const curId = latestRef.current.activeProjId;
+    const blankDoc = createDocument("", [""]);
+    // 先同步推进 ref：若当前项目已经建档，下面的立即落库必须读到清空后的现场，
+    // 不能等 React effect，否则可能把清空前的正文重新写回。
+    latestRef.current = {
+      doc: blankDoc,
+      reviews: [],
+      nodes: [],
+      activeProjId: curId,
+    };
+    setDoc(blankDoc);
+    setReviews([]);
+    setNodes([]);
+    setActiveNodeId(null);
+    setChatTurns([]);
+    setSelection(null);
+    setSelectedId(null);
+    setChatError(null);
+    setChangeSetOpen(false);
+    setReviewUi({ phase: "idle" });
+
+    if (curId) {
+      setSaveState("saving");
+      await persistProjectNow();
+    } else {
+      // 尚未建档的现场只需重置，不为一个空白项目额外创建历史条目。
+      activeProjRef.current = null;
+      setSaveState("idle");
+    }
+    setAnnounce("已清空当前项目，其他历史项目未受影响。");
+  }, [requestLocked, announceRequestLock, persistProjectNow]);
 
   const clearAll = useCallback(async () => {
     if (requestLocked) {
@@ -1288,71 +1333,91 @@ export default function Home() {
     // fit-content 定宽（由内容撑开），正文一短整页就跟着变窄。
     <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-6 py-6 2xl:max-w-[1400px]">
       {/* 顶栏 */}
-      <header className="mb-5 flex flex-wrap items-center gap-3">
+      <header className="mb-5 flex flex-wrap items-center gap-3 xl:grid xl:min-w-[1398px] xl:grid-cols-[15rem_1.5rem_minmax(0,1fr)_auto_minmax(0,1fr)_1.5rem_360px] xl:gap-0">
         {/* 窄屏才出现的「三条横线」：拉出左侧历史记录抽屉（宽屏有常驻左栏） */}
         <ChatHistoryToggle
           open={historyOpen}
           onClick={() => setHistoryOpen((v) => !v)}
         />
-        <input
-          value={doc.title}
-          disabled={requestLocked}
-          title={requestLocked ? "请求处理中，请等待完成后再修改标题" : undefined}
-          // 改标题也是一次内容编辑：必须同样置 saving（否则防抖保存不触发，
-          // 标题既不落库、也不算「活动」——改完刷新就丢，且不会把文章置顶）。
-          // 不走 handleDocChange 是为了跳过多余的锚点校验：标题不参与 block 定位。
-          onChange={(e) => {
-            setDoc({ ...doc, title: e.target.value });
-            setSaveState("saving");
-          }}
-          className="w-72 shrink-0 rounded-lg border border-transparent bg-transparent px-2 py-1 text-lg font-semibold tracking-tight transition-colors hover:border-border focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand-ring"
-          aria-label="文档标题"
-        />
-        <label className="flex items-center gap-1.5 text-xs text-text-muted">
-          审阅模式
-          <Select
-            value={mode}
-            onChange={(v) => setMode(v as ReviewMode)}
-            options={(Object.keys(MODE_LABEL) as ReviewMode[]).map((m) => ({
-              value: m,
-              label: MODE_LABEL[m],
-            }))}
-            ariaLabel="审阅模式"
-            className="w-28"
-          />
-        </label>
-
-        {loading ? (
-          <button
-            type="button"
-            onClick={cancelReview}
-            className={buttonClass("danger", "sm")}
-          >
-            取消审阅
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={runReview}
+        {/* xl 下 wrapper 参与网格而 input 不直接参与轨道固有尺寸计算：长标题不会
+            挤偏正文左右两个 1fr 半区，操作组因此始终钉在正文中心。 */}
+        <div className="min-w-24 flex-1 xl:col-start-1 xl:col-end-4 xl:row-start-1 xl:mr-3 xl:min-w-0 xl:[contain:inline-size]">
+          <input
+            value={doc.title}
             disabled={requestLocked}
-            title="开始审阅（Cmd/Ctrl+Enter）"
-            className={buttonClass("primary", "sm")}
-          >
-            开始审阅
-          </button>
-        )}
-
-        <button
-          type="button"
-          onClick={copyAll}
-          title="复制全文（Cmd/Ctrl+Shift+C）"
-          className={buttonClass("secondary", "sm")}
+            title={requestLocked ? "请求处理中，请等待完成后再修改标题" : undefined}
+            // 改标题也是一次内容编辑：必须同样置 saving（否则防抖保存不触发，
+            // 标题既不落库、也不算「活动」——改完刷新就丢，且不会把文章置顶）。
+            // 不走 handleDocChange 是为了跳过多余的锚点校验：标题不参与 block 定位。
+            onChange={(e) => {
+              setDoc({ ...doc, title: e.target.value });
+              setSaveState("saving");
+            }}
+            className="w-full min-w-0 rounded-lg border border-transparent bg-transparent px-2 py-1 text-lg font-semibold tracking-tight transition-colors hover:border-border focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand-ring"
+            aria-label="文档标题"
+          />
+        </div>
+        <div
+          role="group"
+          aria-label="文档操作"
+          className="flex max-w-full shrink-0 flex-wrap items-center justify-center gap-3 xl:col-start-4 xl:row-start-1"
         >
-          {copyState === "copied" ? "已复制 ✓" : "复制全文"}
-        </button>
+          <label className="flex items-center gap-1.5 text-xs text-text-muted">
+            审阅模式
+            <Select
+              value={mode}
+              onChange={(v) => setMode(v as ReviewMode)}
+              options={(Object.keys(MODE_LABEL) as ReviewMode[]).map((m) => ({
+                value: m,
+                label: MODE_LABEL[m],
+              }))}
+              ariaLabel="审阅模式"
+              className="w-28"
+            />
+          </label>
 
-        <div className="ml-auto flex items-center gap-3 text-xs text-text-faint">
-          <span className="rounded-full bg-brand-soft px-2.5 py-1 font-medium text-brand">
+          {loading ? (
+            <button
+              type="button"
+              onClick={cancelReview}
+              className={buttonClass("danger", "sm")}
+            >
+              取消审阅
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={runReview}
+              disabled={requestLocked}
+              title="开始审阅（Cmd/Ctrl+Enter）"
+              className={buttonClass("primary", "sm")}
+            >
+              开始审阅
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={copyAll}
+            title="复制全文（Cmd/Ctrl+Shift+C）"
+            className={buttonClass("secondary", "sm")}
+          >
+            {copyState === "copied" ? "已复制 ✓" : "复制全文"}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => void clearCurrentProject()}
+            disabled={requestLocked}
+            title={requestLocked ? "请求处理中，请等待完成后再清空项目" : "清空当前项目"}
+            className={buttonClass("secondary", "sm")}
+          >
+            清空项目
+          </button>
+        </div>
+
+        <div className="ml-auto flex items-center gap-3 text-xs text-text-faint xl:col-start-7 xl:row-start-1 xl:ml-0 xl:justify-self-end">
+          <span className="rounded-full bg-brand-soft px-2.5 py-1 font-medium text-brand lg:hidden">
             {openCount} 条待处理
           </span>
           <span role="status" className="transition-opacity duration-300">

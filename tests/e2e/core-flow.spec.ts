@@ -148,6 +148,26 @@ test.describe("核心流程：接受、撤销与复制", () => {
     // Windows 剪贴板把换行规范化为 CRLF，比较前归一化，避免平台差异误报
     expect(clipboard.replace(/\r\n/g, "\n")).toBe(paras.join("\n\n"));
   });
+
+  test("清空项目仅重置当前现场并立即持久化", async ({ page }) => {
+    await gotoApp(page);
+    await loadSample(page);
+
+    page.once("dialog", (dialog) => void dialog.accept());
+    await page.getByRole("button", { name: "清空项目" }).click();
+
+    await expect(page.getByLabel("文档标题")).toHaveValue("");
+    await expect(page.locator("[data-review-card]")).toHaveCount(0);
+    await expect.poll(() => paragraphTexts(page)).toEqual([""]);
+    await expect(page.getByRole("status").first()).toContainText("已保存到本地");
+
+    // 清空后的同一项目已立即落库，刷新不会恢复旧正文或建议。
+    await page.reload();
+    await expect(page.locator(".ProseMirror")).toBeVisible();
+    await expect(page.getByLabel("文档标题")).toHaveValue("");
+    await expect.poll(() => paragraphTexts(page)).toEqual([""]);
+    await expect(page.locator("[data-review-card]")).toHaveCount(0);
+  });
 });
 
 test.describe("核心流程：键盘快捷键", () => {

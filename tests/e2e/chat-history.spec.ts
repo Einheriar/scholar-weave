@@ -34,6 +34,35 @@ const SAMPLE_TITLE = "The Role of Receiver's Social Category in Deception";
 test.describe("历史记录（项目）：宽屏常驻左栏", () => {
   test.use({ viewport: { width: 1600, height: 900 } });
 
+  test("顶栏操作组以正文栏为中心，宽屏不重复展示待处理计数", async ({ page }) => {
+    await gotoApp(page);
+    await loadSample(page);
+
+    const operations = page.getByRole("group", { name: "文档操作" });
+    const editor = page.locator(".ProseMirror");
+    const title = page.getByLabel("文档标题");
+    const [operationsBox, editorBox, titleBox] = await Promise.all([
+      operations.boundingBox(),
+      editor.boundingBox(),
+      title.boundingBox(),
+    ]);
+    expect(operationsBox).not.toBeNull();
+    expect(editorBox).not.toBeNull();
+    expect(titleBox).not.toBeNull();
+    const operationsCenter = operationsBox!.x + operationsBox!.width / 2;
+    const editorCenter = editorBox!.x + editorBox!.width / 2;
+    expect(Math.abs(operationsCenter - editorCenter)).toBeLessThanOrEqual(1);
+    // 标题不是固定宽度：自适应铺到操作组左侧，并保留 12px 间距。
+    expect(Math.abs(operationsBox!.x - (titleBox!.x + titleBox!.width) - 12)).toBeLessThanOrEqual(1);
+
+    await expect(page.locator("header").getByText(/条待处理/)).toBeHidden();
+    await expect(
+      page
+        .getByRole("complementary", { name: "审阅建议侧栏" })
+        .getByText(/待处理 \/ 共/),
+    ).toBeVisible();
+  });
+
   test("发送消息后建档，左侧出现该文章条目（标题取正文首段）", async ({ page }) => {
     await mockChatRoute(page, { withChanges: false });
     await gotoApp(page);
@@ -129,6 +158,25 @@ test.describe("历史记录（项目）：宽屏常驻左栏", () => {
     await page.getByRole("button", { name: `删除文章：${SAMPLE_TITLE}` }).click();
 
     await expect(historyItem(rail, SAMPLE_TITLE)).toHaveCount(0);
+  });
+});
+
+test.describe("顶栏：中窄屏自适应", () => {
+  test.use({ viewport: { width: 900, height: 800 } });
+
+  test("优先压缩标题，清空项目按钮不越出顶栏右边界", async ({ page }) => {
+    await gotoApp(page);
+
+    const headerBox = await page.locator("header").boundingBox();
+    const titleBox = await page.getByLabel("文档标题").boundingBox();
+    const clearBox = await page.getByRole("button", { name: "清空项目" }).boundingBox();
+    expect(headerBox).not.toBeNull();
+    expect(titleBox).not.toBeNull();
+    expect(clearBox).not.toBeNull();
+    expect(titleBox!.width).toBeLessThan(288);
+    expect(clearBox!.x + clearBox!.width).toBeLessThanOrEqual(
+      headerBox!.x + headerBox!.width + 1,
+    );
   });
 });
 
