@@ -308,6 +308,7 @@ function HistoryList({
                 墨迹才真正居中（CSS 通用手法：负边距抵消字距尾随留白）。
               */}
               <span className="relative z-10 -mr-[0.3em]">新文章</span>
+              <span className="t-tilt-spectrum" aria-hidden />
               <span className="t-tilt-glare" aria-hidden />
             </button>
           </div>
