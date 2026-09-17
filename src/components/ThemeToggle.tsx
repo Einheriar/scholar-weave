@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useLayoutEffect, useSyncExternalStore } from "react";
+import { Tooltip } from "@/components/ui/tooltip";
 
 /**
  * 深浅色切换按钮。主题状态本体是 <html> 上的 .dark class（外部可变状态），
@@ -56,14 +57,14 @@ export function ThemeToggle() {
   }, []);
 
   return (
-    <button
-      type="button"
-      onClick={toggle}
-      aria-pressed={dark}
-      aria-label={dark ? "切换到浅色模式" : "切换到深色模式"}
-      title={dark ? "切换到浅色模式" : "切换到深色模式"}
-      className="fixed bottom-4 left-4 z-50 flex h-10 w-10 items-center justify-center rounded-full border border-border bg-surface/90 shadow-md backdrop-blur-sm transition-all duration-150 hover:bg-surface-muted hover:shadow-lg"
-    >
+    <Tooltip label={dark ? "切换到浅色模式" : "切换到深色模式"} side="right">
+      <button
+        type="button"
+        onClick={toggle}
+        aria-pressed={dark}
+        aria-label={dark ? "切换到浅色模式" : "切换到深色模式"}
+        className="fixed bottom-4 left-4 z-50 flex h-10 w-10 items-center justify-center rounded-full border border-border bg-surface/90 shadow-md backdrop-blur-sm transition-all duration-150 hover:bg-surface-muted hover:shadow-lg"
+      >
       {dark ? (
         <svg
           width="20"
@@ -101,6 +102,7 @@ export function ThemeToggle() {
           <path d="m19.07 4.93-1.41 1.41" />
         </svg>
       )}
-    </button>
+      </button>
+    </Tooltip>
   );
 }

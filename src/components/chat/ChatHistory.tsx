@@ -11,6 +11,7 @@ import {
   moveId,
 } from "@/lib/chat-history";
 import { buttonClass } from "@/components/ui/button";
+import { Tooltip } from "@/components/ui/tooltip";
 
 /**
  * 左侧历史记录（项目列表）：一项 = 一篇文章的完整工作现场（正文 + 建议 + 聊天）。
@@ -279,28 +280,28 @@ function HistoryList({
             {/* 层 2：新文章（hover 时淡入，字间距调宽与历史记录同宽）。
                 外层保留平面命中区，按钮本体根据指针位置做低幅度 3D 倾斜；高光单独覆盖，
                 不再用向下投影制造悬浮感。淡入淡出仍与「历史记录」同步。 */}
-            <button
-              type="button"
-              disabled={interactionLocked}
-              aria-disabled={interactionLocked}
-              title={interactionLocked ? lockTitle : "新建文章"}
-              onClick={() => onNew({ keepHistoryOpen: true })}
-              onFocus={(event) => {
-                setTitleHover(true);
-                event.currentTarget.parentElement?.classList.add("is-hover");
-              }}
-              onBlur={(event) => {
-                setTitleHover(false);
-                event.currentTarget.parentElement?.classList.remove("is-hover", "is-tilting");
-              }}
-              className="t-skel-content t-drawer-new-button absolute inset-0 flex h-10 w-[96.2px] items-center justify-center rounded-lg !text-lg font-medium !tracking-[0.3em] text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring disabled:cursor-not-allowed"
-              style={{
-                opacity: titleHover ? 1 : 0,
-                filter: titleHover ? "blur(0px)" : "blur(2px)",
-                transition:
-                  "opacity var(--drawer-skel-dur) var(--drawer-skel-ease), filter var(--drawer-skel-dur) var(--drawer-skel-ease), transform var(--tilt-return) var(--tilt-return-ease), scale 140ms ease, background-color 180ms ease, box-shadow 180ms ease",
-              }}
-            >
+            <Tooltip label={interactionLocked ? lockTitle : "新建文章"}>
+              <button
+                type="button"
+                disabled={interactionLocked}
+                aria-disabled={interactionLocked}
+                onClick={() => onNew({ keepHistoryOpen: true })}
+                onFocus={(event) => {
+                  setTitleHover(true);
+                  event.currentTarget.parentElement?.classList.add("is-hover");
+                }}
+                onBlur={(event) => {
+                  setTitleHover(false);
+                  event.currentTarget.parentElement?.classList.remove("is-hover", "is-tilting");
+                }}
+                className="t-skel-content t-drawer-new-button absolute inset-0 flex h-10 w-[96.2px] items-center justify-center rounded-lg !text-lg font-medium !tracking-[0.3em] text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring disabled:cursor-not-allowed"
+                style={{
+                  opacity: titleHover ? 1 : 0,
+                  filter: titleHover ? "blur(0px)" : "blur(2px)",
+                  transition:
+                    "opacity var(--drawer-skel-dur) var(--drawer-skel-ease), filter var(--drawer-skel-dur) var(--drawer-skel-ease), transform var(--tilt-return) var(--tilt-return-ease), scale 140ms ease, background-color 180ms ease, box-shadow 180ms ease",
+                }}
+              >
               {/*
                 tracking-[0.3em] 会在最后一个字后面也追加一个 5.4px 字距，且布局把它算进
                 文字宽度——justify-center 居中的是「三字 + 末尾空白」，墨迹因此左偏半个字距
@@ -310,7 +311,8 @@ function HistoryList({
               <span className="relative z-10 -mr-[0.3em]">新文章</span>
               <span className="t-tilt-spectrum" aria-hidden />
               <span className="t-tilt-glare" aria-hidden />
-            </button>
+              </button>
+            </Tooltip>
           </div>
         </div>
       ) : (
@@ -318,17 +320,18 @@ function HistoryList({
           <h2 className="relative top-px text-sm leading-5 font-semibold tracking-tight text-text-muted">
             历史记录
           </h2>
-          <button
-            type="button"
-            disabled={interactionLocked}
-            aria-disabled={interactionLocked}
-            title={interactionLocked ? lockTitle : "新建文章"}
-            onClick={() => onNew()}
-            className={buttonClass("secondary", "xs")}
-            style={{ fontSize: "0.875rem", lineHeight: "1.25rem" }}
-          >
-            新文章
-          </button>
+          <Tooltip label={interactionLocked ? lockTitle : "新建文章"} align="end">
+            <button
+              type="button"
+              disabled={interactionLocked}
+              aria-disabled={interactionLocked}
+              onClick={() => onNew()}
+              className={buttonClass("secondary", "xs")}
+              style={{ fontSize: "0.875rem", lineHeight: "1.25rem" }}
+            >
+              新文章
+            </button>
+          </Tooltip>
         </div>
       )}
 
@@ -649,22 +652,22 @@ function HistoryEntry({
           （列表其余位置的滚动因此不受影响，这是保留把手换来的）。
           键盘排序也在这里（纯拖拽对键盘/读屏不可用）。 */}
       {draggable && (
-        <button
-          type="button"
-          disabled={interactionLocked}
-          aria-disabled={interactionLocked}
-          aria-label={`调整「${title}」顺序`}
-          title={interactionLocked ? lockTitle : "拖动排序（也可用 ↑/↓ 键）"}
-          onPointerDown={(e) => onHandlePointerDown(e, p.id)}
-          onPointerMove={onHandlePointerMove}
-          onPointerUp={onHandlePointerUp}
-          onPointerCancel={onHandlePointerCancel}
-          onKeyDown={(e) => onHandleKeyDown(e, p.id)}
-          // 把手在行按钮之外（兄弟节点），点它不会触发行的 onClick；
-          // 但仍要吞掉 click，免得将来把手挪进按钮内部时误开文章。
-          onClick={(e) => e.stopPropagation()}
-          className="absolute left-0 top-1/2 z-10 -translate-y-1/2 cursor-grab touch-none rounded-md p-1 text-text-faint opacity-0 transition-opacity hover:text-foreground active:cursor-grabbing focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring group-hover/entry:opacity-100"
-        >
+        <Tooltip label={interactionLocked ? lockTitle : "拖动排序（也可用 ↑/↓ 键）"} side="right">
+          <button
+            type="button"
+            disabled={interactionLocked}
+            aria-disabled={interactionLocked}
+            aria-label={`调整「${title}」顺序`}
+            onPointerDown={(e) => onHandlePointerDown(e, p.id)}
+            onPointerMove={onHandlePointerMove}
+            onPointerUp={onHandlePointerUp}
+            onPointerCancel={onHandlePointerCancel}
+            onKeyDown={(e) => onHandleKeyDown(e, p.id)}
+            // 把手在行按钮之外（兄弟节点），点它不会触发行的 onClick；
+            // 但仍要吞掉 click，免得将来把手挪进按钮内部时误开文章。
+            onClick={(e) => e.stopPropagation()}
+            className="absolute left-0 top-1/2 z-10 -translate-y-1/2 cursor-grab touch-none rounded-md p-1 text-text-faint opacity-0 transition-opacity hover:text-foreground active:cursor-grabbing focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring group-hover/entry:opacity-100"
+          >
           <svg
             width="12"
             height="14"
@@ -679,24 +682,25 @@ function HistoryEntry({
             <circle cx="3" cy="11" r="1.3" />
             <circle cx="9" cy="11" r="1.3" />
           </svg>
-        </button>
+          </button>
+        </Tooltip>
       )}
-      <button
-        type="button"
-        disabled={interactionLocked}
-        aria-disabled={interactionLocked}
-        data-project-id={p.id}
-        onClick={() => onSelect(p.id)}
-        aria-current={active ? "true" : undefined}
-        title={interactionLocked ? lockTitle : `打开文章：${title}`}
-        className={
-          "block w-full rounded-xl border px-2.5 py-2 pr-8 text-left transition-colors " +
-          (draggable ? "pl-6 " : "") +
-          (active
-            ? "border-brand-ring bg-brand-soft"
-            : "border-transparent hover:bg-surface-muted")
-        }
-      >
+      <Tooltip label={interactionLocked ? lockTitle : `打开文章：${title}`} side="right">
+        <button
+          type="button"
+          disabled={interactionLocked}
+          aria-disabled={interactionLocked}
+          data-project-id={p.id}
+          onClick={() => onSelect(p.id)}
+          aria-current={active ? "true" : undefined}
+          className={
+            "block w-full rounded-xl border px-2.5 py-2 pr-8 text-left transition-colors " +
+            (draggable ? "pl-6 " : "") +
+            (active
+              ? "border-brand-ring bg-brand-soft"
+              : "border-transparent hover:bg-surface-muted")
+          }
+        >
         <span
           className={
             "block truncate text-sm " +
@@ -708,16 +712,17 @@ function HistoryEntry({
         <span className="mt-0.5 block text-[11px] text-text-faint">
           最近活动：{formatRelativeTime(p.lastActivityAt)}
         </span>
-      </button>
-      <button
-        type="button"
-        disabled={interactionLocked}
-        aria-disabled={interactionLocked}
-        onClick={() => onDelete(p.id)}
-        aria-label={`删除文章：${title}`}
-        title={interactionLocked ? lockTitle : "删除这篇文章"}
-        className="absolute right-1 top-1.5 rounded-md p-1 text-text-faint transition-colors hover:bg-surface hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring dark:hover:text-red-400"
-      >
+        </button>
+      </Tooltip>
+      <Tooltip label={interactionLocked ? lockTitle : "删除这篇文章"} side="right">
+        <button
+          type="button"
+          disabled={interactionLocked}
+          aria-disabled={interactionLocked}
+          onClick={() => onDelete(p.id)}
+          aria-label={`删除文章：${title}`}
+          className="absolute right-1 top-1.5 rounded-md p-1 text-text-faint transition-colors hover:bg-surface hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring dark:hover:text-red-400"
+        >
         <svg
           width="14"
           height="14"
@@ -731,7 +736,8 @@ function HistoryEntry({
           <line x1="18" y1="6" x2="6" y2="18" />
           <line x1="6" y1="6" x2="18" y2="18" />
         </svg>
-      </button>
+        </button>
+      </Tooltip>
     </>
   );
   return (
@@ -780,17 +786,17 @@ export function ChatHistoryToggle({
     onClick();
   };
   return (
-    <button
-      type="button"
-      disabled={disabled}
-      aria-disabled={disabled}
-      onClick={handleClick}
-      aria-label="历史记录"
-      aria-expanded={open}
-      title={disabled ? "请求处理中，请等待完成后再操作" : "历史记录"}
-      // z-100：抽屉遮罩 z-90 会盖住顶栏，不提升的话打开后叉叉被压在遮罩下点不到
-      className="relative z-[100] flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-text-muted transition-colors hover:bg-surface-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring xl:hidden"
-    >
+    <Tooltip label={disabled ? "请求处理中，请等待完成后再操作" : "历史记录"}>
+      <button
+        type="button"
+        disabled={disabled}
+        aria-disabled={disabled}
+        onClick={handleClick}
+        aria-label="历史记录"
+        aria-expanded={open}
+        // z-100：抽屉遮罩 z-90 会盖住顶栏，不提升的话打开后叉叉被压在遮罩下点不到
+        className="relative z-[100] flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-text-muted transition-colors hover:bg-surface-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring xl:hidden"
+      >
       {/* 双图标同位叠格：data-state 切换（transitions.dev Icon swap 思路，见 globals.css） */}
       <span className="t-icon-swap" data-state={open ? "b" : "a"}>
         <svg
@@ -825,6 +831,7 @@ export function ChatHistoryToggle({
           <line x1="6" y1="18" x2="18" y2="6" />
         </svg>
       </span>
-    </button>
+      </button>
+    </Tooltip>
   );
 }

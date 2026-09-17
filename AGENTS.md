@@ -106,6 +106,8 @@ tests/e2e/                      # Playwright 用例（helpers.ts 里是 mock 与
 7. **遮罩点击关闭** — 模态框/抽屉"点外部收起"的写法要判断 `e.target === e.currentTarget`（面板是遮罩子元素），照 `src/components/SettingsPanel.tsx:134` 抄。只认"点遮罩空白处"，别用 `document` 上的全局点击，那样在面板内拖动松手会误关。
 8. **本项目没有动画库**，动效一律手写 CSS keyframes（`globals.css`）。由此有一条固定约束：**退出动画必须延迟卸载**——`{open && ...}` 这类条件渲染会在关闭瞬间卸载节点，淡出/滑出根本没机会播放。做法是加一个「closing」状态在动画期间继续渲染，`onAnimationEnd` 后再真正移除。另外新加的 keyframes 必须同时登记到 `globals.css` 的 `prefers-reduced-motion` 覆盖名单里，漏了的话，明明开了「减少动态效果」的用户反而还会看到动画。
 9. **滚动条全局自定义过**（`globals.css`）：细窄（8px）半透明滑块，悬停加深；滑块色用 `color-mix(in srgb, var(--text-faint) 45%, transparent)`、悬停用 `--text-muted`，深浅色自适应。Chrome/Edge/Safari 走 `::-webkit-scrollbar`，Firefox 走 `scrollbar-width: thin` + `scrollbar-color`。新增可滚区域不用单独配，全局生效。**注意**：半透明滑块会叠在内容上，长文滚动有轻微透色，是有意的取舍；别改回不透明的粗条。
+10. **悬浮提示统一用 `src/components/ui/tooltip.tsx` 的 `Tooltip`，不要使用 HTML `title` 属性。** 原生 `title` 是浏览器绘制的黑色提示，无法跟随项目的浅色卡片、深色模式和阴影规范；统一组件通过 portal 渲染，也不会被设置面板、抽屉或侧栏的 `overflow` 裁掉。
+11. **当前应用只面向 Windows。** 用户可见的快捷键说明和 `aria-keyshortcuts` 只写 `Ctrl`（例如 `Ctrl+Enter`、`Ctrl+Shift+C`、`Ctrl+Z`），不要写 `Cmd/Ctrl` 或 `Meta`。
 
 ## 左侧历史（项目制，一篇文章 = 一个项目）
 
@@ -170,7 +172,7 @@ tests/e2e/                      # Playwright 用例（helpers.ts 里是 mock 与
 
 - 正文纸张右上角常驻一个轻量撤销按钮，悬停／键盘聚焦提示「撤销 / Ctrl+Z」；按钮只表示当前文章、当前会话的 Tiptap 正文历史，无法撤回已覆盖落库的历史版本，切换文档 ID 时必须重建编辑器以清空跨文章撤销栈。
 - 单条建议的接受与安全撤销由建议卡片负责，相关 Tiptap 事务必须设置 `addToHistory: false`，否则普通 `Ctrl+Z` 会只还原正文而让卡片继续显示「已接受」。ChangeSet 批量应用仍作为一次普通正文事务进入撤销栈。
-- 按钮处于纸张右上角的正文内边距中；调整尺寸或位置时要同步保证首行文字不会与按钮／焦点环重叠。请求锁定或没有可撤销内容时按钮禁用，但 Tooltip 外层仍可响应 hover。
+- 按钮处于纸张右上角的正文内边距中；调整尺寸或位置时要同步保证首行文字不会与按钮／焦点环重叠。请求锁定或没有可撤销内容时按钮禁用，但统一 `Tooltip` 仍须响应 hover。
 
 ## 浮动按钮与页面底部布局
 

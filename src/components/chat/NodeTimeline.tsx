@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ChatNode } from "@/lib/review-schema";
 import { deriveNodeTitle } from "@/lib/chat-nodes";
+import { Tooltip } from "@/components/ui/tooltip";
 
 export type NodeTimelineProps = {
   nodes: ChatNode[];
@@ -113,18 +114,19 @@ export function NodeTimeline({
           <h2 className="text-xs font-semibold tracking-tight text-text-muted">
             聊天节点
           </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="收起节点时间线"
-            title="收起节点时间线"
-            className="rounded-md p-1 text-text-faint transition-colors hover:bg-surface-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-          </button>
+          <Tooltip label="收起节点时间线" side="left">
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="收起节点时间线"
+              className="rounded-md p-1 text-text-faint transition-colors hover:bg-surface-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          </Tooltip>
         </div>
 
         <ul className="space-y-1 p-2">
@@ -307,13 +309,13 @@ function NodeRow({
         {userTurnCount} 问
       </span>
       {/* 行内删除（规则 13：删该行全部讨论，直接删不弹确认） */}
-      <button
-        type="button"
-        onClick={() => onDeleteNode(node.id)}
-        aria-label="删除该节点讨论"
-        title="删除该节点讨论"
-        className="shrink-0 rounded-md p-1 text-text-faint transition-colors hover:bg-surface hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring dark:hover:text-red-400"
-      >
+      <Tooltip label="删除该节点讨论" side="left">
+        <button
+          type="button"
+          onClick={() => onDeleteNode(node.id)}
+          aria-label="删除该节点讨论"
+          className="shrink-0 rounded-md p-1 text-text-faint transition-colors hover:bg-surface hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring dark:hover:text-red-400"
+        >
         <svg
           width="14"
           height="14"
@@ -327,7 +329,8 @@ function NodeRow({
           <line x1="18" y1="6" x2="6" y2="18" />
           <line x1="6" y1="6" x2="18" y2="18" />
         </svg>
-      </button>
+        </button>
+      </Tooltip>
     </li>
   );
 }

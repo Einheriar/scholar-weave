@@ -1,7 +1,7 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 
 /**
- * 统一三级按钮样式（纯 className 工厂，不包组件，避免影响现有 aria/title 属性）。
+ * 统一三级按钮样式（纯 className 工厂，不包组件，避免影响现有 aria/Tooltip 属性）。
  * primary：品牌绿主操作；secondary：白底灰边框；danger：红色边框文字；ghost：无框文字按钮。
  */
 

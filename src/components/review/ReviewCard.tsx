@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReviewItem } from "@/lib/review-schema";
 import { buttonClass } from "@/components/ui/button";
+import { Tooltip } from "@/components/ui/tooltip";
 import { renderMiniMarkdown } from "@/lib/mini-markdown";
 import {
   CATEGORY_META,
@@ -235,72 +236,77 @@ export function ReviewCard({
         <div className="flex items-center gap-2">
           {actionable && !accepting && (
             <>
-              <button
-                type="button"
-                disabled={interactionLocked}
-                title={interactionLocked ? "请求处理中，请等待完成" : undefined}
-                className={buttonClass("primary", "xs")}
-                onClick={handleAccept}
-              >
-                接受
-              </button>
-              <button
-                type="button"
-                disabled={interactionLocked}
-                title={interactionLocked ? "请求处理中，请等待完成" : undefined}
-                className={buttonClass("secondary", "xs")}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onReject(item.id);
-                }}
-              >
-                忽略
-              </button>
+              <Tooltip label={interactionLocked ? "请求处理中，请等待完成" : undefined}>
+                <button
+                  type="button"
+                  disabled={interactionLocked}
+                  className={buttonClass("primary", "xs")}
+                  onClick={handleAccept}
+                >
+                  接受
+                </button>
+              </Tooltip>
+              <Tooltip label={interactionLocked ? "请求处理中，请等待完成" : undefined}>
+                <button
+                  type="button"
+                  disabled={interactionLocked}
+                  className={buttonClass("secondary", "xs")}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onReject(item.id);
+                  }}
+                >
+                  忽略
+                </button>
+              </Tooltip>
             </>
           )}
 
           {item.kind === "opinion" && item.status === "open" && !accepting && (
             <>
-              <button
-                type="button"
-                disabled={interactionLocked}
-                title={interactionLocked ? "请求处理中，请等待完成" : undefined}
-                className={buttonClass("secondary", "xs")}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onChat?.(item.id);
-                }}
-              >
-                继续询问
-              </button>
-              <button
-                type="button"
-                disabled={applyingOpinion || interactionLocked}
-                title={interactionLocked ? "请求处理中，请等待完成" : undefined}
-                className={buttonClass("primary", "xs")}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onApplyOpinion?.(item.id);
-                }}
-              >
-                {applyingOpinion ? "生成中…" : "按此意见修改"}
-              </button>
+              <Tooltip label={interactionLocked ? "请求处理中，请等待完成" : undefined}>
+                <button
+                  type="button"
+                  disabled={interactionLocked}
+                  className={buttonClass("secondary", "xs")}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onChat?.(item.id);
+                  }}
+                >
+                  继续询问
+                </button>
+              </Tooltip>
+              <Tooltip label={interactionLocked ? "请求处理中，请等待完成" : undefined}>
+                <button
+                  type="button"
+                  disabled={applyingOpinion || interactionLocked}
+                  className={buttonClass("primary", "xs")}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onApplyOpinion?.(item.id);
+                  }}
+                >
+                  {applyingOpinion ? "生成中…" : "按此意见修改"}
+                </button>
+              </Tooltip>
             </>
           )}
 
           {visualRevertible && (
-            <button
-              type="button"
-              disabled={interactionLocked}
-              title={interactionLocked ? "请求处理中，请等待完成" : undefined}
-              className={buttonClass("secondary", "xs")}
-              onClick={(e) => {
-                e.stopPropagation();
-                onRevert(item.id);
-              }}
-            >
-              撤销
-            </button>
+            <Tooltip label={interactionLocked ? "请求处理中，请等待完成" : undefined}>
+              <button
+                type="button"
+                disabled={interactionLocked}
+                className={buttonClass("secondary", "xs")}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRevert(item.id);
+                }}
+              >
+                撤销
+              </button>
+            </Tooltip>
           )}
 
           {visualStatus === "stale" && (

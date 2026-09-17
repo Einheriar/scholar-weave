@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { buttonClass } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
+import { Tooltip } from "@/components/ui/tooltip";
 import { renderMiniMarkdown } from "@/lib/mini-markdown";
 import {
   saveSettings,
@@ -535,36 +536,38 @@ export function SettingsPanel({
                 <p className="mb-2 text-xs text-text-faint">
                   加载内置的示例论文和审阅建议，用于演示界面效果（不会调用 LLM）。
                 </p>
-                <button
-                  type="button"
-                  disabled={dataActionsLocked}
-                  title={dataActionsLocked ? "请求处理中，请等待完成" : undefined}
-                  onClick={() => {
-                    onLoadSample?.();
-                    onClose();
-                  }}
-                  className={buttonClass("secondary", "md")}
-                >
-                  载入样例
-                </button>
+                <Tooltip label={dataActionsLocked ? "请求处理中，请等待完成" : undefined}>
+                  <button
+                    type="button"
+                    disabled={dataActionsLocked}
+                    onClick={() => {
+                      onLoadSample?.();
+                      onClose();
+                    }}
+                    className={buttonClass("secondary", "md")}
+                  >
+                    载入样例
+                  </button>
+                </Tooltip>
               </div>
               <div>
                 <label className={labelCls}>本地数据</label>
                 <p className="mb-2 text-xs text-text-faint">
                   清除浏览器本地保存的草稿，并将编辑器重置为示例文档。此操作不可撤销。
                 </p>
-                <button
-                  type="button"
-                  disabled={dataActionsLocked}
-                  title={dataActionsLocked ? "请求处理中，请等待完成" : undefined}
-                  onClick={() => {
-                    onClearAll?.();
-                    onClose();
-                  }}
-                  className={buttonClass("danger", "md")}
-                >
-                  清空数据
-                </button>
+                <Tooltip label={dataActionsLocked ? "请求处理中，请等待完成" : undefined}>
+                  <button
+                    type="button"
+                    disabled={dataActionsLocked}
+                    onClick={() => {
+                      onClearAll?.();
+                      onClose();
+                    }}
+                    className={buttonClass("danger", "md")}
+                  >
+                    清空数据
+                  </button>
+                </Tooltip>
               </div>
             </div>
           )}

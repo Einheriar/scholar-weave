@@ -148,6 +148,7 @@ test.describe("核心流程：接受、撤销与复制", () => {
     const editor = page.locator(".ProseMirror");
     const undo = page.getByRole("button", { name: "撤销正文编辑" });
     await expect(undo).toBeDisabled();
+    await undo.hover();
     await expect(page.getByRole("tooltip")).toHaveText("撤销 / Ctrl+Z");
 
     await editor.press("Control+Home");
@@ -194,7 +195,7 @@ test.describe("核心流程：接受、撤销与复制", () => {
 });
 
 test.describe("核心流程：键盘快捷键", () => {
-  test("Cmd/Ctrl+Shift+C 复制全文", async ({ page }) => {
+  test("Ctrl+Shift+C 复制全文", async ({ page }) => {
     await gotoApp(page);
     await loadSample(page);
 
@@ -206,7 +207,7 @@ test.describe("核心流程：键盘快捷键", () => {
     expect(clipboard.replace(/\r\n/g, "\n")).toBe(paras.join("\n\n"));
   });
 
-  test("对话输入框聚焦时 Cmd/Ctrl+Enter 不触发审阅", async ({ page }) => {
+  test("对话输入框聚焦时 Ctrl+Enter 不触发审阅", async ({ page }) => {
     await gotoApp(page);
     await loadSample(page);
 

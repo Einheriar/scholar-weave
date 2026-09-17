@@ -30,6 +30,7 @@ import {
 import type { DocumentState, DocumentBlock, ReviewItem, ChatNode } from "@/lib/review-schema";
 import { computeChecksum } from "@/lib/revisions";
 import { locateRange } from "@/lib/anchoring";
+import { Tooltip } from "@/components/ui/tooltip";
 
 export type DocumentEditorHandle = {
   /** 把编辑器滚动并选中到某条建议对应的正文位置（侧栏→正文定位） */
@@ -166,7 +167,7 @@ export const DocumentEditor = forwardRef<
     editorProps: {
       attributes: {
         class:
-          "prose max-w-none focus:outline-none min-h-[60vh] py-7 pl-8 pr-12 leading-relaxed sm:py-9 sm:pl-10 sm:pr-14",
+          "prose max-w-none focus:outline-none min-h-[60vh] py-7 pl-8 pr-16 leading-relaxed sm:py-9 sm:pl-10 sm:pr-16",
         "aria-label": "文档编辑器",
       },
     },
@@ -311,38 +312,33 @@ export const DocumentEditor = forwardRef<
     /* 纸张式编辑器：白卡片浮在页面底色上，内边距在编辑器本体上，
        让文本选区/光标留边一致（PLAN 布局美化） */
     <div className="relative rounded-2xl border border-border bg-surface shadow-sm transition-shadow duration-200 focus-within:shadow-md">
-      <span className="group absolute right-3 top-3 z-10">
-        <button
-          type="button"
-          aria-label="撤销正文编辑"
-          aria-describedby="editor-undo-tooltip"
-          aria-keyshortcuts="Control+Z Meta+Z"
-          disabled={readOnly || !canUndo}
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={() => editor?.commands.undo()}
-          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-text-muted transition-colors hover:border-border hover:bg-surface-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring disabled:cursor-default disabled:opacity-30 disabled:hover:border-transparent disabled:hover:bg-transparent disabled:hover:text-text-muted motion-reduce:transition-none"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="h-4 w-4"
-            aria-hidden="true"
+      <span className="editor-undo-corner">
+        <Tooltip label="撤销 / Ctrl+Z" side="bottom" align="end">
+          <button
+            type="button"
+            aria-label="撤销正文编辑"
+            aria-keyshortcuts="Control+Z"
+            disabled={readOnly || !canUndo}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => editor?.commands.undo()}
+            className="editor-undo-corner-button"
           >
-            <path d="m9 8-4 4 4 4" />
-            <path d="M5 12h8a5 5 0 0 1 5 5" />
-          </svg>
-        </button>
-        <span
-          id="editor-undo-tooltip"
-          role="tooltip"
-          className="pointer-events-none absolute right-0 top-full mt-1.5 whitespace-nowrap rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-muted opacity-0 shadow-md transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 motion-reduce:transition-none"
-        >
-          撤销 / Ctrl+Z
-        </span>
+            <span className="editor-undo-fold" aria-hidden="true">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="editor-undo-relief"
+              >
+                <path d="M9 5 4 10l5 5" />
+                <path d="M4 10h10a5 5 0 0 1 0 10h-2" />
+              </svg>
+            </span>
+          </button>
+        </Tooltip>
       </span>
       <EditorContent editor={editor} />
     </div>

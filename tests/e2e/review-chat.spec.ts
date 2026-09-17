@@ -78,7 +78,7 @@ test.describe("LLM 审阅（mock /api/review）", () => {
     await expect(card(page, "m_edit")).toBeVisible();
   });
 
-  test("快捷键 Cmd/Ctrl+Enter 也能触发审阅", async ({ page }) => {
+  test("快捷键 Ctrl+Enter 也能触发审阅", async ({ page }) => {
     await mockReviewRoute(page);
     await gotoApp(page);
 

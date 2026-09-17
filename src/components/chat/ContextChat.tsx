@@ -9,6 +9,7 @@ import type {
   ReviewItem,
 } from "@/lib/review-schema";
 import { buttonClass } from "@/components/ui/button";
+import { Tooltip } from "@/components/ui/tooltip";
 import { renderMiniMarkdown } from "@/lib/mini-markdown";
 import { NodeTimeline } from "./NodeTimeline";
 
@@ -148,27 +149,27 @@ export function ContextChat({
         }
       >
         <span className="flex min-w-0 items-center gap-1.5 text-text-muted">
-          <button
-            type="button"
-            onClick={() => {
-              // 首次打开才挂载抽屉；之后打开播进入动画、关闭走退出动画后卸载
-              if (timelineOpen) {
-                closeTimeline();
-              } else {
-                setTimelineMounted(true);
-                setTimelineOpen(true);
+          <Tooltip label="聊天节点历史">
+            <button
+              type="button"
+              onClick={() => {
+                // 首次打开才挂载抽屉；之后打开播进入动画、关闭走退出动画后卸载
+                if (timelineOpen) {
+                  closeTimeline();
+                } else {
+                  setTimelineMounted(true);
+                  setTimelineOpen(true);
+                }
+              }}
+              aria-label="聊天节点历史"
+              aria-expanded={timelineOpen}
+              className={
+                "shrink-0 rounded-md p-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring " +
+                (timelineOpen
+                  ? "bg-node-soft text-node"
+                  : "text-text-faint hover:bg-surface-muted hover:text-foreground")
               }
-            }}
-            aria-label="聊天节点历史"
-            aria-expanded={timelineOpen}
-            title="聊天节点历史"
-            className={
-              "shrink-0 rounded-md p-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring " +
-              (timelineOpen
-                ? "bg-node-soft text-node"
-                : "text-text-faint hover:bg-surface-muted hover:text-foreground")
-            }
-          >
+            >
             <svg
               width="16"
               height="16"
@@ -186,26 +187,28 @@ export function ContextChat({
               <line x1="3" y1="12" x2="3.01" y2="12" />
               <line x1="3" y1="18" x2="3.01" y2="18" />
             </svg>
-          </button>
+            </button>
+          </Tooltip>
           {activeNode && (
-            <span
-              className="h-1.5 w-1.5 shrink-0 rounded-full bg-node"
-              title="正在聊这个节点"
-              aria-hidden
-            />
+            <Tooltip label="正在聊这个节点">
+              <span
+                className="h-1.5 w-1.5 shrink-0 rounded-full bg-node"
+                aria-hidden
+              />
+            </Tooltip>
           )}
           <span className="truncate">
             当前上下文：<span className="font-medium text-foreground">{contextLabel}</span>
           </span>
         </span>
         <div className="flex shrink-0 items-center gap-1">
-          <button
-            type="button"
-            onClick={onToggleMinimize}
-            aria-label={minimized ? "展开聊天区" : "最小化聊天区"}
-            title={minimized ? "展开聊天区" : "最小化聊天区"}
-            className="rounded-md p-1 text-text-faint transition-colors hover:bg-surface-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring"
-          >
+          <Tooltip label={minimized ? "展开聊天区" : "最小化聊天区"} align="end">
+            <button
+              type="button"
+              onClick={onToggleMinimize}
+              aria-label={minimized ? "展开聊天区" : "最小化聊天区"}
+              className="rounded-md p-1 text-text-faint transition-colors hover:bg-surface-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring"
+            >
             {minimized ? (
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
                 <polyline points="18 15 12 9 6 15" />
@@ -215,7 +218,8 @@ export function ContextChat({
                 <polyline points="6 9 12 15 18 9" />
               </svg>
             )}
-          </button>
+            </button>
+          </Tooltip>
         </div>
       </div>
 
@@ -226,18 +230,19 @@ export function ContextChat({
       <div className={"chat-body" + (minimized ? " chat-body-min" : "")}>
         <div>
           {/* 顶部拖拽把手：按住上/下拖调整聊天区高度（用户可控大小） */}
-          <button
-            type="button"
-            onPointerDown={(e) => {
-              dragRef.current = { startY: e.clientY, startHeight: panelHeight };
-              e.currentTarget.setPointerCapture?.(e.pointerId);
-            }}
-            aria-label="调整聊天区高度"
-            title="按住上下拖动，调整聊天区高度"
-            className="group flex w-full cursor-ns-resize touch-none items-center justify-center border-b border-border py-1 transition-colors hover:bg-surface-muted"
-          >
-            <span className="h-1 w-10 rounded-full bg-border-strong transition-colors group-hover:bg-text-faint" />
-          </button>
+          <Tooltip label="按住上下拖动，调整聊天区高度">
+            <button
+              type="button"
+              onPointerDown={(e) => {
+                dragRef.current = { startY: e.clientY, startHeight: panelHeight };
+                e.currentTarget.setPointerCapture?.(e.pointerId);
+              }}
+              aria-label="调整聊天区高度"
+              className="group flex w-full cursor-ns-resize touch-none items-center justify-center border-b border-border py-1 transition-colors hover:bg-surface-muted"
+            >
+              <span className="h-1 w-10 rounded-full bg-border-strong transition-colors group-hover:bg-text-faint" />
+            </button>
+          </Tooltip>
 
           {anchorStale && (
             <p className="mx-3.5 mt-3 rounded-lg bg-surface-muted px-3 py-2 text-xs text-text-muted">
@@ -313,15 +318,16 @@ export function ContextChat({
               className="flex-1 resize-none rounded-xl border border-border bg-transparent px-3 py-2 text-sm transition-colors focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand-ring"
               aria-label="对话输入框"
             />
-            <button
-              type="button"
-              onClick={submit}
-              disabled={busy || !draft.trim() || sendDisabled}
-              title={sendDisabled ? "请先选中正文或一条建议" : undefined}
-              className={buttonClass("primary", "md")}
-            >
-              发送
-            </button>
+            <Tooltip label={sendDisabled ? "请先选中正文或一条建议" : undefined} side="top" align="end">
+              <button
+                type="button"
+                onClick={submit}
+                disabled={busy || !draft.trim() || sendDisabled}
+                className={buttonClass("primary", "md")}
+              >
+                发送
+              </button>
+            </Tooltip>
           </div>
         </div>
       </div>

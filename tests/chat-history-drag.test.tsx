@@ -278,10 +278,13 @@ describe("历史列表：拖拽接线", () => {
     expect(container.querySelector<HTMLButtonElement>('button[aria-label^="调整"]')?.disabled).toBe(true);
     expect(container.querySelector<HTMLButtonElement>('button[aria-label^="删除文章"]')?.disabled).toBe(true);
     expect(container.querySelector<HTMLButtonElement>('button[data-project-id="a"]')?.disabled).toBe(true);
-    expect(container.querySelector<HTMLButtonElement>('button[title*="请求处理中"]')?.disabled).toBe(true);
+    const newButton = Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find(
+      (button) => button.textContent?.trim() === "新文章",
+    )!;
+    expect(newButton.disabled).toBe(true);
     fireEvent.click(container.querySelector<HTMLButtonElement>('button[data-project-id="a"]')!);
     fireEvent.click(container.querySelector<HTMLButtonElement>('button[aria-label^="删除文章"]')!);
-    fireEvent.click(container.querySelector<HTMLButtonElement>('button[title*="请求处理中"]')!);
+    fireEvent.click(newButton);
     fireEvent.keyDown(container.querySelector<HTMLButtonElement>('button[aria-label^="调整"]')!, { key: "ArrowDown" });
     expect(onSelect).not.toHaveBeenCalled();
     expect(onDelete).not.toHaveBeenCalled();

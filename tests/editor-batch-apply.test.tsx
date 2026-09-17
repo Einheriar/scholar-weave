@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createRef } from "react";
-import { act, render, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, waitFor } from "@testing-library/react";
 import {
   DocumentEditor,
   type DocumentEditorHandle,
@@ -40,7 +40,10 @@ describe("DocumentEditor 批量应用与撤销（阶段 4）", () => {
     const { doc, ref, getLatest, view } = setup(["before"]);
     const button = view.getByRole("button", { name: "撤销正文编辑" });
     expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("aria-keyshortcuts", "Control+Z");
+    fireEvent.pointerEnter(button);
     expect(view.getByRole("tooltip")).toHaveTextContent("撤销 / Ctrl+Z");
+    fireEvent.pointerLeave(button);
 
     act(() => {
       expect(

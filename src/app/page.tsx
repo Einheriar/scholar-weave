@@ -13,6 +13,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { SettingsPanel } from "@/components/SettingsPanel";
 import { buttonClass } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
+import { Tooltip } from "@/components/ui/tooltip";
 import {
   loadSettings,
   settingsToRequestBody,
@@ -1289,8 +1290,8 @@ export default function Home() {
   );
 
   // ── 键盘快捷键（阶段 6）──
-  // Cmd/Ctrl+Enter：开始审阅；Cmd/Ctrl+Shift+C：复制全文。
-  // 在输入类控件聚焦时不拦截 Cmd+Enter，避免和对话输入冲突。
+  // Ctrl+Enter：开始审阅；Ctrl+Shift+C：复制全文。
+  // 在输入类控件聚焦时不拦截 Ctrl+Enter，避免和对话输入冲突。
   useEffect(() => {
     const isTextEntry = (el: EventTarget | null) => {
       const node = el as HTMLElement | null;
@@ -1303,7 +1304,7 @@ export default function Home() {
       );
     };
     const onKeyDown = (e: KeyboardEvent) => {
-      if (!e.metaKey && !e.ctrlKey) return;
+      if (!e.ctrlKey) return;
       if (e.shiftKey && e.key.toLowerCase() === "c") {
         e.preventDefault();
         void copyAll();
@@ -1343,20 +1344,25 @@ export default function Home() {
         {/* xl 下 wrapper 参与网格而 input 不直接参与轨道固有尺寸计算：长标题不会
             挤偏正文左右两个 1fr 半区，操作组因此始终钉在正文中心。 */}
         <div className="min-w-24 flex-1 xl:col-start-1 xl:col-end-4 xl:row-start-1 xl:mr-3 xl:min-w-0 xl:[contain:inline-size]">
-          <input
-            value={doc.title}
-            disabled={requestLocked}
-            title={requestLocked ? "请求处理中，请等待完成后再修改标题" : undefined}
-            // 改标题也是一次内容编辑：必须同样置 saving（否则防抖保存不触发，
-            // 标题既不落库、也不算「活动」——改完刷新就丢，且不会把文章置顶）。
-            // 不走 handleDocChange 是为了跳过多余的锚点校验：标题不参与 block 定位。
-            onChange={(e) => {
-              setDoc({ ...doc, title: e.target.value });
-              setSaveState("saving");
-            }}
-            className="w-full min-w-0 rounded-lg border border-transparent bg-transparent px-2 py-1 text-lg font-semibold tracking-tight transition-colors hover:border-border focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand-ring"
-            aria-label="文档标题"
-          />
+          <Tooltip
+            label={requestLocked ? "请求处理中，请等待完成后再修改标题" : undefined}
+            side="bottom"
+            align="start"
+          >
+            <input
+              value={doc.title}
+              disabled={requestLocked}
+              // 改标题也是一次内容编辑：必须同样置 saving（否则防抖保存不触发，
+              // 标题既不落库、也不算「活动」——改完刷新就丢，且不会把文章置顶）。
+              // 不走 handleDocChange 是为了跳过多余的锚点校验：标题不参与 block 定位。
+              onChange={(e) => {
+                setDoc({ ...doc, title: e.target.value });
+                setSaveState("saving");
+              }}
+              className="w-full min-w-0 rounded-lg border border-transparent bg-transparent px-2 py-1 text-lg font-semibold tracking-tight transition-colors hover:border-border focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand-ring"
+              aria-label="文档标题"
+            />
+          </Tooltip>
         </div>
         <div
           role="group"
@@ -1386,35 +1392,40 @@ export default function Home() {
               取消审阅
             </button>
           ) : (
-            <button
-              type="button"
-              onClick={runReview}
-              disabled={requestLocked}
-              title="开始审阅（Cmd/Ctrl+Enter）"
-              className={buttonClass("primary", "sm")}
-            >
-              开始审阅
-            </button>
+            <Tooltip label="开始审阅（Ctrl+Enter）">
+              <button
+                type="button"
+                onClick={runReview}
+                disabled={requestLocked}
+                className={buttonClass("primary", "sm")}
+              >
+                开始审阅
+              </button>
+            </Tooltip>
           )}
 
-          <button
-            type="button"
-            onClick={copyAll}
-            title="复制全文（Cmd/Ctrl+Shift+C）"
-            className={buttonClass("secondary", "sm")}
-          >
-            {copyState === "copied" ? "已复制 ✓" : "复制全文"}
-          </button>
+          <Tooltip label="复制全文（Ctrl+Shift+C）">
+            <button
+              type="button"
+              onClick={copyAll}
+              className={buttonClass("secondary", "sm")}
+            >
+              {copyState === "copied" ? "已复制 ✓" : "复制全文"}
+            </button>
+          </Tooltip>
 
-          <button
-            type="button"
-            onClick={() => void clearCurrentProject()}
-            disabled={requestLocked}
-            title={requestLocked ? "请求处理中，请等待完成后再清空项目" : "清空当前项目"}
-            className={buttonClass("secondary", "sm")}
+          <Tooltip
+            label={requestLocked ? "请求处理中，请等待完成后再清空项目" : "清空当前项目"}
           >
-            清空项目
-          </button>
+            <button
+              type="button"
+              onClick={() => void clearCurrentProject()}
+              disabled={requestLocked}
+              className={buttonClass("secondary", "sm")}
+            >
+              清空项目
+            </button>
+          </Tooltip>
         </div>
 
         <div className="ml-auto flex items-center gap-3 text-xs text-text-faint xl:col-start-7 xl:row-start-1 xl:ml-0 xl:justify-self-end">
@@ -1584,13 +1595,13 @@ export default function Home() {
       </footer>
 
       {/* 设置按钮（在主题切换上方） */}
-      <button
-        type="button"
-        onClick={() => setSettingsOpen((v) => !v)}
-        aria-label="设置"
-        title="设置"
-        className="fixed bottom-16 left-4 z-50 flex h-10 w-10 items-center justify-center rounded-full border border-border bg-surface/90 shadow-md backdrop-blur-sm transition-all duration-150 hover:bg-surface-muted hover:shadow-lg"
-      >
+      <Tooltip label="设置" side="right">
+        <button
+          type="button"
+          onClick={() => setSettingsOpen((v) => !v)}
+          aria-label="设置"
+          className="fixed bottom-16 left-4 z-50 flex h-10 w-10 items-center justify-center rounded-full border border-border bg-surface/90 shadow-md backdrop-blur-sm transition-all duration-150 hover:bg-surface-muted hover:shadow-lg"
+        >
         <svg
           width="20"
           height="20"
@@ -1612,7 +1623,8 @@ export default function Home() {
           <line x1="9" y1="8" x2="15" y2="8" />
           <line x1="17" y1="16" x2="23" y2="16" />
         </svg>
-      </button>
+        </button>
+      </Tooltip>
 
       <ThemeToggle />
 
