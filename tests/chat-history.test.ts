@@ -44,14 +44,40 @@ describe("项目：标题派生", () => {
     expect(deriveProjectTitle(doc("d1", "我的手稿", "anything"))).toBe("我的手稿");
   });
 
-  it("文档标题为空时取正文首段截断", () => {
+  it("文档标题为空时取正文首段", () => {
     expect(deriveProjectTitle(doc("d1", "  ", "Introduction"))).toBe("Introduction");
   });
 
-  it("首段过长截断并加省略号", () => {
+  it("空格分词文本取前 12 个词并加省略号", () => {
+    const paragraph =
+      "Deception can be defined as a psychological process in which an individual deliberately attempts to mislead";
+    expect(deriveProjectTitle(doc("d1", "", paragraph))).toBe(
+      "Deception can be defined as a psychological process in which an individual…",
+    );
+  });
+
+  it("不超过 12 个词的空格分词文本保持完整", () => {
+    expect(deriveProjectTitle(doc("d1", "", "A concise working title"))).toBe(
+      "A concise working title",
+    );
+  });
+
+  it("连续文本过长时取前 24 个字符并加省略号", () => {
     const long = "一".repeat(40);
     const title = deriveProjectTitle(doc("d1", "", long));
     expect(title).toHaveLength(25);
+    expect(title.endsWith("…")).toBe(true);
+  });
+
+  it("跳过正文开头的空段落", () => {
+    const input = doc("d1", "", "   ");
+    input.blocks.push({ id: "p_2", type: "paragraph", text: "Actual opening paragraph" });
+    expect(deriveProjectTitle(input)).toBe("Actual opening paragraph");
+  });
+
+  it("异常长单词受硬上限约束", () => {
+    const title = deriveProjectTitle(doc("d1", "", `${"a".repeat(120)} next`));
+    expect(Array.from(title)).toHaveLength(97);
     expect(title.endsWith("…")).toBe(true);
   });
 

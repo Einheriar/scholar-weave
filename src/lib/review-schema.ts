@@ -192,7 +192,8 @@ export type ChatNode = z.infer<typeof ChatNodeSchema>;
  * 列表顺序由显式的 `order` 决定（升序、越小越靠前）：用户可手动拖动排序，
  * 任何一次「活动」（编辑正文 / 审阅出结果 / 聊天回复）会把该项目移到最前。
  * 单纯点开查看**不算**活动，不改变位置。
- * title 取正文首段截断（见 chat-history.ts 的 deriveProjectTitle）。
+ * title is derived locally from the first non-empty paragraph when no manual
+ * document title exists (see deriveProjectTitle in chat-history.ts).
  *
  * `order` 刻意是 **optional**：`listProjects` 用 safeParse 读旧数据，必填会让缺字段的
  * 既有项目校验失败、被整条丢弃（看起来像历史全没了）。旧数据在 Dexie v4 的 upgrade

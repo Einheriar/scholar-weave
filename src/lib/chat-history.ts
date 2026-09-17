@@ -10,15 +10,45 @@ export function newProjectId(): string {
 }
 
 /**
- * 项目标题：取文档标题，为空则退而取正文首段截断。
- * 文档标题是用户在标题框里输入的；未填时给正文开头的片段，列表里能看出是哪篇。
+ * Project title: prefer the manual title, then derive a readable local title
+ * from the first non-empty paragraph. Space-delimited text is capped by words;
+ * continuous text (such as Chinese) is capped by characters.
  */
 export function deriveProjectTitle(doc: DocumentState): string {
   const manual = doc.title.trim();
   if (manual) return manual;
-  const first = doc.blocks[0]?.text.trim() ?? "";
+  const first = doc.blocks.find((block) => block.text.trim())?.text.trim() ?? "";
   if (!first) return "未命名文章";
-  return first.length > TITLE_MAX ? `${first.slice(0, TITLE_MAX)}…` : first;
+
+  const normalized = first.replace(/\s+/g, " ");
+  const words = normalized.split(" ");
+  if (words.length > 1) {
+    const selected: string[] = [];
+    let selectedLength = 0;
+
+    for (const word of words.slice(0, TITLE_WORD_MAX)) {
+      const separatorLength = selected.length > 0 ? 1 : 0;
+      const nextLength = selectedLength + separatorLength + Array.from(word).length;
+      if (nextLength > TITLE_HARD_MAX) {
+        if (selected.length === 0) {
+          selected.push(Array.from(word).slice(0, TITLE_HARD_MAX).join(""));
+        }
+        break;
+      }
+      selected.push(word);
+      selectedLength = nextLength;
+    }
+
+    const title = selected.join(" ");
+    return selected.length < words.length || title !== normalized
+      ? `${title}…`
+      : title;
+  }
+
+  const characters = Array.from(normalized);
+  return characters.length > TITLE_CHAR_MAX
+    ? `${characters.slice(0, TITLE_CHAR_MAX).join("")}…`
+    : normalized;
 }
 
 /**
@@ -184,8 +214,10 @@ export function dragShifts(
   return out;
 }
 
-/** 列表里标题的字符上限，超出截断加省略号 */
-const TITLE_MAX = 24;
+/** Limits for locally derived titles; manual titles are never truncated here. */
+const TITLE_WORD_MAX = 12;
+const TITLE_CHAR_MAX = 24;
+const TITLE_HARD_MAX = 96;
 
 function pad(n: number): string {
   return n.toString().padStart(2, "0");

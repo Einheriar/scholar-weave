@@ -238,7 +238,8 @@ export default function Home() {
     if (!curDoc) return;
     const now = new Date().toISOString();
     const id = curId ?? newProjectId();
-    // 标题单一事实源：doc.title 为空时用派生标题（首段截断）回填进 doc，
+    // Single title source: when doc.title is empty, derive a local title from
+    // the first non-empty paragraph and write it back to the document.
     // 左上角标题框与历史条目显示同一份（改任一处处处生效，列表条目用实时派生）。
     const derived = deriveProjectTitle(curDoc);
     const docToSave = curDoc.title.trim()

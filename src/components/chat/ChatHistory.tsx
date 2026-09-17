@@ -638,7 +638,8 @@ function HistoryEntry({
   const [roseFor, setRoseFor] = useState<string | null>(null);
   if (justCreated && roseFor !== p.id) setRoseFor(p.id);
   const rising = roseFor === p.id;
-  // 标题实时从 doc 派生（doc.title 优先，空则首段截断），不用落库时的快照 p.title——
+  // Derive the title from doc in real time (manual title first, otherwise the
+  // first non-empty paragraph) instead of using the persisted p.title snapshot.
   // 这样左上角标题框改一个字，这里立刻跟着变，两处始终是同一个标题（单一事实源）。
   const title = deriveProjectTitle(p.doc);
   const body = (
