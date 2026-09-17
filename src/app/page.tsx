@@ -967,24 +967,16 @@ export default function Home() {
     ],
   );
 
-  /** 规则 12：当前节点锚点是否失效（原文被改/删），复用 canLocateScope 老原则 */
-  const anchorStale = useMemo(() => {
-    if (!activeNode || !doc) return false;
-    const a = activeNode.anchor;
-    if (a.type === "document") return false;
-    if (a.type === "block") return !canLocateScope(doc, { type: "block", blockId: a.blockId ?? "" });
-    if (a.type === "range")
-      return !canLocateScope(doc, {
-        type: "range",
-        blockId: a.blockId ?? "",
-        original: a.selectedText ?? "",
-      });
-    if (a.type === "review") {
-      const item = reviews.find((r) => r.id === a.reviewId);
-      return item ? !canLocateScope(doc, item.scope) : true;
-    }
-    return false;
-  }, [activeNode, doc, reviews]);
+  /** 规则 12：所有节点的锚点失效状态，供当前标签与时间线竖条共用。 */
+  const staleNodeIds = useMemo(() => {
+    if (!doc) return new Set<string>();
+    return new Set(
+      nodes
+        .filter((node) => isChatNodeAnchorStale(node, doc, reviews))
+        .map((node) => node.id),
+    );
+  }, [nodes, doc, reviews]);
+  const anchorStale = activeNode ? staleNodeIds.has(activeNode.id) : false;
 
   /** 规则 19：点时间线端点 → 切到该节点对话并滚动到对应轮次 */
   const handleJumpToTurn = useCallback(
@@ -1068,6 +1060,38 @@ export default function Home() {
       setAnnounce(`已切换到聊天节点「${node.originalText || "讨论"}」。`);
     },
     [nodes],
+  );
+
+  /**
+   * 聊天→正文：时间线竖条与头部当前上下文共用。
+   * range 恢复真实选区；review 交给既有建议高亮；block/document 只落光标。
+   */
+  const handleRevealChatAnchor = useCallback(
+    (nodeId: string) => {
+      const node = nodes.find((entry) => entry.id === nodeId);
+      if (!node || !doc) return;
+      const reviewItem =
+        node.anchor.type === "review"
+          ? reviews.find((item) => item.id === node.anchor.reviewId) ?? null
+          : null;
+      const revealed = editorRef.current?.revealChatAnchor(node, reviewItem) ?? false;
+      if (!revealed) {
+        setAnnounce("原文已变更，无法定位这个聊天节点。");
+        return;
+      }
+
+      setActiveNodeId(node.id);
+      setChatTurns(node.turns);
+      if (node.anchor.type === "review") {
+        setSelection(null);
+        setSelectedId(node.anchor.reviewId ?? null);
+      } else {
+        setSelectedId(null);
+        if (node.anchor.type !== "range") setSelection(null);
+      }
+      setAnnounce(`已定位到聊天节点「${node.originalText || "讨论"}」的正文锚点。`);
+    },
+    [nodes, doc, reviews],
   );
 
   // 打开：挂上预览框（未挂载态）并播进入动画；收起：只关 open 播退出动画，
@@ -1563,7 +1587,9 @@ export default function Home() {
                 panelHeight={chatHeight}
                 onResize={handleChatResize}
                 onJumpToTurn={handleJumpToTurn}
+                onRevealAnchor={handleRevealChatAnchor}
                 onDeleteNode={handleDeleteNode}
+                staleNodeIds={staleNodeIds}
               />
             </div>
           </div>
@@ -1661,4 +1687,28 @@ export default function Home() {
       />
     </main>
   );
+}
+
+function isChatNodeAnchorStale(
+  node: ChatNode,
+  doc: DocumentState,
+  reviews: ReviewItem[],
+): boolean {
+  const anchor = node.anchor;
+  if (anchor.type === "document") return false;
+  if (anchor.type === "block") {
+    return !canLocateScope(doc, {
+      type: "block",
+      blockId: anchor.blockId ?? "",
+    });
+  }
+  if (anchor.type === "range") {
+    return !canLocateScope(doc, {
+      type: "range",
+      blockId: anchor.blockId ?? "",
+      original: anchor.selectedText ?? "",
+    });
+  }
+  const item = reviews.find((review) => review.id === anchor.reviewId);
+  return item ? !canLocateScope(doc, item.scope) : true;
 }

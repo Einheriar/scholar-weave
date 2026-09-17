@@ -38,6 +38,10 @@ export type ContextChatProps = {
   onResize: (height: number) => void;
   /** 点击时间线端点：切到该节点并滚动到对应轮次（规则 19） */
   onJumpToTurn: (nodeId: string, turnIndex: number) => void;
+  /** 点击节点竖条或当前上下文标签：定位到该节点的正文锚点 */
+  onRevealAnchor: (nodeId: string) => void;
+  /** 当前无法可靠定位到正文的节点 id */
+  staleNodeIds: ReadonlySet<string>;
   /** 时间线行内删除该节点全部讨论（规则 13） */
   onDeleteNode: (nodeId: string) => void;
 };
@@ -66,6 +70,8 @@ export function ContextChat({
   panelHeight,
   onResize,
   onJumpToTurn,
+  onRevealAnchor,
+  staleNodeIds,
   onDeleteNode,
 }: ContextChatProps) {
   const [draft, setDraft] = useState("");
@@ -197,8 +203,32 @@ export function ContextChat({
               />
             </Tooltip>
           )}
-          <span className="truncate">
-            当前上下文：<span className="font-medium text-foreground">{contextLabel}</span>
+          <span className="flex min-w-0 items-center truncate">
+            <span className="shrink-0">当前上下文：</span>
+            {activeNode ? (
+              <Tooltip
+                label={anchorStale ? "原文已变更，无法定位" : "定位到正文锚点"}
+              >
+                <button
+                  type="button"
+                  disabled={anchorStale}
+                  onClick={() => onRevealAnchor(activeNode.id)}
+                  aria-label={`定位到当前上下文正文：${contextLabel}`}
+                  className={
+                    "min-w-0 truncate rounded px-1 py-0.5 font-medium underline decoration-dotted underline-offset-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-node-ring " +
+                    (anchorStale
+                      ? "cursor-default text-text-faint decoration-border-strong"
+                      : "cursor-pointer text-foreground decoration-node hover:bg-node-soft hover:text-node")
+                  }
+                >
+                  {contextLabel}
+                </button>
+              </Tooltip>
+            ) : (
+              <span className="truncate font-medium text-foreground">
+                {contextLabel}
+              </span>
+            )}
           </span>
         </span>
         <div className="flex shrink-0 items-center gap-1">
@@ -337,6 +367,7 @@ export function ContextChat({
         <NodeTimeline
           nodes={nodes}
           activeNodeId={activeNode?.id ?? null}
+          staleNodeIds={staleNodeIds}
           closing={timelineClosing}
           onClosingEnd={() => {
             setClosingDone(true);
@@ -345,6 +376,10 @@ export function ContextChat({
           onJump={(nodeId, turnIndex) => {
             closeTimeline();
             onJumpToTurn(nodeId, turnIndex);
+          }}
+          onRevealAnchor={(nodeId) => {
+            closeTimeline();
+            onRevealAnchor(nodeId);
           }}
           onDeleteNode={onDeleteNode}
           onClose={closeTimeline}

@@ -36,6 +36,8 @@ import { Tooltip } from "@/components/ui/tooltip";
 export type DocumentEditorHandle = {
   /** 把编辑器滚动并选中到某条建议对应的正文位置（侧栏→正文定位） */
   revealItem: (item: ReviewItem) => void;
+  /** 定位聊天节点的正文锚点；范围锚恢复选区，其余类型只落光标／高亮 */
+  revealChatAnchor: (node: ChatNode, reviewItem?: ReviewItem | null) => boolean;
   /** 返回某条建议标记在视口中的纵向位置（相对 document），供侧栏对齐用 */
   getItemViewportTop: (item: ReviewItem) => number | null;
   /** 应用一条可执行修改：替换其命中的文本范围（单条接受） */
@@ -351,6 +353,29 @@ export const DocumentEditor = forwardRef<
         .scrollIntoView()
         .run();
     },
+    revealChatAnchor(node, reviewItem) {
+      if (!editor) return false;
+      const pos = findChatAnchorPosition(
+        editor,
+        docRef.current,
+        node,
+        reviewItem,
+      );
+      if (!pos) return false;
+
+      const size = editor.state.doc.content.size;
+      const from = Math.max(0, Math.min(pos.from, size));
+      const to = Math.max(from, Math.min(pos.to, size));
+      editor
+        .chain()
+        .focus(undefined, { scrollIntoView: false })
+        // 只有 range 锚恢复真实选区。review 继续使用现有建议高亮；block/document
+        // 只落光标，避免 onSelectionUpdate 把它们误判成一个新的 range 上下文。
+        .setTextSelection(pos.selectRange && to > from ? { from, to } : from)
+        .run();
+      scrollChatAnchorIntoReadableArea(editor, from);
+      return true;
+    },
     getItemViewportTop(item) {
       if (!editor) return null;
       const pos = findItemPosition(editor, docRef.current, item);
@@ -470,6 +495,85 @@ function findItemPosition(
     return { from: start + 1, to: start + node.nodeSize - 1 };
   }
   return null; // document 级无正文位置
+}
+
+/**
+ * 把四类聊天锚点解析成 ProseMirror 位置。定位原则与正文 Decoration 相同：
+ * 不能唯一定位就返回 null，绝不猜测。
+ */
+function findChatAnchorPosition(
+  editor: Editor,
+  doc: DocumentState,
+  node: ChatNode,
+  reviewItem?: ReviewItem | null,
+): { from: number; to: number; selectRange: boolean } | null {
+  const anchor = node.anchor;
+  if (anchor.type === "document") {
+    const start = Math.min(1, editor.state.doc.content.size);
+    return { from: start, to: start, selectRange: false };
+  }
+  if (anchor.type === "review") {
+    if (!reviewItem) return null;
+    if (reviewItem.scope.type === "document") {
+      const start = Math.min(1, editor.state.doc.content.size);
+      return { from: start, to: start, selectRange: false };
+    }
+    const pos = findItemPosition(editor, doc, reviewItem);
+    return pos ? { ...pos, selectRange: false } : null;
+  }
+  if (anchor.type === "block") {
+    if (!anchor.blockId) return null;
+    const start = blockStartPosition(editor, anchor.blockId);
+    if (start == null) return null;
+    return { from: start + 1, to: start + 1, selectRange: false };
+  }
+  if (!anchor.blockId || !anchor.selectedText) return null;
+  const hit = locateRange(doc, {
+    type: "range",
+    blockId: anchor.blockId,
+    original: anchor.selectedText,
+  });
+  if (!hit.ok) return null;
+  const blockStart = blockStartPosition(editor, anchor.blockId);
+  if (blockStart == null) return null;
+  return {
+    from: blockStart + 1 + hit.start,
+    to: blockStart + 1 + hit.end,
+    selectRange: true,
+  };
+}
+
+/**
+ * 把正文锚点放到 sticky 聊天框上方的可读区域中央，而不是简单按整个视口居中。
+ * 聊天框较高时，普通 scrollIntoView({block:"center"}) 可能把目标压在其后面。
+ */
+function scrollChatAnchorIntoReadableArea(editor: Editor, position: number) {
+  requestAnimationFrame(() => {
+    let rect: { top: number; bottom: number };
+    try {
+      rect = editor.view.coordsAtPos(position);
+    } catch {
+      return;
+    }
+    const chat = document.querySelector('[aria-label="上下文对话"]');
+    const chatTop =
+      chat instanceof HTMLElement
+        ? Math.min(window.innerHeight, chat.getBoundingClientRect().top)
+        : window.innerHeight;
+    const visibleTop = 24;
+    const visibleBottom = Math.max(
+      visibleTop + 120,
+      Math.min(window.innerHeight - 24, chatTop - 16),
+    );
+    const desiredY = visibleTop + (visibleBottom - visibleTop) * 0.45;
+    const currentY = (rect.top + rect.bottom) / 2;
+    const delta = currentY - desiredY;
+    if (Math.abs(delta) < 2) return;
+    const reduce =
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches ||
+      navigator.webdriver;
+    window.scrollBy({ top: delta, behavior: reduce ? "auto" : "smooth" });
+  });
 }
 
 /** 找到某 blockId 对应段落在 PM 文档中的起始位置 */

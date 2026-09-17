@@ -9,8 +9,12 @@ export type NodeTimelineProps = {
   nodes: ChatNode[];
   /** 当前查看的节点 id（当前节点行高亮，规则 18） */
   activeNodeId: string | null;
+  /** 当前无法可靠定位到正文的节点 id */
+  staleNodeIds: ReadonlySet<string>;
   /** 点击端点：切到该节点并滚动到对应轮次（规则 19） */
   onJump: (nodeId: string, turnIndex: number) => void;
+  /** 点击节点身份竖条：切到并定位该节点的正文锚点 */
+  onRevealAnchor: (nodeId: string) => void;
   /** 行内删除该节点全部讨论（规则 13，直接删不弹确认） */
   onDeleteNode: (nodeId: string) => void;
   onClose: () => void;
@@ -40,7 +44,9 @@ const PAN_STEP = 2;
 export function NodeTimeline({
   nodes,
   activeNodeId,
+  staleNodeIds,
   onJump,
+  onRevealAnchor,
   onDeleteNode,
   onClose,
   closing,
@@ -140,11 +146,13 @@ export function NodeTimeline({
               key={node.id}
               node={node}
               isActive={node.id === activeNodeId}
+              anchorStale={staleNodeIds.has(node.id)}
               dimmed={hover !== null && hover.row !== row}
               lit={hover?.row === row}
               onShowTip={(content) => showTip(row, node, content)}
               onHideTip={() => setHover(null)}
               onJump={onJump}
+              onRevealAnchor={onRevealAnchor}
               onDeleteNode={onDeleteNode}
             />
           ))}
@@ -173,15 +181,18 @@ export function NodeTimeline({
 function NodeRow({
   node,
   isActive,
+  anchorStale,
   dimmed,
   lit,
   onShowTip,
   onHideTip,
   onJump,
+  onRevealAnchor,
   onDeleteNode,
 }: {
   node: ChatNode;
   isActive: boolean;
+  anchorStale: boolean;
   /** 其它行正被 hover：本行压暗，突出焦点那行 */
   dimmed: boolean;
   /** 本行正被 hover（端点上）：提亮 */
@@ -189,6 +200,7 @@ function NodeRow({
   onShowTip: (content: string) => void;
   onHideTip: () => void;
   onJump: (nodeId: string, turnIndex: number) => void;
+  onRevealAnchor: (nodeId: string) => void;
   onDeleteNode: (nodeId: string) => void;
 }) {
   const turns = node.turns;
@@ -251,15 +263,31 @@ function NodeRow({
         (dimmed ? " opacity-60" : "")
       }
     >
-      {/* 节点身份竖条（琥珀；当前节点深一号）——竖条而非圆点，
-          与轨道上的提问端点形态区分，避免被误认成「多一次提问」 */}
-      <span
-        className={
-          "h-4 w-[3px] shrink-0 rounded-full " +
-          (isActive ? "bg-node-hover" : "bg-node")
-        }
-        aria-hidden
-      />
+      {/* 节点身份竖条仍是次要入口：视觉保持 3px，仅把命中区温和扩到 12×24px。
+          它与轨道端点语义分工：竖条回正文，端点跳某次提问。 */}
+      <Tooltip
+        label={anchorStale ? "原文已变更，无法定位" : "定位到正文锚点"}
+      >
+        <button
+          type="button"
+          disabled={anchorStale}
+          onClick={() => onRevealAnchor(node.id)}
+          aria-label={`定位到节点「${nodeTitle}」的正文锚点`}
+          className={
+            "group -my-1 flex h-6 w-3 shrink-0 items-center justify-center rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-node-ring " +
+            (anchorStale ? "cursor-default opacity-45" : "cursor-pointer")
+          }
+        >
+          <span
+            className={
+              "h-4 w-[3px] rounded-full transition-all duration-150 " +
+              (isActive ? "bg-node-hover" : "bg-node") +
+              (anchorStale ? "" : " group-hover:w-[5px]")
+            }
+            aria-hidden
+          />
+        </button>
+      </Tooltip>
 
       {/* 尺子轨道：横向可滚，端点左对齐固定间距；scrollbar 隐藏，靠两端箭头卷动 */}
       <div className="relative min-w-16 flex-1">

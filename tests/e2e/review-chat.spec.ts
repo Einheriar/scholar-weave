@@ -167,6 +167,52 @@ test.describe("上下文对话（mock /api/chat）", () => {
     expect(await paragraphTexts(page)).toEqual(before);
   });
 
+  test("当前上下文标签与节点竖条都能定位回正文锚点", async ({ page }) => {
+    await mockChatRoute(page, { withChanges: false });
+    await gotoApp(page);
+    await loadSample(page);
+    await selectTextInEditor(page, "upstanding");
+    await sendChatMessage(page, "解释一下这个词");
+    await expect(
+      page.getByText("这是纯解释回复（mock），不包含任何正文修改。"),
+    ).toBeVisible();
+
+    const contextAnchor = page.getByRole("button", {
+      name: /定位到当前上下文正文/,
+    });
+    await contextAnchor.click();
+    await expect
+      .poll(() =>
+        page.evaluate(() => (window.getSelection()?.toString() ?? "").trim()),
+      )
+      .toBe("upstanding");
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const selection = window.getSelection();
+          const chat = document.querySelector('[aria-label="上下文对话"]');
+          if (!selection?.rangeCount || !(chat instanceof HTMLElement)) return false;
+          const rect = selection.getRangeAt(0).getBoundingClientRect();
+          return rect.top >= 16 && rect.bottom <= chat.getBoundingClientRect().top - 8;
+        }),
+      )
+      .toBe(true);
+
+    await page.getByRole("button", { name: "聊天节点历史" }).click();
+    const timeline = page.getByRole("dialog", { name: "聊天节点历史" });
+    const identityAnchor = timeline.getByRole("button", {
+      name: /定位到节点.*正文锚点/,
+    });
+    await expect(identityAnchor).toBeVisible();
+    await identityAnchor.click();
+    await expect(timeline).toHaveCount(0);
+    await expect
+      .poll(() =>
+        page.evaluate(() => (window.getSelection()?.toString() ?? "").trim()),
+      )
+      .toBe("upstanding");
+  });
+
   test("重新载入样例会清空旧聊天现场", async ({ page }) => {
     await mockChatRoute(page, { withChanges: false });
     await gotoApp(page);
