@@ -17,7 +17,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 | 文件 | 性质 | 放什么 |
 |------|------|--------|
-| `HANDOFF.md` | **临时** | 只在需要别的 agent 接手时存在：当前进度、本机环境、下一步。工作交接完就可以被覆盖或删掉 |
+| `plan/HANDOFF.md` | **临时** | 只在需要别的 agent 接手时存在：当前进度、本机环境、下一步。工作交接完就可以被覆盖或删掉 |
 | `AGENTS.md`（本文件） | **永久** | 整体注意事项、实现约定、踩过的坑、有意为之的取舍 |
 | `README.md` | **永久** | 面向 GitHub 访客的产品介绍、快速开始、隐私边界与分发方式 |
 | `DEVELOPMENTER.md` | **永久** | 面向开发者的完整技术说明、开发命令、打包排错与实现细节 |
@@ -25,12 +25,12 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 | `plan/CHANGELOG.md` | **永久** | 变更记录，条目对应 git 提交、按里程碑分组 |
 | `plan/TODO.md` | 临时 | 短期任务清单 |
 
-`plan/` 目录专放**计划、变更记录与短期任务清单**；已完成且不再作为当前执行依据的方案与讨论文档移入 `plan/archive/`。新的计划类文档、每个里程碑的变更记录，以及短期任务清单都放这里。引用时用相对路径（`plan/PLAN.md`、`plan/CHANGELOG.md`、`plan/TODO.md`）。
+`plan/` 目录专放**计划、变更记录、短期任务清单与临时交接说明**；已完成且不再作为当前执行依据的方案与讨论文档移入 `plan/archive/`。新的计划类文档、每个里程碑的变更记录，以及短期任务清单都放这里。引用时用相对路径（`plan/PLAN.md`、`plan/CHANGELOG.md`、`plan/TODO.md`、`plan/HANDOFF.md`）。
 
 规则：
 
-- **不要新建 `HANDOFF-stageN.md` / `HANDOFF-<主题>.md` 这类分册。** 交接内容直接改写 `HANDOFF.md`。已有分册要先把独有信息合并进去、确认无丢失、再删除，并检查有无别处引用它。
-- 长期有效的知识**不要**留在 `HANDOFF.md`；`HANDOFF.md` 变长说明有内容放错了位置。
+- **不要新建 `HANDOFF-stageN.md` / `HANDOFF-<主题>.md` 这类分册。** 交接内容直接改写 `plan/HANDOFF.md`。已有分册要先把独有信息合并进去、确认无丢失、再删除，并检查有无别处引用它。
+- 长期有效的知识**不要**留在 `plan/HANDOFF.md`；`plan/HANDOFF.md` 变长说明有内容放错了位置。
 - 更新文档时同步核对里面的数字（测试用例数、完成阶段、关键文件地图）是否还准。
 
 ## Git 操作：先获得许可，再执行

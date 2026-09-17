@@ -2,7 +2,7 @@
 
 本地优先、Web 优先的 AI 文档审阅工作台。把长文本交给 LLM 检查语病、清晰度和行文质量，审阅结果以“全文意见 / 段落意见 / 局部修改”三层形式绑定到原文位置，所有修改必须先预览、再由用户逐条确认后才会应用。
 
-完整的产品定义、技术设计与实施计划见 [plan/PLAN.md](./plan/PLAN.md)；变更记录见 [plan/CHANGELOG.md](./plan/CHANGELOG.md)；实现约定、踩坑记录与设计取舍见 [AGENTS.md](./AGENTS.md)；当前进度与交接状态见 [HANDOFF.md](./HANDOFF.md)。
+完整的产品定义、技术设计与实施计划见 [plan/PLAN.md](./plan/PLAN.md)；变更记录见 [plan/CHANGELOG.md](./plan/CHANGELOG.md)；实现约定、踩坑记录与设计取舍见 [AGENTS.md](./AGENTS.md)；当前进度与交接状态见 [plan/HANDOFF.md](./plan/HANDOFF.md)。
 
 ### 关于 `plan/` 目录
 
@@ -192,4 +192,4 @@ LLM 未经确认不改正文、防注入、密钥只在服务端——统一维�
 - **界面** — 深浅色主题切换、左侧对话历史、键盘快捷键（`Ctrl+Enter` 审阅、`Ctrl+Shift+C` 复制全文）、
   屏幕阅读器播报与键盘可达。
 
-后续阶段进度与当前测试基线见 [HANDOFF.md](./HANDOFF.md)。
+后续阶段进度与当前测试基线见 [plan/HANDOFF.md](./plan/HANDOFF.md)。
