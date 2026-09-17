@@ -99,16 +99,40 @@ describe("POST /api/review", () => {
     expect((await res.json()).error.code).toBe("llm_schema_mismatch");
   });
 
-  it("LLM 调用抛错 → 502 llm_error（不泄露内部细节）", async () => {
+  it("LLM 首次结构不符时自动纠错一次", async () => {
+    const repaired = {
+      documentSummary: "纠错后结构有效。",
+      items: [],
+    };
+    const gen = vi
+      .fn<LLMProvider["generate"]>()
+      .mockResolvedValueOnce(JSON.stringify({ foo: 1 }))
+      .mockResolvedValueOnce(JSON.stringify(repaired));
     vi.spyOn(providerMod, "getProviderFromEnv").mockReturnValue({
       name: "mock",
-      generate: vi.fn(async () => {
-        throw new Error("upstream exploded");
-      }),
+      generate: gen,
+    });
+
+    const res = await POST(makeReq(validBody()));
+    expect(res.status).toBe(200);
+    expect((await res.json()).documentSummary).toBe("纠错后结构有效。");
+    expect(gen).toHaveBeenCalledTimes(2);
+    expect(gen.mock.calls[1][0].at(-1)?.content).toContain("上一条回复未通过结构校验");
+    expect(gen.mock.calls[1][1]).toMatchObject({ temperature: 0 });
+  });
+
+  it("LLM 调用抛错 → 502 llm_error（不泄露内部细节）", async () => {
+    const gen = vi.fn(async () => {
+      throw new Error("upstream exploded");
+    });
+    vi.spyOn(providerMod, "getProviderFromEnv").mockReturnValue({
+      name: "mock",
+      generate: gen,
     });
     const res = await POST(makeReq(validBody()));
     expect(res.status).toBe(502);
     expect((await res.json()).error.code).toBe("llm_error");
+    expect(gen).toHaveBeenCalledTimes(1);
   });
 
   it("正常流程：返回带 status/documentRevision 的完整建议", async () => {

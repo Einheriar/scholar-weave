@@ -249,6 +249,7 @@ tests/e2e/                      # Playwright 用例（helpers.ts 里是 mock 与
 25. **LLM 输出里的 ID 不可信，也不属于 wire 协议。** `LLMReviewItemSchema` / `LLMConcreteEditSchema` 不要求模型返回 `id`；即使模型多输出了该字段，Zod 解析后也会剥离。三个 API 路由统一在服务端用 `crypto.randomUUID()` 生成 `review_*` / `edit_*`，前端绝不能用模型给的 ID 做 React key 或状态身份。
 26. **一个自然段内部正式支持 `\n`。** `DocumentState.blocks[].text` 用换行字符表示 Shift+Enter，`tiptap-convert.ts` 双向映射为 ProseMirror `hardBreak`。所有程序化替换必须走 `textToPMContent()`，不能直接把 replacement 当 HTML/富文本插入；否则会丢换行，且类似 `<b>` 的原文会被解释成标签。
 27. **单条 edit 撤销必须是安全反向操作。** range edit 用当前正文中的 `replacement + prefix/suffix` 重新定位，找不到或不唯一就拒绝；block edit 接受时把 `{before, after}` 存入 `ReviewItem.acceptedSnapshot`，只有当前整段仍严格等于 `after` 才恢复 `before`。不要退回仅存在内存的整段快照，也不要覆盖用户接受后继续做的编辑。
+28. **所有结构化 LLM 输出统一走有限纠错与显式重试。** `/api/review`、`/api/chat`、`/api/change-set` 都必须复用 `callLLMStructured()`：首次输出遇到 JSON 解析失败或 Zod 协议不符时，追加原回复和精简校验错误，以 `temperature: 0` 自动纠错一次；网络、超时、鉴权和供应商错误不得自动重试，避免重复计费或放大故障。第二次仍失败则返回统一错误，由前端显示手动重试按钮。聊天手动重试必须复用失败节点中已经落下的最后一条 user turn，并从 history 临时排除它，不能生成重复提问气泡；测试连接返回普通文本，不属于这套结构化重试。
 
 ## 有意为之的取舍（不要当 bug 改掉）
 

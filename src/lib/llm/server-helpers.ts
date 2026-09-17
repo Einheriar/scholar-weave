@@ -32,9 +32,69 @@ export type CallLLMResult<T> =
   | { ok: true; data: T }
   | { ok: false; response: NextResponse<ApiError> };
 
+type StructuredParseResult<T> =
+  | { ok: true; data: T }
+  | {
+      ok: false;
+      code: "llm_bad_json" | "llm_schema_mismatch";
+      detail: string;
+    };
+
+function parseStructuredContent<S extends z.ZodType>(
+  content: string,
+  schema: S,
+): StructuredParseResult<z.infer<S>> {
+  let json: unknown;
+  try {
+    json = JSON.parse(extractJson(content));
+  } catch {
+    return {
+      ok: false,
+      code: "llm_bad_json",
+      detail: "输出不是可解析的 JSON。",
+    };
+  }
+  const parsed = schema.safeParse(json);
+  if (!parsed.success) {
+    const detail = parsed.error.issues
+      .slice(0, 6)
+      .map((issue) => {
+        const path = issue.path.length > 0 ? issue.path.join(".") : "根对象";
+        return `${path}: ${issue.message}`;
+      })
+      .join("；");
+    return {
+      ok: false,
+      code: "llm_schema_mismatch",
+      detail: detail || "输出字段不符合协议。",
+    };
+  }
+  return { ok: true, data: parsed.data };
+}
+
+function buildRepairMessages(
+  messages: ChatMessage[],
+  invalidContent: string,
+  detail: string,
+): ChatMessage[] {
+  return [
+    ...messages,
+    // 防止异常供应商返回超长垃圾文本，让纠错请求本身无限膨胀。
+    { role: "assistant", content: invalidContent.slice(0, 20_000) },
+    {
+      role: "user",
+      content:
+        `上一条回复未通过结构校验：${detail}\n` +
+        "请只修正 JSON 的语法和字段结构，不改变原有判断、建议或修改内容。" +
+        "严格遵循最初系统消息中的输出协议，只输出一个 JSON 对象，不要代码围栏或解释。",
+    },
+  ];
+}
+
 /**
  * 调用 LLM 并解析/校验结构化输出。
  * 负责超时、客户端取消、JSON 提取、Zod 校验，返回统一错误。
+ * 首次仅在 JSON / Schema 错误时自动纠错一次；网络、超时和供应商错误不重试。
  */
 export async function callLLMStructured<S extends z.ZodType>(
   request: Request,
@@ -43,6 +103,7 @@ export async function callLLMStructured<S extends z.ZodType>(
   opts: {
     timeoutMs?: number;
     maxTokens?: number;
+    debugLabel?: string;
     llmConfig?: {
       apiKey: string;
       baseURL?: string;
@@ -82,6 +143,43 @@ export async function callLLMStructured<S extends z.ZodType>(
       maxTokens: opts.maxTokens ?? 16000,
       reasoningEffort: opts.llmConfig?.reasoningEffort,
     });
+    if (opts.debugLabel && process.env.DEBUG_REVIEW === "1") {
+      console.log(`[${opts.debugLabel}] raw content length:`, content.length);
+      console.log(`[${opts.debugLabel}] raw head:`, content.slice(0, 500));
+      console.log(
+        `[${opts.debugLabel}] extracted head:`,
+        extractJson(content).slice(0, 500),
+      );
+    }
+
+    const firstParsed = parseStructuredContent(content, schema);
+    if (firstParsed.ok) return firstParsed;
+    if (opts.debugLabel && process.env.DEBUG_REVIEW === "1") {
+      console.log(`[${opts.debugLabel}] structured parse error:`, firstParsed.detail);
+    }
+
+    content = await provider.generate(
+      buildRepairMessages(messages, content, firstParsed.detail),
+      {
+        jsonMode: true,
+        signal: controller.signal,
+        maxTokens: opts.maxTokens ?? 16000,
+        temperature: 0,
+        reasoningEffort: opts.llmConfig?.reasoningEffort,
+      },
+    );
+    const repaired = parseStructuredContent(content, schema);
+    if (repaired.ok) return repaired;
+    return {
+      ok: false,
+      response: apiError(
+        502,
+        repaired.code,
+        repaired.code === "llm_bad_json"
+          ? "LLM 自动纠错后仍未返回合法 JSON。"
+          : "LLM 自动纠错后返回结构仍不符合协议。",
+      ),
+    };
   } catch (e) {
     if (e instanceof Error && e.name === "AbortError") {
       const clientAborted = request.signal.aborted;
@@ -106,22 +204,4 @@ export async function callLLMStructured<S extends z.ZodType>(
     clearTimeout(timer);
     request.signal.removeEventListener("abort", onClientAbort);
   }
-
-  let json: unknown;
-  try {
-    json = JSON.parse(extractJson(content));
-  } catch {
-    return {
-      ok: false,
-      response: apiError(502, "llm_bad_json", "LLM 未返回合法 JSON。"),
-    };
-  }
-  const parsed = schema.safeParse(json);
-  if (!parsed.success) {
-    return {
-      ok: false,
-      response: apiError(502, "llm_schema_mismatch", "LLM 返回结构不符合协议。"),
-    };
-  }
-  return { ok: true, data: parsed.data };
 }

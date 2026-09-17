@@ -38,6 +38,34 @@ function validBody(overrides: Record<string, unknown> = {}) {
 beforeEach(() => vi.restoreAllMocks());
 
 describe("POST /api/change-set", () => {
+  it("LLM 首次返回非法 JSON 时自动纠错一次", async () => {
+    const payload = {
+      summary: "纠错后可用",
+      edits: [
+        {
+          blockId: "p_a",
+          original: "共同的表明",
+          replacement: "共同表明",
+          explanation: "删除多余助词。",
+        },
+      ],
+    };
+    const gen = vi
+      .fn<LLMProvider["generate"]>()
+      .mockResolvedValueOnce("not json")
+      .mockResolvedValueOnce(JSON.stringify(payload));
+    vi.spyOn(providerMod, "getProviderFromEnv").mockReturnValue({
+      name: "mock",
+      generate: gen,
+    });
+
+    const res = await POST(makeReq(validBody()));
+    expect(res.status).toBe(200);
+    expect((await res.json()).changeSet.summary).toBe("纠错后可用");
+    expect(gen).toHaveBeenCalledTimes(2);
+    expect(gen.mock.calls[1][1]).toMatchObject({ temperature: 0 });
+  });
+
   it("忽略模型 edit ID，为重复 ID 重新生成唯一 ID，并透传 reasoningEffort", async () => {
     const payload = {
       summary: "改进表达",

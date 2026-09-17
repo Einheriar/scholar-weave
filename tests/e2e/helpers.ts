@@ -64,8 +64,23 @@ export const MOCK_REVIEW_SUMMARY = "整体结构清晰，但结尾段落存在�
  * 拦截 POST /api/review，返回固定三层建议（避开真实 LLM 与 API Key）。
  * 锚点用请求体里的真实 blockId 与真实存在的原文片段。
  */
-export async function mockReviewRoute(page: Page) {
+export async function mockReviewRoute(
+  page: Page,
+  opts: { failFirst?: boolean } = {},
+) {
+  let attempts = 0;
   await page.route("**/api/review", async (route) => {
+    attempts += 1;
+    if (opts.failFirst && attempts === 1) {
+      await route.fulfill({
+        status: 502,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: { code: "llm_error", message: "LLM 调用失败（mock）。" },
+        }),
+      });
+      return;
+    }
     const body = route.request().postDataJSON() as {
       revision: number;
       checksum: string;
@@ -141,9 +156,25 @@ export async function mockReviewRoute(page: Page) {
  */
 export async function mockChatRoute(
   page: Page,
-  opts: { withChanges?: boolean; withReviewProposal?: boolean } = {},
+  opts: {
+    withChanges?: boolean;
+    withReviewProposal?: boolean;
+    failFirst?: boolean;
+  } = {},
 ) {
+  let attempts = 0;
   await page.route("**/api/chat", async (route) => {
+    attempts += 1;
+    if (opts.failFirst && attempts === 1) {
+      await route.fulfill({
+        status: 502,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: { code: "llm_error", message: "对话失败（mock）。" },
+        }),
+      });
+      return;
+    }
     const body = route.request().postDataJSON() as {
       revision: number;
       blocks: Block[];
@@ -196,6 +227,57 @@ export async function mockChatRoute(
                   original: "overlooking the interpersonal part",
                   replacement: "overlooking the interpersonal dimension",
                   explanation: "更符合学术行文，且避免与前文重复。",
+                  status: "pending",
+                },
+              ]
+            : [],
+        },
+      }),
+    });
+  });
+}
+
+/** 拦截 opinion → ChangeSet；可让第一次失败，用于验证前端手动重试。 */
+export async function mockChangeSetRoute(
+  page: Page,
+  opts: { failFirst?: boolean } = {},
+) {
+  let attempts = 0;
+  await page.route("**/api/change-set", async (route) => {
+    attempts += 1;
+    if (opts.failFirst && attempts === 1) {
+      await route.fulfill({
+        status: 502,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: { code: "llm_error", message: "生成修改集失败（mock）。" },
+        }),
+      });
+      return;
+    }
+    const body = route.request().postDataJSON() as {
+      revision: number;
+      sourceReview: { id: string };
+      blocks: Block[];
+    };
+    const target = findBlock(body.blocks, "Deception can be defined");
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        changeSet: {
+          id: "cs_opinion_mock",
+          sourceReviewId: body.sourceReview.id,
+          documentRevision: body.revision,
+          summary: "按意见生成的修改（mock）。",
+          edits: target
+            ? [
+                {
+                  id: "edit_opinion_mock",
+                  blockId: target.id,
+                  original: "Deception can be defined",
+                  replacement: "Deception may be defined",
+                  explanation: "验证修改集重试。",
                   status: "pending",
                 },
               ]

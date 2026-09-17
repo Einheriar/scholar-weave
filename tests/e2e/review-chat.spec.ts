@@ -3,6 +3,7 @@ import {
   MOCK_REVIEW_SUMMARY,
   gotoApp,
   loadSample,
+  mockChangeSetRoute,
   mockChatRoute,
   mockReviewRoute,
   paragraphTexts,
@@ -88,23 +89,37 @@ test.describe("LLM 审阅（mock /api/review）", () => {
     await expect(card(page, "m_edit")).toBeVisible();
   });
 
-  test("审阅请求失败时显示错误状态", async ({ page }) => {
-    await page.route("**/api/review", (route) =>
-      route.fulfill({
-        status: 502,
-        contentType: "application/json",
-        body: JSON.stringify({
-          error: { code: "llm_error", message: "LLM 调用失败（mock）。" },
-        }),
-      }),
-    );
+  test("审阅请求失败时可手动重试", async ({ page }) => {
+    await mockReviewRoute(page, { failFirst: true });
     await gotoApp(page);
 
     await page.getByRole("button", { name: "开始审阅" }).click();
 
-    await expect(page.locator('p[role="alert"]')).toContainText(
-      "LLM 调用失败（mock）。",
-    );
+    const alert = page.locator('[role="alert"]').filter({
+      hasText: "LLM 调用失败（mock）。",
+    });
+    await expect(alert).toContainText("LLM 调用失败（mock）。");
+    await alert.getByRole("button", { name: "重试审阅" }).click();
+    await expect(page.getByText(MOCK_REVIEW_SUMMARY)).toBeVisible();
+  });
+
+  test("按意见生成修改失败时可手动重试", async ({ page }) => {
+    await mockReviewRoute(page);
+    await mockChangeSetRoute(page, { failFirst: true });
+    await gotoApp(page);
+    await page.getByRole("button", { name: "开始审阅" }).click();
+
+    await card(page, "m_doc")
+      .getByRole("button", { name: "按此意见修改" })
+      .click();
+    const alert = page.locator('[role="alert"]').filter({
+      hasText: "生成修改集失败（mock）。",
+    });
+    await expect(alert).toContainText("生成修改集失败（mock）。");
+    await alert.getByRole("button", { name: "重试生成" }).click();
+
+    await expect(page.getByRole("dialog", { name: "修改集预览" })).toBeVisible();
+    await expect(page.getByText("按意见生成的修改（mock）。")).toBeVisible();
   });
 
   test("接受 mock 修改会改正文，撤销后还原", async ({ page }) => {
@@ -193,6 +208,26 @@ test.describe("上下文对话（mock /api/chat）", () => {
     // 没有任何“预览修改”入口，正文不变
     await expect(page.getByRole("button", { name: /预览修改/ })).toHaveCount(0);
     expect(await paragraphTexts(page)).toEqual(before);
+  });
+
+  test("对话失败时可原上下文重试且不重复提问", async ({ page }) => {
+    await mockChatRoute(page, { withChanges: false, failFirst: true });
+    await gotoApp(page);
+    await loadSample(page);
+    await selectTextInEditor(page, "upstanding");
+
+    const question = "这条失败的提问只应出现一次";
+    await sendChatMessage(page, question);
+    const alert = page.locator('[role="alert"]').filter({
+      hasText: "对话失败（mock）。",
+    });
+    await expect(alert).toContainText("对话失败（mock）。");
+    await alert.getByRole("button", { name: "重试对话" }).click();
+
+    await expect(
+      page.getByText("这是纯解释回复（mock），不包含任何正文修改。"),
+    ).toBeVisible();
+    await expect(page.getByText(question, { exact: true })).toHaveCount(1);
   });
 
   test("讨论结论可转为审阅意见，刷新后可再次定位", async ({ page }) => {

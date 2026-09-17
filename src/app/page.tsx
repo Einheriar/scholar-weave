@@ -65,6 +65,10 @@ const MODE_LABEL: Record<ReviewMode, string> = {
 
 type Selection = { blockId: string; text: string } | null;
 
+type LlmRetryAction =
+  | { type: "chat"; message: string; nodeId: string }
+  | { type: "change-set"; reviewId: string };
+
 /** 聊天区高度（拖拽把手可调）的持久化 key 与范围 */
 const CHAT_HEIGHT_KEY = "supergrammarly-chat-height";
 const DEFAULT_CHAT_HEIGHT = 320;
@@ -84,6 +88,7 @@ export default function Home() {
   const [chatTurns, setChatTurns] = useState<ChatTurn[]>([]);
   const [chatBusy, setChatBusy] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
+  const [llmRetry, setLlmRetry] = useState<LlmRetryAction | null>(null);
   const [applyingOpinionId, setApplyingOpinionId] = useState<string | null>(null);
   const [activeChangeSet, setActiveChangeSet] = useState<ChangeSet | null>(null);
   // 修改集预览框常驻渲染：open 驱动进/出动画，播完由 onClosed 卸载
@@ -328,6 +333,7 @@ export default function Home() {
       setChatTurns(lastNode?.turns ?? []);
       setSelection(null);
       setSelectedId(null);
+      setLlmRetry(null);
       setChatError(null);
       setChangeSetOpen(false);
       setSaveState("idle");
@@ -405,6 +411,7 @@ export default function Home() {
     setChatTurns([]);
     setSelection(null);
     setSelectedId(null);
+    setLlmRetry(null);
     setChatError(null);
     setChangeSetOpen(false);
     if (!opts?.keepHistoryOpen) setHistoryOpen(false);
@@ -674,6 +681,7 @@ export default function Home() {
     if (item.status === "accepted" && item.kind === "edit") {
       const ok = editorRef.current?.revertEdit(item) ?? false;
       if (!ok) {
+        setLlmRetry(null);
         setChatError("正文已变化，无法安全撤销这条修改。");
         setAnnounce("正文已变化，无法安全撤销这条修改。");
         return;
@@ -702,6 +710,7 @@ export default function Home() {
   }, []);
 
   const handleEditorReviewUndoUnavailable = useCallback(() => {
+    setLlmRetry(null);
     setChatError("正文已变化，无法安全撤销这条修改。");
     setAnnounce("正文已变化，无法安全撤销这条修改。");
   }, []);
@@ -795,23 +804,27 @@ export default function Home() {
 
   // ── 对话（节点化：规则 7/8/10/11/24）──
   const sendChat = useCallback(
-    async (message: string) => {
+    async (message: string, retryNodeId?: string) => {
       if (!doc) return;
       if (requestLocked) {
         announceRequestLock();
         return;
       }
+      const retryNode = retryNodeId
+        ? latestRef.current.nodes.find((node) => node.id === retryNodeId)
+        : undefined;
       // 规则 11：无选区且无选中建议时禁止提问（想问全文请自行全选）
-      if (chatForbidden) {
+      if (!retryNode && chatForbidden) {
+        setLlmRetry(null);
         setChatError("请先选中正文中的词、段落，或选中一条审阅建议，再提问。");
         setAnnounce("提问前请先选中正文或一条建议。");
         return;
       }
-      const ctx = chatContext;
+      const ctx = retryNode?.anchor ?? chatContext;
       // 规则 8/10：当前上下文 = 有新选区跟新选区，没选区跟正在查看的节点。
       // 发送那一刻才按身份找/建节点（规则 7）。从 latestRef 读最新节点，
       // 避免闭包里的 nodes 是旧快照导致新建节点冲掉已有节点。
-      const existing = findNodeByAnchor(latestRef.current.nodes, ctx);
+      const existing = retryNode ?? findNodeByAnchor(latestRef.current.nodes, ctx);
       const nodeId = existing?.id ?? `node_${crypto.randomUUID()}`;
       // 节点锚点原文快照：range 取选区原文；review 锚取建议定位到的原文（range/block 级）
       const anchorReview =
@@ -828,10 +841,13 @@ export default function Home() {
         createdAt: new Date().toISOString(),
         turns: [],
       };
-      const nodeWithUser: ChatNode = {
-        ...targetNode,
-        turns: [...targetNode.turns, { role: "user", content: message }],
-      };
+      // 手动重试复用失败请求已经写入的最后一条 user turn，不能再插入一遍。
+      const nodeWithUser: ChatNode = retryNode
+        ? targetNode
+        : {
+            ...targetNode,
+            turns: [...targetNode.turns, { role: "user", content: message }],
+          };
       // 基于 latestRef 先算好再 setState（updater 副作用在批处理下不可靠）：
       // 优先用回调里已写入的最新节点，其次用闭包 nodes
       const baseNodes = latestRef.current.nodes.length ? latestRef.current.nodes : nodes;
@@ -843,13 +859,17 @@ export default function Home() {
       activeNodeIdRef.current = nodeId;
       setActiveNodeId(nodeId);
       setChatTurns(nodeWithUser.turns);
+      setLlmRetry(null);
       setChatError(null);
       // 触发项目落库（建档时机：发消息即保存，id 在防抖保存里分配）
       setSaveState("saving");
 
       // 规则 24：节点边界即上下文边界。history 取本节点全部轮次（不含跨节点），
       // blocks 用 packBlocks 取锚点段 ±1 段，建议只带锚点段的 open 建议。
-      const history = targetNode.turns
+      const historySource = retryNode
+        ? targetNode.turns.slice(0, -1)
+        : targetNode.turns;
+      const history = historySource
         .map((t) => ({ role: t.role, content: t.content }));
       const blocks = packBlocks(ctx);
       const anchorBlockId =
@@ -899,12 +919,12 @@ export default function Home() {
               explanation: r.explanation,
               category: r.category,
             })),
-            reviewItem: contextReview
+            reviewItem: anchorReview
               ? {
-                  id: contextReview.id,
-                  title: contextReview.title,
-                  explanation: contextReview.explanation,
-                  category: contextReview.category,
+                  id: anchorReview.id,
+                  title: anchorReview.title,
+                  explanation: anchorReview.explanation,
+                  category: anchorReview.category,
                 }
               : undefined,
             language: "en",
@@ -964,6 +984,7 @@ export default function Home() {
           // 用户取消：不加错误
         } else {
           setChatError(e instanceof Error ? e.message : "对话失败。");
+          setLlmRetry({ type: "chat", message, nodeId });
         }
       } finally {
         if (chatRequestSeq.current === requestId) {
@@ -978,7 +999,6 @@ export default function Home() {
       chatForbidden,
       nodes,
       reviews,
-      contextReview,
       packBlocks,
       settings,
       persistProjectNow,
@@ -1010,6 +1030,7 @@ export default function Home() {
           (item) => item.id === proposal.convertedReviewId,
         );
         if (!existing) {
+          setLlmRetry(null);
           setChatError("对应的审阅意见已不存在，无法定位。");
           return;
         }
@@ -1019,6 +1040,7 @@ export default function Home() {
 
       const scope = reviewScopeFromNode(node, current.reviews);
       if (!scope || !canLocateScope(currentDoc, scope)) {
+        setLlmRetry(null);
         setChatError("正文已变化，无法把这条回复转为审阅意见。");
         setAnnounce("正文已变化，无法转为审阅意见。");
         return;
@@ -1064,6 +1086,7 @@ export default function Home() {
           nextNodes.find((entry) => entry.id === nodeId)?.turns ?? [],
         );
       }
+      setLlmRetry(null);
       setChatError(null);
       setSaveState("saving");
       setAnnounce(`已创建审阅意见：${review.title}。`);
@@ -1148,6 +1171,8 @@ export default function Home() {
         }
         return next;
       });
+      setLlmRetry(null);
+      setChatError(null);
       setSaveState("saving");
       setAnnounce("已删除该节点讨论。");
     },
@@ -1230,6 +1255,7 @@ export default function Home() {
           ? item.scope.blockId
           : undefined;
       setApplyingOpinionId(id);
+      setLlmRetry(null);
       setChatError(null);
       const requestId = ++changeSetRequestSeq.current;
       const requestDoc = {
@@ -1283,6 +1309,7 @@ export default function Home() {
       } catch (e) {
         if (changeSetRequestSeq.current !== requestId) return;
         setChatError(e instanceof Error ? e.message : "生成修改集失败。");
+        setLlmRetry({ type: "change-set", reviewId: id });
       } finally {
         if (changeSetRequestSeq.current === requestId) setApplyingOpinionId(null);
       }
@@ -1344,6 +1371,7 @@ export default function Home() {
       setCopyState("copied");
       setTimeout(() => setCopyState("idle"), 1500);
     } catch {
+      setLlmRetry(null);
       setChatError("复制失败，请检查浏览器剪贴板权限。");
     }
   }, [doc]);
@@ -1378,6 +1406,7 @@ export default function Home() {
     setChatTurns([]);
     setSelection(null);
     setSelectedId(null);
+    setLlmRetry(null);
     setChatError(null);
     setChangeSetOpen(false);
     setReviewUi({ phase: "idle" });
@@ -1415,6 +1444,8 @@ export default function Home() {
     setActiveProjId(null);
     setChangeSetOpen(false);
     setSelectedId(null);
+    setLlmRetry(null);
+    setChatError(null);
     setReviewUi({ phase: "idle" });
     setSaveState("saving");
   }, [requestLocked, announceRequestLock]);
@@ -1432,6 +1463,7 @@ export default function Home() {
     setChatTurns([]);
     setSelection(null);
     setSelectedId(null);
+    setLlmRetry(null);
     setChatError(null);
     setChangeSetOpen(false);
     setReviewUi({ phase: "idle" });
@@ -1604,9 +1636,17 @@ export default function Home() {
         </p>
       )}
       {reviewUi.phase === "error" && (
-        <p className="animate-item-in mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300" role="alert">
-          {reviewUi.message}
-        </p>
+        <div className="animate-item-in mb-4 flex items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300" role="alert">
+          <span>{reviewUi.message}</span>
+          <button
+            type="button"
+            className={buttonClass("secondary", "xs")}
+            onClick={() => void runReview()}
+            disabled={requestLocked}
+          >
+            重试审阅
+          </button>
+        </div>
       )}
       {reviewUi.phase === "done" && reviewUi.summary && (
         <p
@@ -1670,9 +1710,26 @@ export default function Home() {
 
             {/* 上下文对话 */}
             {chatError && (
-              <p className="animate-item-in rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300" role="alert">
-                {chatError}
-              </p>
+              <div className="animate-item-in flex items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300" role="alert">
+                <span>{chatError}</span>
+                {llmRetry && (
+                  <button
+                    type="button"
+                    className={buttonClass("secondary", "xs")}
+                    onClick={() => {
+                      const retry = llmRetry;
+                      if (retry.type === "chat") {
+                        void sendChat(retry.message, retry.nodeId);
+                      } else {
+                        void applyOpinion(retry.reviewId);
+                      }
+                    }}
+                    disabled={requestLocked}
+                  >
+                    {llmRetry.type === "chat" ? "重试对话" : "重试生成"}
+                  </button>
+                )}
+              </div>
             )}
             {/*
               聊天区浮动（规则 21 sticky-dock）：position sticky bottom 让它在文档流中

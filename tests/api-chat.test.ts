@@ -239,6 +239,25 @@ describe("POST /api/chat", () => {
     expect(res.status).toBe(502);
   });
 
+  it("LLM 首次返回非协议结构时自动纠错一次", async () => {
+    const gen = vi
+      .fn<LLMProvider["generate"]>()
+      .mockResolvedValueOnce(JSON.stringify({ type: "weird" }))
+      .mockResolvedValueOnce(
+        JSON.stringify({ type: "answer", answer: "纠错后可用。" }),
+      );
+    vi.spyOn(providerMod, "getProviderFromEnv").mockReturnValue({
+      name: "mock",
+      generate: gen,
+    });
+
+    const res = await POST(makeReq(validBody()));
+    expect(res.status).toBe(200);
+    expect((await res.json()).answer).toBe("纠错后可用。");
+    expect(gen).toHaveBeenCalledTimes(2);
+    expect(gen.mock.calls[1][1]).toMatchObject({ temperature: 0 });
+  });
+
   it("内容超长 → 413", async () => {
     const res = await POST(
       makeReq(validBody({ blocks: [{ id: "p_x", text: "字".repeat(60_001) }] })),

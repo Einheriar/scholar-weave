@@ -1,8 +1,4 @@
 import { NextResponse } from "next/server";
-import {
-  getProviderFromEnv,
-  getProviderFromUserConfig,
-} from "@/lib/llm/provider";
 import { buildReviewMessages } from "@/lib/llm/prompts";
 import {
   LLMReviewResponseSchema,
@@ -10,6 +6,7 @@ import {
 } from "@/lib/llm/review-llm-schema";
 import { ReviewItemSchema, type ReviewItem } from "@/lib/review-schema";
 import { locateInText } from "@/lib/anchoring";
+import { callLLMStructured } from "@/lib/llm/server-helpers";
 
 /**
  * POST /api/review（PLAN 12）。
@@ -29,7 +26,6 @@ export const runtime = "nodejs";
 // 输入规模与 LLM 调用约束
 const MAX_BLOCKS = 200;
 const MAX_TOTAL_CHARS = 60_000;
-const LLM_TIMEOUT_MS = 90_000;
 
 type ErrorBody = { error: { code: string; message: string } };
 
@@ -67,86 +63,21 @@ export async function POST(request: Request) {
     return err(413, "too_long", `文档总字数超过上限（${MAX_TOTAL_CHARS}）。`);
   }
 
-  // 构造 prompt 与 provider（用户配置优先于 env）
-  let provider;
-  if (reqBody.llmConfig?.apiKey) {
-    provider = getProviderFromUserConfig(reqBody.llmConfig);
-  } else {
-    try {
-      provider = getProviderFromEnv();
-    } catch (e) {
-      return err(
-        500,
-        "provider_misconfigured",
-        e instanceof Error ? e.message : "LLM 服务未配置。",
-      );
-    }
-  }
   const messages = buildReviewMessages(reqBody);
-
-  // 超时 + 客户端取消联动
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
-  const onClientAbort = () => controller.abort();
-  request.signal.addEventListener("abort", onClientAbort);
-
-  let content: string;
-  try {
-    content = await provider.generate(messages, {
-      jsonMode: true,
-      signal: controller.signal,
-      maxTokens: 16000,
-      reasoningEffort: reqBody.llmConfig?.reasoningEffort,
-    });
-  } catch (e) {
-    if (e instanceof Error && e.name === "AbortError") {
-      return err(
-        request.signal.aborted ? 499 : 504,
-        request.signal.aborted ? "client_aborted" : "llm_timeout",
-        request.signal.aborted ? "请求已取消。" : "审阅超时，请重试。",
-      );
-    }
-    return err(
-      502,
-      "llm_error",
-      e instanceof Error ? e.message : "LLM 调用失败。",
-    );
-  } finally {
-    clearTimeout(timer);
-    request.signal.removeEventListener("abort", onClientAbort);
-  }
-
-  // 解析 + Zod 校验模型输出
-  let llmJson: unknown;
-  const extracted = extractJson(content);
-  if (process.env.DEBUG_REVIEW === "1") {
-    console.log("[review] raw content length:", content.length);
-    console.log("[review] raw head:", content.slice(0, 500));
-    console.log("[review] extracted head:", extracted.slice(0, 500));
-  }
-  try {
-    llmJson = JSON.parse(extracted);
-  } catch (e) {
-    if (process.env.DEBUG_REVIEW === "1") {
-      console.log("[review] JSON parse error:", e);
-      console.log("[review] extracted full:", extracted.slice(0, 2000));
-    }
-    return err(502, "llm_bad_json", "LLM 未返回合法 JSON。");
-  }
-  const llmParsed = LLMReviewResponseSchema.safeParse(llmJson);
-  if (!llmParsed.success) {
-    return err(
-      502,
-      "llm_schema_mismatch",
-      "LLM 返回结构不符合协议，已丢弃。",
-    );
-  }
+  const llmResult = await callLLMStructured(
+    request,
+    messages,
+    LLMReviewResponseSchema,
+    { llmConfig: reqBody.llmConfig, debugLabel: "review" },
+  );
+  if (!llmResult.ok) return llmResult.response;
+  const llmData = llmResult.data;
 
   // 转成完整 ReviewItem：填充 status / documentRevision，过滤无效与不可定位的 edit
   const blockTextById = new Map(reqBody.blocks.map((b) => [b.id, b.text]));
   const items: ReviewItem[] = [];
 
-  for (const rawItem of llmParsed.data.items) {
+  for (const rawItem of llmData.items) {
     // 业务校验：edit 的 scope 不能是 document；opinion 不得带 replacement
     const full = {
       ...rawItem,
@@ -178,19 +109,9 @@ export async function POST(request: Request) {
   }
 
   return NextResponse.json({
-    documentSummary: llmParsed.data.documentSummary,
+    documentSummary: llmData.documentSummary,
     items,
     documentRevision: reqBody.revision,
     checksum: reqBody.checksum,
   });
-}
-
-/** 从模型输出中提取 JSON（容忍其包了 ```json 代码块） */
-function extractJson(content: string): string {
-  const fence = content.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (fence) return fence[1].trim();
-  const start = content.indexOf("{");
-  const end = content.lastIndexOf("}");
-  if (start >= 0 && end > start) return content.slice(start, end + 1);
-  return content;
 }
