@@ -15,6 +15,8 @@ Most writing assistants treat feedback as a stream of disconnected messages. Sch
 - **Local-first storage** — drafts and chat history stay in the current browser through IndexedDB.
 - **Built-in demo content** — the app opens with a sample manuscript, so the review workflow can be explored before connecting a model.
 
+![homepage](doc/image/homepage.png)
+
 ## Quick start
 
 Requirements: **Node.js 20.9 or newer**.
