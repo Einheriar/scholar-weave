@@ -37,6 +37,7 @@
 - `src/components/editor/DocumentEditor.tsx`
 - `tests/editor-batch-apply.test.tsx`
 - `tests/e2e/core-flow.spec.ts`
+- `DEVELOPMENTER.md`
 - `README.md`
 - `AGENTS.md`
 - `plan/CHANGELOG.md`
@@ -47,7 +48,7 @@
 
 ```powershell
 git status --short
-git diff -- src/components/editor/DocumentEditor.tsx tests/editor-batch-apply.test.tsx tests/e2e/core-flow.spec.ts README.md AGENTS.md plan/CHANGELOG.md
+git diff -- src/components/editor/DocumentEditor.tsx tests/editor-batch-apply.test.tsx tests/e2e/core-flow.spec.ts DEVELOPMENTER.md README.md AGENTS.md plan/CHANGELOG.md
 ```
 
 如果环境提示 `dubious ownership`，只读检查可临时使用：
