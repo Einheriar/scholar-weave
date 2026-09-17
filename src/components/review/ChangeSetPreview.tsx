@@ -46,6 +46,8 @@ export function ChangeSetPreview({
 
   // 键盘焦点管理：打开时进入预览，关闭时回到触发它的控件
   const panelRef = useRef<HTMLDivElement>(null);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const closedRef = useRef(false);
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     panelRef.current
@@ -59,15 +61,34 @@ export function ChangeSetPreview({
   useEffect(() => {
     const el = panelRef.current;
     if (!el) return;
+    if (closeTimerRef.current) {
+      clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
     if (open) {
+      closedRef.current = false;
       el.classList.remove("animate-item-out");
     } else {
+      const finishClosing = () => {
+        if (closedRef.current) return;
+        closedRef.current = true;
+        onClosed();
+      };
       const raf = requestAnimationFrame(() => {
         el.classList.add("animate-item-out");
+        // animationend is not guaranteed (reduced motion, background tabs, or
+        // a DOM removal by a parent). Keep delayed unmount deterministic.
+        closeTimerRef.current = setTimeout(finishClosing, 350);
       });
-      return () => cancelAnimationFrame(raf);
+      return () => {
+        cancelAnimationFrame(raf);
+        if (closeTimerRef.current) {
+          clearTimeout(closeTimerRef.current);
+          closeTimerRef.current = null;
+        }
+      };
     }
-  }, [open]);
+  }, [open, onClosed]);
 
   const toggle = (id: string) =>
     setChecked((prev) => {
@@ -92,6 +113,12 @@ export function ChangeSetPreview({
       aria-labelledby="changeset-preview-title"
       onAnimationEnd={(e) => {
         if (e.target === e.currentTarget && e.animationName === "item-fade-out") {
+          if (closeTimerRef.current) {
+            clearTimeout(closeTimerRef.current);
+            closeTimerRef.current = null;
+          }
+          if (closedRef.current) return;
+          closedRef.current = true;
           onClosed();
         }
       }}

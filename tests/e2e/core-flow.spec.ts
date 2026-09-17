@@ -38,6 +38,23 @@ test.describe("核心流程：三层建议与定位", () => {
     await expect(page.locator('[data-review-id="review_doc_1"]')).toHaveCount(0);
   });
 
+  test("按范围筛选时只显示当前范围的建议分区", async ({ page }) => {
+    await gotoApp(page);
+    await loadSample(page);
+    const reviewSidebar = page.getByRole("complementary", { name: "审阅建议侧栏" });
+
+    for (const [label, regionName, cardId] of [
+      ["全文", "全文审阅", "review_doc_1"],
+      ["段落", "段落意见", "review_blk_1"],
+      ["局部", "具体修改", "review_edit_1"],
+    ] as const) {
+      await page.getByRole("button", { name: new RegExp(`^${label}\\s`) }).click();
+      await expect(reviewSidebar.getByRole("region")).toHaveCount(1);
+      await expect(reviewSidebar.getByRole("region", { name: regionName })).toBeVisible();
+      await expect(card(page, cardId)).toBeVisible();
+    }
+  });
+
   test("侧栏 → 正文：点击局部建议卡片后正文选中对应文本", async ({ page }) => {
     await gotoApp(page);
     await loadSample(page);

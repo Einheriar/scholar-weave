@@ -80,6 +80,7 @@ export async function callLLMStructured<S extends z.ZodType>(
       jsonMode: true,
       signal: controller.signal,
       maxTokens: opts.maxTokens ?? 16000,
+      reasoningEffort: opts.llmConfig?.reasoningEffort,
     });
   } catch (e) {
     if (e instanceof Error && e.name === "AbortError") {

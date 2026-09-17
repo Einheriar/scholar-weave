@@ -75,6 +75,13 @@ export const ReviewItemSchema = z
     explanation: z.string(),
     replacement: z.string().optional(),
     status: ReviewStatusSchema,
+    /**
+     * block edit 接受时的可逆快照。仅在当前整段仍严格等于 after 时才允许恢复 before，
+     * 因而可以跨刷新撤销，又不会覆盖用户接受后继续做的编辑。
+     */
+    acceptedSnapshot: z
+      .object({ before: z.string(), after: z.string() })
+      .optional(),
   })
   .superRefine((item, ctx) => {
     if (item.kind === "opinion" && item.replacement !== undefined) {

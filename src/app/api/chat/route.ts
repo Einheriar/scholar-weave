@@ -75,7 +75,12 @@ export async function POST(request: Request) {
     updatedAt: "",
   };
   const edits = llm.changeSet.edits
-    .map((e) => ({ ...e, status: "pending" as const }))
+    .map((e) => ({
+      ...e,
+      // 不信任 LLM 生成的标识，避免重复 ID 造成前端状态串联。
+      id: `edit_${crypto.randomUUID()}`,
+      status: "pending" as const,
+    }))
     .filter((e) => resolveEdit(doc, e).ok); // 定位不到的修改不进入修改集
 
   const changeSet: ChangeSet = {

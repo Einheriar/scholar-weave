@@ -27,7 +27,7 @@ export async function paragraphTexts(page: Page): Promise<string[]> {
 export async function loadSample(page: Page) {
   await page.getByRole("button", { name: "设置" }).click();
   const dialog = page.getByRole("dialog", { name: "设置" });
-  await dialog.getByRole("button", { name: "数据" }).click();
+  await dialog.getByRole("button", { name: "数据", exact: true }).click();
   await dialog.getByRole("button", { name: "载入样例" }).click();
   await expect(page.locator("[data-review-card]").first()).toBeVisible();
   // 等防抖保存落库（建档时机：文档变化即保存），避免后续「新文章/切换」抢在保存前。

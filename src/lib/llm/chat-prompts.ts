@@ -62,7 +62,7 @@ ${SAFETY}
 2. 解释 + 待确认修改（当用户要求生成修改时）：
 { "type": "answer_with_changes", "answer": "说明", "changeSet": { "summary": "修改概述", "edits": [ 修改对象 ] } }
 
-每个修改对象字段：id（c1、c2…唯一）、blockId、original、replacement、可选 prefix/suffix、explanation。
+每个修改对象字段：blockId、original、replacement、可选 prefix/suffix、explanation。修改 ID 由服务端生成，不要输出 id。
 ${EDIT_ANCHOR}
 
 【行为准则】
@@ -122,7 +122,7 @@ ${SAFETY}
 
 【输出协议】严格输出 JSON：
 { "summary": "修改集概述", "edits": [ 修改对象 ] }
-每个修改对象字段：id（c1、c2…唯一）、blockId、original、replacement、可选 prefix/suffix、explanation。
+每个修改对象字段：blockId、original、replacement、可选 prefix/suffix、explanation。修改 ID 由服务端生成，不要输出 id。
 ${EDIT_ANCHOR}
 
 【行为准则】

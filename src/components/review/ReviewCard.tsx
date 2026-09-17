@@ -27,6 +27,8 @@ export type ReviewCardProps = {
   onApplyOpinion?: (id: string) => void;
   /** 是否正在为该建议生成修改集 */
   applyingOpinion?: boolean;
+  /** 付费请求进行期间禁止会改变正文/建议状态的操作 */
+  interactionLocked?: boolean;
 };
 
 /**
@@ -49,6 +51,7 @@ export function ReviewCard({
   onChat,
   onApplyOpinion,
   applyingOpinion = false,
+  interactionLocked = false,
 }: ReviewCardProps) {
   const cat = CATEGORY_META[item.category];
   const sev = SEVERITY_META[item.severity];
@@ -75,7 +78,7 @@ export function ReviewCard({
   const handleAccept = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
-      if (accepting) return;
+      if (accepting || interactionLocked) return;
       setAccepting(true);
       setCheckState("in");
       // 勾号动画 500ms，散去 200ms，共 700ms
@@ -94,7 +97,7 @@ export function ReviewCard({
         }, 200);
       }, 500);
     },
-    [accepting, item.id, onAccept],
+    [accepting, interactionLocked, item.id, onAccept],
   );
 
   // derived-state：item.status 变化时同步 collapsed
@@ -234,6 +237,8 @@ export function ReviewCard({
             <>
               <button
                 type="button"
+                disabled={interactionLocked}
+                title={interactionLocked ? "请求处理中，请等待完成" : undefined}
                 className={buttonClass("primary", "xs")}
                 onClick={handleAccept}
               >
@@ -241,6 +246,8 @@ export function ReviewCard({
               </button>
               <button
                 type="button"
+                disabled={interactionLocked}
+                title={interactionLocked ? "请求处理中，请等待完成" : undefined}
                 className={buttonClass("secondary", "xs")}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -256,6 +263,8 @@ export function ReviewCard({
             <>
               <button
                 type="button"
+                disabled={interactionLocked}
+                title={interactionLocked ? "请求处理中，请等待完成" : undefined}
                 className={buttonClass("secondary", "xs")}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -266,7 +275,8 @@ export function ReviewCard({
               </button>
               <button
                 type="button"
-                disabled={applyingOpinion}
+                disabled={applyingOpinion || interactionLocked}
+                title={interactionLocked ? "请求处理中，请等待完成" : undefined}
                 className={buttonClass("primary", "xs")}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -281,6 +291,8 @@ export function ReviewCard({
           {visualRevertible && (
             <button
               type="button"
+              disabled={interactionLocked}
+              title={interactionLocked ? "请求处理中，请等待完成" : undefined}
               className={buttonClass("secondary", "xs")}
               onClick={(e) => {
                 e.stopPropagation();

@@ -22,6 +22,50 @@ function card(page: import("@playwright/test").Page, id: string) {
 }
 
 test.describe("LLM 审阅（mock /api/review）", () => {
+  test("付费请求期间锁定当前文章，完成后恢复编辑", async ({ page }) => {
+    let releaseRequest!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      releaseRequest = resolve;
+    });
+    await page.route("**/api/review", async (route) => {
+      const body = route.request().postDataJSON() as {
+        revision: number;
+        checksum: string;
+      };
+      await pending;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          documentSummary: "锁定测试完成",
+          items: [],
+          documentRevision: body.revision,
+          checksum: body.checksum,
+        }),
+      });
+    });
+    await gotoApp(page);
+    await loadSample(page);
+
+    await page.getByRole("button", { name: "开始审阅" }).click();
+    await expect(page.getByText("正在审阅文档…", { exact: false })).toBeVisible();
+    await expect(page.getByLabel("文档标题")).toBeDisabled();
+    await expect(page.locator(".ProseMirror")).toHaveAttribute(
+      "contenteditable",
+      "false",
+    );
+    const history = page.getByRole("complementary", { name: "历史记录" });
+    await expect(history.getByRole("button", { name: "新文章" })).toBeDisabled();
+
+    releaseRequest();
+    await expect(page.getByText("锁定测试完成")).toBeVisible();
+    await expect(page.getByLabel("文档标题")).toBeEnabled();
+    await expect(page.locator(".ProseMirror")).toHaveAttribute(
+      "contenteditable",
+      "true",
+    );
+  });
+
   test("点击开始审阅后展示全文总结与三层建议", async ({ page }) => {
     await mockReviewRoute(page);
     await gotoApp(page);
@@ -86,6 +130,22 @@ test.describe("LLM 审阅（mock /api/review）", () => {
       "may already have been decided",
     );
   });
+
+  test("审阅结果与处理状态会持久化，刷新后仍可恢复", async ({ page }) => {
+    await mockReviewRoute(page);
+    await gotoApp(page);
+    await page.getByRole("button", { name: "开始审阅" }).click();
+    await expect(card(page, "m_edit")).toBeVisible();
+
+    await card(page, "m_edit").getByRole("button", { name: "忽略" }).click();
+    await expect(card(page, "m_edit").getByLabel("状态：已忽略")).toBeVisible();
+    await expect(page.getByRole("status").first()).toContainText("已保存到本地");
+
+    await page.reload();
+    await expect(page.locator(".ProseMirror")).toBeVisible();
+    await expect(card(page, "m_edit")).toBeVisible();
+    await expect(card(page, "m_edit").getByLabel("状态：已忽略")).toBeVisible();
+  });
 });
 
 test.describe("上下文对话（mock /api/chat）", () => {
@@ -105,6 +165,22 @@ test.describe("上下文对话（mock /api/chat）", () => {
     // 没有任何“预览修改”入口，正文不变
     await expect(page.getByRole("button", { name: /预览修改/ })).toHaveCount(0);
     expect(await paragraphTexts(page)).toEqual(before);
+  });
+
+  test("重新载入样例会清空旧聊天现场", async ({ page }) => {
+    await mockChatRoute(page, { withChanges: false });
+    await gotoApp(page);
+    await loadSample(page);
+    await selectTextInEditor(page, "upstanding");
+    await sendChatMessage(page, "这条聊天之后应被清空");
+    await expect(
+      page.getByText("这是纯解释回复（mock），不包含任何正文修改。"),
+    ).toBeVisible();
+
+    await loadSample(page);
+    await expect(
+      page.getByText("这是纯解释回复（mock），不包含任何正文修改。"),
+    ).toHaveCount(0);
   });
 
   test("带修改集的回复先预览，接受后才改正文", async ({ page }) => {

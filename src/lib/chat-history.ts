@@ -159,14 +159,14 @@ export function dragTargetIndex(
  * 抽出来就能在 vitest 里守住。约定：
  * - `to` 是最终落点下标（由 dragTargetIndex 给出），不是「插入位」；
  * - 被拖行（index === from）位移 = dragDy（跟手距离，松手时传回落距离）；
- * - 中间段行整体让开 `rowH`：向下拖时（from < to）中间行上移，向上拖时下移；
+ * - 中间段行移动到相邻槽位，距离从 `tops` 的相邻差值取得（包含列表行间距）；
  * - 其余行不动。
  */
 export function dragShifts(
   count: number,
   from: number,
   to: number,
-  rowH: number,
+  tops: number[],
   dragDy: number,
 ): number[] {
   const out = new Array<number>(count).fill(0);
@@ -175,8 +175,11 @@ export function dragShifts(
   if (to === from || to < 0 || to >= count) return out;
   for (let i = 0; i < count; i++) {
     if (i === from) continue;
-    if (from < to && i > from && i <= to) out[i] = -rowH;
-    else if (from > to && i >= to && i < from) out[i] = rowH;
+    if (from < to && i > from && i <= to) {
+      out[i] = (tops[i - 1] ?? tops[i]) - (tops[i] ?? 0);
+    } else if (from > to && i >= to && i < from) {
+      out[i] = (tops[i + 1] ?? tops[i]) - (tops[i] ?? 0);
+    }
   }
   return out;
 }

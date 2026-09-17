@@ -29,6 +29,8 @@ type SettingsPanelProps = {
   onSettingsChange: (settings: UserSettings) => void;
   onLoadSample?: () => void;
   onClearAll?: () => void;
+  /** 请求期间禁止会替换当前文章的数据操作。 */
+  dataActionsLocked?: boolean;
 };
 
 export function SettingsPanel({
@@ -38,6 +40,7 @@ export function SettingsPanel({
   onSettingsChange,
   onLoadSample,
   onClearAll,
+  dataActionsLocked = false,
 }: SettingsPanelProps) {
   const [tab, setTab] = useState<Tab>("model");
   const [draft, setDraft] = useState<UserSettings>(settings);
@@ -534,6 +537,8 @@ export function SettingsPanel({
                 </p>
                 <button
                   type="button"
+                  disabled={dataActionsLocked}
+                  title={dataActionsLocked ? "请求处理中，请等待完成" : undefined}
                   onClick={() => {
                     onLoadSample?.();
                     onClose();
@@ -550,6 +555,8 @@ export function SettingsPanel({
                 </p>
                 <button
                   type="button"
+                  disabled={dataActionsLocked}
+                  title={dataActionsLocked ? "请求处理中，请等待完成" : undefined}
                   onClick={() => {
                     onClearAll?.();
                     onClose();

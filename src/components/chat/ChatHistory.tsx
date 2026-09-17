@@ -39,6 +39,8 @@ export type ChatHistoryProps = {
   /** 窄屏抽屉是否展开（xl 及以上忽略） */
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** 付费请求进行中时锁定文章现场，禁止切换/新建/删除/排序。 */
+  interactionLocked?: boolean;
 };
 
 type HistoryListProps = Omit<ChatHistoryProps, "open" | "onOpenChange">;
@@ -54,6 +56,7 @@ export function ChatHistory({
   onCreatedShown,
   open,
   onOpenChange,
+  interactionLocked = false,
 }: ChatHistoryProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   // 延迟卸载：closing 期间继续渲染，退出动画播完（onAnimationEnd）才真正移除。
@@ -129,6 +132,7 @@ export function ChatHistory({
           onReorder={onReorder}
           justCreatedId={justCreatedId}
           onCreatedShown={onCreatedShown}
+          interactionLocked={interactionLocked}
         />
       </aside>
 
@@ -175,6 +179,7 @@ export function ChatHistory({
               onReorder={onReorder}
               justCreatedId={justCreatedId}
               onCreatedShown={onCreatedShown}
+              interactionLocked={interactionLocked}
               variant="drawer"
             />
           </div>
@@ -193,6 +198,7 @@ function HistoryList({
   onReorder,
   justCreatedId,
   onCreatedShown,
+  interactionLocked = false,
   variant = "sidebar",
 }: HistoryListProps & { variant?: "sidebar" | "drawer" }) {
   const drawer = variant === "drawer";
@@ -205,9 +211,11 @@ function HistoryList({
     beginDrag,
     moveDrag,
     endDrag,
+    cancelDrag,
     moveByKey,
     shiftOf,
-  } = useHistoryDrag(projects, onReorder);
+  } = useHistoryDrag(projects, onReorder, interactionLocked);
+  const lockTitle = "请求处理中，请等待完成后再切换文章";
   return (
     <>
       {drawer ? (
@@ -246,6 +254,9 @@ function HistoryList({
                 （深色下黑投影弱，位移+抬亮兜底，方案 a）。淡入淡出仍走内联 style。 */}
             <button
               type="button"
+              disabled={interactionLocked}
+              aria-disabled={interactionLocked}
+              title={interactionLocked ? lockTitle : "新建文章"}
               onClick={() => onNew({ keepHistoryOpen: true })}
               className={
                 "t-skel-content absolute inset-y-0 right-0 my-auto flex h-10 w-[96.2px] items-center justify-center rounded-lg bg-surface-muted !text-lg font-medium !tracking-[0.3em] text-foreground transition-[transform,box-shadow,background-color] duration-150 hover:-translate-y-px hover:bg-surface hover:shadow-[var(--new-btn-shadow)] active:translate-y-0 active:bg-border/50 active:shadow-[var(--new-btn-shadow-active)] active:scale-[0.98]"
@@ -273,6 +284,9 @@ function HistoryList({
           </h2>
           <button
             type="button"
+            disabled={interactionLocked}
+            aria-disabled={interactionLocked}
+            title={interactionLocked ? lockTitle : "新建文章"}
             onClick={() => onNew()}
             className={buttonClass("secondary", "xs")}
           >
@@ -296,8 +310,9 @@ function HistoryList({
             project={p}
             draggable={projects.length > 1}
             dragging={dragId === p.id}
+            settling={settling && dragId === p.id}
             shift={shiftOf(i)}
-            animated={dragId !== p.id || settling}
+            animated={dragId !== null && dragId !== p.id}
             active={p.id === activeId}
             justCreated={p.id === justCreatedId}
             onSelect={onSelect}
@@ -306,7 +321,10 @@ function HistoryList({
             onHandlePointerDown={beginDrag}
             onHandlePointerMove={moveDrag}
             onHandlePointerUp={endDrag}
+            onHandlePointerCancel={cancelDrag}
             onHandleKeyDown={moveByKey}
+            interactionLocked={interactionLocked}
+            lockTitle={lockTitle}
           />
         ))}
       </ul>
@@ -314,9 +332,9 @@ function HistoryList({
   );
 }
 
-/** 让位/回落过渡时长（ms）。与 globals.css 的 `.t-drag-shift` transition 配套——
- *  那边改了时长必须同步这里（提交顺序等的是这段动画播完）。 */
-const SETTLE_MS = 330;
+/** 松手落位等待时间（ms）。比 `.t-drag-settle` 的 180ms 多留 10ms，
+ *  动画结束后再无过渡地提交 DOM 顺序，避免交接帧产生第二次位移。 */
+const LANDING_MS = 190;
 
 /**
  * 列表拖动排序（Pointer Events，不引第三方库）。
@@ -332,15 +350,16 @@ const SETTLE_MS = 330;
  * - **不改 DOM 顺序**，只改 transform。被拖条目的 translateY 由 JS 直写内联样式跟手走，
  *   并挂 `.t-drag-lift` 浮起（放大 + 阴影 + z-index）；
  * - 其余条目按各自「让位距离」做 translateY，靠 `.t-drag-shift` 的 CSS transition 平滑滑开。
- *   让位距离 = 目标槽位与自己原位置之间的行高差 —— 这就是「哗哗哗滑过去」的来源。
+ *   让位距离 = 相邻槽位顶部之差（含行间距），而且拖动全程保留 transition，滑开与回原位同速同曲线。
  * 边拖边真重排数组会让行在指针下跳位、且每帧触发 React 重渲染，所以不做。
  *
- * 松手：把浮起条目 transition 到目标槽位（回落动画），过渡结束才提交顺序，
- * 视觉与数据不会错位。
+ * 松手：被拖条目改走更短的 `.t-drag-settle`，位置、缩放和阴影同步落稳；
+ * 动画结束才无过渡地提交顺序，视觉与数据不会错位。
  */
 function useHistoryDrag(
   projects: Project[],
   onReorder: ChatHistoryProps["onReorder"],
+  interactionLocked: boolean,
 ) {
   const listRef = useRef<HTMLUListElement>(null);
   const [dragId, setDragId] = useState<string | null>(null);
@@ -388,7 +407,7 @@ function useHistoryDrag(
   };
 
   const beginDrag = (e: React.PointerEvent<HTMLElement>, id: string) => {
-    if (projects.length < 2 || settling) return;
+    if (interactionLocked || projects.length < 2 || settling) return;
     const lis = items();
     const from = projects.findIndex((p) => p.id === id);
     if (from < 0 || lis.length === 0) return;
@@ -411,7 +430,7 @@ function useHistoryDrag(
   };
 
   const moveDrag = (e: React.PointerEvent<HTMLElement>) => {
-    if (fromRef.current < 0 || settling) return;
+    if (interactionLocked || fromRef.current < 0 || settling) return;
     // 自动滚动会让条目的「基准位置」随内容上移；把滚动量累加进位移，
     // 浮起的条目才会一直待在指针下面，而不是被滚走。
     const scrolled = autoScroll(e.clientY);
@@ -429,6 +448,7 @@ function useHistoryDrag(
     } catch {
       /* 指针已释放 */
     }
+    if (interactionLocked) return finish(null);
     const from = fromRef.current;
     const { tops, h } = geoRef.current;
     // 用松手时的最终位移重算落点（与渲染期同一条纯函数，保证「看到的落点 = 提交的落点」）
@@ -443,10 +463,20 @@ function useHistoryDrag(
     clearSettleTimer();
     settleTimer.current = setTimeout(
       () => finish(moveId(projects.map((p) => p.id), from, to)),
-      // 略大于 .t-drag-shift 的 300ms，等回落过渡真的走完（globals.css 里改了时长要同步这里）
-      SETTLE_MS,
+      // 略大于 .t-drag-settle 的 180ms，等落位过渡真的走完。
+      LANDING_MS,
     );
     return;
+  };
+
+  const cancelDrag = (e: React.PointerEvent<HTMLElement>) => {
+    if (fromRef.current < 0) return;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      /* 指针已释放 */
+    }
+    finish(null);
   };
 
   /** 收尾：清空拖动视觉并（可选）提交新顺序 */
@@ -477,11 +507,12 @@ function useHistoryDrag(
     fromIndex < 0
       ? fromIndex
       : dragTargetIndex(geoState.tops, geoState.h, fromIndex, dragDy);
-  const shifts = dragShifts(projects.length, fromIndex, toIndex, geoState.h, dragDy);
+  const shifts = dragShifts(projects.length, fromIndex, toIndex, geoState.tops, dragDy);
   const shiftOf = (index: number): number => shifts[index] ?? 0;
 
   /** 键盘排序：把手聚焦后 ↑/↓ 上下移动一位（纯拖拽对键盘/读屏不可用） */
   const moveByKey = (e: React.KeyboardEvent<HTMLElement>, id: string) => {
+    if (interactionLocked) return;
     if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
     const ids = projects.map((p) => p.id);
     const from = ids.indexOf(id);
@@ -511,6 +542,7 @@ function useHistoryDrag(
     beginDrag,
     moveDrag,
     endDrag,
+    cancelDrag,
     moveByKey,
     shiftOf,
   };
@@ -524,6 +556,7 @@ function HistoryEntry({
   project: p,
   draggable,
   dragging,
+  settling,
   shift,
   animated,
   active,
@@ -534,14 +567,19 @@ function HistoryEntry({
   onHandlePointerDown,
   onHandlePointerMove,
   onHandlePointerUp,
+  onHandlePointerCancel,
   onHandleKeyDown,
+  interactionLocked,
+  lockTitle,
 }: {
   project: Project;
   draggable: boolean;
   dragging: boolean;
+  /** 仅被拖条目在松手落位阶段为 true */
+  settling: boolean;
   /** 本条目的纵向位移（px）：被拖的跟手、其余按需让位滑开 */
   shift: number;
-  /** 位移是否走过渡（被拖的那个跟手时不能过渡，松手回落时才有） */
+  /** 其余条目的果冻让位是否走过渡；被拖条目的落位使用独立 class */
   animated: boolean;
   active: boolean;
   justCreated: boolean;
@@ -551,7 +589,10 @@ function HistoryEntry({
   onHandlePointerDown: (e: React.PointerEvent<HTMLElement>, id: string) => void;
   onHandlePointerMove: (e: React.PointerEvent<HTMLElement>) => void;
   onHandlePointerUp: (e: React.PointerEvent<HTMLElement>) => void;
+  onHandlePointerCancel: (e: React.PointerEvent<HTMLElement>) => void;
   onHandleKeyDown: (e: React.KeyboardEvent<HTMLElement>, id: string) => void;
+  interactionLocked: boolean;
+  lockTitle: string;
 }) {
   // 渲染期 derived state（React 官方模式，同外层 closing 的写法）：justCreated 在防抖建档
   // （~500ms 后）才变 true，在渲染体内 setState、同渲染内立即重跑，使条目「首次挂载」时就
@@ -572,12 +613,14 @@ function HistoryEntry({
       {draggable && (
         <button
           type="button"
+          disabled={interactionLocked}
+          aria-disabled={interactionLocked}
           aria-label={`调整「${title}」顺序`}
-          title="拖动排序（也可用 ↑/↓ 键）"
+          title={interactionLocked ? lockTitle : "拖动排序（也可用 ↑/↓ 键）"}
           onPointerDown={(e) => onHandlePointerDown(e, p.id)}
           onPointerMove={onHandlePointerMove}
           onPointerUp={onHandlePointerUp}
-          onPointerCancel={onHandlePointerUp}
+          onPointerCancel={onHandlePointerCancel}
           onKeyDown={(e) => onHandleKeyDown(e, p.id)}
           // 把手在行按钮之外（兄弟节点），点它不会触发行的 onClick；
           // 但仍要吞掉 click，免得将来把手挪进按钮内部时误开文章。
@@ -602,9 +645,12 @@ function HistoryEntry({
       )}
       <button
         type="button"
+        disabled={interactionLocked}
+        aria-disabled={interactionLocked}
         data-project-id={p.id}
         onClick={() => onSelect(p.id)}
         aria-current={active ? "true" : undefined}
+        title={interactionLocked ? lockTitle : `打开文章：${title}`}
         className={
           "block w-full rounded-xl border px-2.5 py-2 pr-8 text-left transition-colors " +
           (draggable ? "pl-6 " : "") +
@@ -627,9 +673,11 @@ function HistoryEntry({
       </button>
       <button
         type="button"
+        disabled={interactionLocked}
+        aria-disabled={interactionLocked}
         onClick={() => onDelete(p.id)}
         aria-label={`删除文章：${title}`}
-        title="删除这篇文章"
+        title={interactionLocked ? lockTitle : "删除这篇文章"}
         className="absolute right-1 top-1.5 rounded-md p-1 text-text-faint transition-colors hover:bg-surface hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring dark:hover:text-red-400"
       >
         <svg
@@ -652,13 +700,14 @@ function HistoryEntry({
     <li
       data-entry-id={p.id}
       // 位移走 transform（合成层，不触发布局）：被拖的跟手时不要过渡，否则会拖泥带水；
-      // 其余条目让位、以及松手回落时才挂 .t-drag-shift 让 CSS 平滑过渡。
+      // 其余条目用果冻让位，松手后的被拖条目则用更短的落位动画。
       style={shift !== 0 || dragging ? { transform: `translateY(${shift}px)` } : undefined}
       className={
         "group/entry relative" +
         (rising ? " t-toast-rise" : "") +
-        (dragging ? " t-drag-lift" : "") +
-        (animated && shift !== 0 ? " t-drag-shift" : "")
+        (dragging && !settling ? " t-drag-lift" : "") +
+        (settling ? " t-drag-settle" : "") +
+        (animated ? " t-drag-shift" : "")
       }
       onAnimationEnd={(e) => {
         // 行高关键帧播完即视为出现动画完成（只认外层那条动画，内容层的不算）
@@ -676,9 +725,11 @@ function HistoryEntry({
 export function ChatHistoryToggle({
   open,
   onClick,
+  disabled = false,
 }: {
   open: boolean;
   onClick: () => void;
+  disabled?: boolean;
 }) {
   // 冷却：点击后 500ms 内（抽屉动画 250ms + 250ms）忽略同位置再次点击。
   // 既防抖双击，也顺带挡住「关闭动画中途又点开」的边界；reduced-motion 下没有动画，
@@ -693,10 +744,12 @@ export function ChatHistoryToggle({
   return (
     <button
       type="button"
+      disabled={disabled}
+      aria-disabled={disabled}
       onClick={handleClick}
       aria-label="历史记录"
       aria-expanded={open}
-      title="历史记录"
+      title={disabled ? "请求处理中，请等待完成后再操作" : "历史记录"}
       // z-100：抽屉遮罩 z-90 会盖住顶栏，不提升的话打开后叉叉被压在遮罩下点不到
       className="relative z-[100] flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-text-muted transition-colors hover:bg-surface-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring xl:hidden"
     >

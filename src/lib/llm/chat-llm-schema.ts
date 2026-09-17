@@ -15,7 +15,6 @@ export type ChatMessage = z.infer<typeof ChatMessageSchema>;
 
 /** LLM 产出的可执行编辑（ChangeSet 的组成单元，wire 形态） */
 export const LLMConcreteEditSchema = z.object({
-  id: z.string().min(1),
   blockId: z.string().min(1),
   original: z.string().min(1),
   replacement: z.string(),

@@ -101,7 +101,67 @@ describe("POST /api/chat", () => {
     );
     const res = await POST(makeReq(validBody()));
     const data = await res.json();
-    expect(data.changeSet.edits.map((e: { id: string }) => e.id)).toEqual(["c1"]);
+    expect(data.changeSet.edits).toHaveLength(1);
+    expect(data.changeSet.edits[0].id).toMatch(/^edit_/);
+    expect(data.changeSet.edits[0].id).not.toBe("c1");
+  });
+
+  it("忽略模型 edit ID，并透传 reasoningEffort", async () => {
+    const payload = {
+      type: "answer_with_changes",
+      answer: "…",
+      changeSet: {
+        summary: "s",
+        edits: [
+          { id: "same-id", blockId: "p_a", original: "共同的表明", replacement: "共同表明", explanation: "" },
+          { id: "same-id", blockId: "p_a", original: "该效应存在", replacement: "该效应确实存在", explanation: "" },
+        ],
+      },
+    };
+    const gen = vi.fn<LLMProvider["generate"]>(async () => JSON.stringify(payload));
+    vi.spyOn(providerMod, "getProviderFromUserConfig").mockReturnValue({
+      name: "mock",
+      generate: gen,
+    });
+    const res = await POST(
+      makeReq(
+        validBody({
+          llmConfig: { apiKey: "test-key", reasoningEffort: "high" },
+        }),
+      ),
+    );
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    const ids = data.changeSet.edits.map((e: { id: string }) => e.id);
+    expect(ids).toHaveLength(2);
+    expect(new Set(ids).size).toBe(2);
+    expect(ids.every((id: string) => id.startsWith("edit_"))).toBe(true);
+    expect(ids).not.toContain("same-id");
+    expect(gen.mock.calls[0][1]).toMatchObject({ reasoningEffort: "high" });
+  });
+
+  it("模型省略 edit ID 时仍由服务端生成", async () => {
+    const payload = {
+      type: "answer_with_changes",
+      answer: "…",
+      changeSet: {
+        summary: "s",
+        edits: [
+          {
+            blockId: "p_a",
+            original: "共同的表明",
+            replacement: "共同表明",
+            explanation: "",
+          },
+        ],
+      },
+    };
+    vi.spyOn(providerMod, "getProviderFromEnv").mockReturnValue(
+      mockProvider(JSON.stringify(payload)),
+    );
+    const res = await POST(makeReq(validBody()));
+    expect(res.status).toBe(200);
+    expect((await res.json()).changeSet.edits[0].id).toMatch(/^edit_/);
   });
 
   it("review 上下文会把关联建议写入 prompt", async () => {

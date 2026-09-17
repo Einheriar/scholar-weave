@@ -67,6 +67,11 @@ export type AnchorResult =
 
 /** 统计 needle 在 haystack 中出现的所有起始偏移 */
 function findOccurrences(haystack: string, needle: string): number[] {
+  // String#indexOf("", from) keeps returning haystack.length even after the
+  // end, so enumerate the finite set of insertion points explicitly.
+  if (needle.length === 0) {
+    return Array.from({ length: haystack.length + 1 }, (_, index) => index);
+  }
   const offsets: number[] = [];
   let from = 0;
   for (;;) {

@@ -181,33 +181,36 @@ describe("拖动落点判定（dragTargetIndex）", () => {
 
 describe("拖动让位几何（dragShifts）", () => {
   const H = 60;
+  const GAP = 4;
+  const STEP = H + GAP;
+  const tops = [0, STEP, 2 * STEP, 3 * STEP];
 
   it("没拖动（from 越界）时全为 0", () => {
-    expect(dragShifts(3, -1, 0, H, 20)).toEqual([0, 0, 0]);
-    expect(dragShifts(3, 5, 0, H, 20)).toEqual([0, 0, 0]);
+    expect(dragShifts(3, -1, 0, tops, 20)).toEqual([0, 0, 0]);
+    expect(dragShifts(3, 5, 0, tops, 20)).toEqual([0, 0, 0]);
   });
 
   it("落点等于原位时其余行不动，只有被拖行跟手", () => {
-    expect(dragShifts(3, 1, 1, H, 25)).toEqual([0, 25, 0]);
+    expect(dragShifts(3, 1, 1, tops, 25)).toEqual([0, 25, 0]);
   });
 
-  it("向下拖：中间行整体上移一行（腾出位置）", () => {
-    expect(dragShifts(3, 0, 2, H, 130)).toEqual([130, -H, -H]);
+  it("向下拖：中间行整体上移一个完整槽位（包含行间距）", () => {
+    expect(dragShifts(3, 0, 2, tops, 130)).toEqual([130, -STEP, -STEP]);
   });
 
-  it("向上拖：中间行整体下移一行", () => {
-    expect(dragShifts(3, 2, 0, H, -130)).toEqual([H, H, -130]);
+  it("向上拖：中间行整体下移一个完整槽位（包含行间距）", () => {
+    expect(dragShifts(3, 2, 0, tops, -130)).toEqual([STEP, STEP, -130]);
   });
 
   it("跨多格时中间各行都让位（落点是下标，不是插入位）", () => {
     // 从 1 挪到 3：第 3、4 行（原 index 2、3）各上移一行
-    expect(dragShifts(4, 1, 3, H, 70)).toEqual([0, 70, -H, -H]);
+    expect(dragShifts(4, 1, 3, tops, 70)).toEqual([0, 70, -STEP, -STEP]);
     // 从 2 挪到 1：只有原 index 1 下移一行
-    expect(dragShifts(4, 2, 1, H, -70)).toEqual([0, H, -70, 0]);
+    expect(dragShifts(4, 2, 1, tops, -70)).toEqual([0, STEP, -70, 0]);
   });
 
   it("落点越界时不动其余行，只保留跟手位移", () => {
-    const out = dragShifts(3, 2, 3, H, 10);
+    const out = dragShifts(3, 2, 3, tops, 10);
     expect(out[2]).toBe(10);
     expect(out[0]).toBe(0);
     expect(out[1]).toBe(0);
@@ -222,23 +225,23 @@ describe("拖动让位几何（dragShifts）", () => {
     ]) {
       const ids = ["a", "b", "c", "d"];
       const moved = moveId(ids, from, to);
-      const shifts = dragShifts(4, from, to, H, 0);
+      const shifts = dragShifts(4, from, to, tops, 0);
       if (to > from) {
-        for (let i = from + 1; i <= to; i++) expect(shifts[i]).toBe(-H);
+        for (let i = from + 1; i <= to; i++) expect(shifts[i]).toBe(-STEP);
       } else {
-        for (let i = to; i < from; i++) expect(shifts[i]).toBe(H);
+        for (let i = to; i < from; i++) expect(shifts[i]).toBe(STEP);
       }
       expect(moved[to]).toBe(ids[from]);
     }
   });
 
   it("落点判定与让位一致：把 dragTargetIndex 的结果喂给 dragShifts，落点行确实让位", () => {
-    const tops = [0, H, 2 * H];
+    const targetTops = [0, STEP, 2 * STEP];
     // 第 1 行往下拖一点 → 落点 1 → 第 2 行上移
-    const to = dragTargetIndex(tops, H, 0, 1);
-    const shifts = dragShifts(3, 0, to, H, 1);
+    const to = dragTargetIndex(targetTops, H, 0, GAP + 1);
+    const shifts = dragShifts(3, 0, to, targetTops, GAP + 1);
     expect(to).toBe(1);
-    expect(shifts[1]).toBe(-H);
+    expect(shifts[1]).toBe(-STEP);
   });
 });
 

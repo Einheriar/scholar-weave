@@ -25,6 +25,8 @@ export type ReviewSidebarProps = {
   anchorTop?: number | null;
   onApplyOpinion?: (id: string) => void;
   applyingOpinionId?: string | null;
+  /** 付费请求进行期间禁止会改变正文/建议状态的操作 */
+  interactionLocked?: boolean;
 };
 
 /**
@@ -47,6 +49,7 @@ export function ReviewSidebar({
   onChat,
   onApplyOpinion,
   applyingOpinionId = null,
+  interactionLocked = false,
 }: ReviewSidebarProps) {
   const [scopeFilter, setScopeFilter] = useState<ScopeType | "all">("all");
   const [kindFilter, setKindFilter] = useState<Kind | "all">("all");
@@ -333,12 +336,9 @@ export function ReviewSidebar({
         )}
         {sections.map(({ scope, title, empty }) => {
           const list = byScope[scope];
-          // 三个范围区始终作为 landmark 存在（无障碍分组导航）；
-          // 被范围筛选排除时显示为空区，而不是整块移除。
+          // 范围筛选为单选：选择某个范围后，只显示该范围的分区。
           const excluded = scopeFilter !== "all" && scopeFilter !== scope;
-          // 无筛选时 0 意见的分区整区隐藏（「没有符合筛选条件的建议」已覆盖空态），
-          // 避免三个「暂无 ××」空段落刷屏；被筛选排除时仍保留空区作为 landmark。
-          if (!excluded && list.length === 0 && items.length > 0) return null;
+          if (excluded || (list.length === 0 && items.length > 0)) return null;
           return (
             <section key={scope} aria-label={title}>
               <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-text-faint">
@@ -348,7 +348,7 @@ export function ReviewSidebar({
               </h3>
               {list.length === 0 ? (
                 <p className="text-xs text-text-faint">
-                  {excluded ? "（当前筛选不含此范围）" : empty}
+                  {empty}
                 </p>
               ) : (
                 <ul className="space-y-2.5">
@@ -364,6 +364,7 @@ export function ReviewSidebar({
                       onChat={onChat}
                       onApplyOpinion={onApplyOpinion}
                       applyingOpinion={applyingOpinionId === item.id}
+                      interactionLocked={interactionLocked}
                     />
                   ))}
                 </ul>

@@ -195,9 +195,68 @@ describe("POST /api/review", () => {
     const res = await POST(makeReq(validBody()));
     const data = await res.json();
     const ids = data.items.map((i: { id: string }) => i.id);
-    expect(ids).toContain("r_ok");
+    expect(ids).toHaveLength(1);
+    expect(ids[0]).toMatch(/^review_/);
+    expect(ids).not.toContain("r_ok");
     expect(ids).not.toContain("r_noexist");
     expect(ids).not.toContain("r_badblock");
+  });
+
+  it("忽略模型建议 ID，并为重复 ID 重新生成唯一 ID", async () => {
+    const payload = {
+      documentSummary: "…",
+      items: [
+        {
+          id: "same-id",
+          scope: { type: "document" },
+          kind: "opinion",
+          category: "structure",
+          severity: "info",
+          title: "意见一",
+          explanation: "…",
+        },
+        {
+          id: "same-id",
+          scope: { type: "document" },
+          kind: "opinion",
+          category: "clarity",
+          severity: "info",
+          title: "意见二",
+          explanation: "…",
+        },
+      ],
+    };
+    vi.spyOn(providerMod, "getProviderFromEnv").mockReturnValue(
+      mockProvider(JSON.stringify(payload)),
+    );
+    const res = await POST(makeReq(validBody()));
+    const ids = (await res.json()).items.map((i: { id: string }) => i.id);
+    expect(ids).toHaveLength(2);
+    expect(new Set(ids).size).toBe(2);
+    expect(ids.every((id: string) => id.startsWith("review_"))).toBe(true);
+    expect(ids).not.toContain("same-id");
+  });
+
+  it("模型省略 ID 时仍由服务端生成建议 ID", async () => {
+    const payload = {
+      documentSummary: "…",
+      items: [
+        {
+          scope: { type: "document" },
+          kind: "opinion",
+          category: "structure",
+          severity: "info",
+          title: "无需模型分配 ID",
+          explanation: "…",
+        },
+      ],
+    };
+    vi.spyOn(providerMod, "getProviderFromEnv").mockReturnValue(
+      mockProvider(JSON.stringify(payload)),
+    );
+    const res = await POST(makeReq(validBody()));
+    expect(res.status).toBe(200);
+    expect((await res.json()).items[0].id).toMatch(/^review_/);
   });
 
   it("违反业务约束的建议被丢弃（edit 用 document scope / opinion 带 replacement）", async () => {

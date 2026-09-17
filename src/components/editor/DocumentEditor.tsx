@@ -22,6 +22,7 @@ import {
 } from "./ChatAnchorDecorationExtension";
 import {
   docToTiptap,
+  textToPMContent,
   tiptapToBlocks,
   type PMDocNode,
 } from "@/lib/tiptap-convert";
@@ -40,6 +41,8 @@ export type DocumentEditorHandle = {
   applyBlockTexts: (newTextByBlock: Map<string, string>) => boolean;
   /** 撤销：把若干段落还原为旧文本 */
   revertBlockTexts: (oldTextByBlock: Map<string, string>) => boolean;
+  /** 安全撤销一条 edit，不覆盖用户在接受后的其他编辑 */
+  revertEdit: (item: ReviewItem) => boolean;
 };
 
 export type DocumentEditorProps = {
@@ -57,6 +60,8 @@ export type DocumentEditorProps = {
   chatNodes?: ChatNode[];
   /** 点击正文聊天锚点标记时回调（正文→聊天区对应节点） */
   onSelectChatAnchor?: (nodeId: string) => void;
+  /** 请求处理中锁定正文编辑，但仍允许滚动与选择文本 */
+  readOnly?: boolean;
 };
 
 /**
@@ -76,6 +81,7 @@ export const DocumentEditor = forwardRef<
     onSelectionChange,
     chatNodes = [],
     onSelectChatAnchor,
+    readOnly = false,
   },
   ref,
 ) {
@@ -152,6 +158,7 @@ export const DocumentEditor = forwardRef<
 
   const editor = useEditor({
     immediatelyRender: false,
+    editable: !readOnly,
     extensions,
     content: docToTiptap(document) as PMDocNode,
     editorProps: {
@@ -187,6 +194,9 @@ export const DocumentEditor = forwardRef<
         checksum: computeChecksum(rebuilt),
         updatedAt: new Date().toISOString(),
       };
+      // Keep imperative editor operations coherent even if another operation
+      // happens before React has committed the parent state update.
+      docRef.current = next;
       onChangeRef.current(next);
     },
     onSelectionUpdate({ editor }) {
@@ -211,6 +221,12 @@ export const DocumentEditor = forwardRef<
       cb(blockId ? { blockId, text } : null);
     },
   });
+
+  // readOnly 可能在编辑器实例创建后变化，使用 Tiptap API 同步编辑能力。
+  useEffect(() => {
+    if (!editor) return;
+    editor.setEditable(!readOnly);
+  }, [editor, readOnly]);
 
   // items / 选中项变化时触发 Decoration 重建（必须用同一个 PluginKey 作为 meta key）
   useEffect(() => {
@@ -270,7 +286,10 @@ export const DocumentEditor = forwardRef<
       editor
         .chain()
         .focus()
-        .insertContentAt({ from: pos.from, to: pos.to }, item.replacement)
+        .insertContentAt(
+          { from: pos.from, to: pos.to },
+          textToPMContent(item.replacement) ?? [],
+        )
         .run();
       return true;
     },
@@ -279,6 +298,9 @@ export const DocumentEditor = forwardRef<
     },
     revertBlockTexts(oldTextByBlock) {
       return replaceBlockTexts(editor, oldTextByBlock);
+    },
+    revertEdit(item) {
+      return revertSingleEdit(editor, docRef.current, item);
     },
   }));
 
@@ -369,11 +391,69 @@ function replaceBlockTexts(
         type: "paragraph",
         // 保留原 blockId：普通编辑不改变 ID（PLAN 10.2）
         ...(keepId ? { attrs: { blockId: keepId } } : {}),
-        content: t.text ? [{ type: "text", text: t.text }] : undefined,
+        content: textToPMContent(t.text),
       },
     );
   }
   chain.run();
+  return true;
+}
+
+/**
+ * 安全撤销单条 edit。
+ *
+ * 反向定位只使用当前正文中的 replacement 与原 scope 上下文。若用户已经
+ * 改动了 replacement 周围的内容，locateRange 会失败，此处不会猜测位置，
+ * 也不会用旧的整段快照覆盖后续编辑。block 级 edit 只在当前整段仍严格等于
+ * 接受后文本时恢复持久化的 before 快照，正文继续变化后同样拒绝撤销。
+ */
+function revertSingleEdit(
+  editor: Editor | null,
+  fallbackDoc: DocumentState,
+  item: ReviewItem,
+): boolean {
+  if (!editor || item.kind !== "edit") return false;
+  if (item.replacement === undefined) return false;
+
+  // 直接从 editor 当前 JSON 重建正文，避免父组件尚未完成一次 rerender 时
+  // docRef 仍是接受修改前的快照。
+  const currentBlocks = tiptapToBlocks(editor.getJSON() as PMDocNode).map(
+    (block) => ({
+      id: block.blockId,
+      type: "paragraph" as const,
+      text: block.text,
+    }),
+  );
+  const currentDoc: DocumentState = {
+    ...fallbackDoc,
+    blocks: currentBlocks,
+  };
+
+  if (item.scope.type === "block") {
+    const snapshot = item.acceptedSnapshot;
+    const blockId = item.scope.blockId;
+    const block = currentDoc.blocks.find((entry) => entry.id === blockId);
+    if (!snapshot || !block || block.text !== snapshot.after) return false;
+    return replaceBlockTexts(editor, new Map([[blockId, snapshot.before]]));
+  }
+  if (item.scope.type !== "range") return false;
+  const reverseScope = {
+    ...item.scope,
+    original: item.replacement,
+  };
+  const hit = locateRange(currentDoc, reverseScope);
+  if (!hit.ok) return false;
+
+  const blockStart = blockStartPosition(editor, item.scope.blockId);
+  if (blockStart == null) return false;
+  editor
+    .chain()
+    .focus()
+    .insertContentAt(
+      { from: blockStart + 1 + hit.start, to: blockStart + 1 + hit.end },
+      textToPMContent(item.scope.original) ?? [],
+    )
+    .run();
   return true;
 }
 

@@ -148,6 +148,10 @@ export default function Home() {
 
   const editorRef = useRef<DocumentEditorHandle>(null);
   const abortRef = useRef<AbortController | null>(null);
+  /** 每条付费请求各自的世代号：即使取消/超时与新请求交错，旧回调也不能改当前界面。 */
+  const reviewRequestSeq = useRef(0);
+  const chatRequestSeq = useRef(0);
+  const changeSetRequestSeq = useRef(0);
   /**
    * 防抖保存从 ref 读最新状态（doc/reviews/nodes/activeProjId），
    * 避免 setTimeout 闭包读到批处理前的旧值导致节点/建议丢失。
@@ -162,6 +166,22 @@ export default function Home() {
     latestRef.current = { doc, reviews, nodes, activeProjId };
   }, [doc, reviews, nodes, activeProjId]);
   const chatAbortRef = useRef<AbortController | null>(null);
+  /** 异步聊天回复只在用户仍查看原节点时更新消息面板；节点数据本身仍按 nodeId 写回。 */
+  const activeNodeIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    activeNodeIdRef.current = activeNodeId;
+  }, [activeNodeId]);
+
+  /**
+   * 审阅/聊天/生成修改集都会产生调用费用。请求期间锁住文章现场，避免用户切换或修改后
+   * 让已经付费生成的结果失去归属；请求 token 与文档快照校验仍作为异常路径的兜底。
+   */
+  const requestLocked =
+    reviewUi.phase === "loading" || chatBusy || applyingOpinionId !== null;
+
+  const announceRequestLock = useCallback(() => {
+    setAnnounce("请求处理中，请等待完成后再修改或切换文章。");
+  }, []);
 
   // ── 启动：恢复最近项目，否则载入样例 ──
   useEffect(() => {
@@ -266,6 +286,10 @@ export default function Home() {
   /** 点开左栏项目：完整恢复正文 + 建议 + 聊天现场（规则 5 现场可回看） */
   const handleSelectProject = useCallback(
     (id: string) => {
+      if (requestLocked) {
+        announceRequestLock();
+        return;
+      }
       const proj = projects.find((p) => p.id === id);
       if (!proj) return;
       // 切换前把当前项目立即落库（防抖保存可能还没跑，避免旧文章丢失）。
@@ -300,6 +324,7 @@ export default function Home() {
       const lastNode = proj.nodes[proj.nodes.length - 1];
       setActiveNodeId(lastNode?.id ?? null);
       setChatTurns(lastNode?.turns ?? []);
+      setSelection(null);
       setSelectedId(null);
       setChatError(null);
       setChangeSetOpen(false);
@@ -308,7 +333,7 @@ export default function Home() {
       setHistoryOpen(false);
       setAnnounce(`已打开文章：${proj.title}。`);
     },
-    [projects],
+    [projects, requestLocked, announceRequestLock],
   );
 
   /** 新文章：清空正文 + 建议 + 聊天，开一个新项目；旧文章留在左栏（规则 4）。
@@ -321,6 +346,10 @@ export default function Home() {
    *    早先却挂在防抖落库路径上，于是「点」与「新行蹦出来」之间空出约一秒。
    */
   const handleNewProject = useCallback((opts?: { keepHistoryOpen?: boolean }) => {
+    if (requestLocked) {
+      announceRequestLock();
+      return;
+    }
     const {
       doc: curDoc,
       reviews: curReviews,
@@ -372,25 +401,34 @@ export default function Home() {
     setNodes([]);
     setActiveNodeId(null);
     setChatTurns([]);
+    setSelection(null);
     setSelectedId(null);
     setChatError(null);
     setChangeSetOpen(false);
     if (!opts?.keepHistoryOpen) setHistoryOpen(false);
     setSaveState("saving");
     setAnnounce("已开始新文章。");
-  }, []);
+  }, [requestLocked, announceRequestLock]);
 
   /** 手动拖动 / 键盘移动后的新顺序：密集重编号、立即落库（显式操作，允许全表写回） */
   const handleReorderProjects = useCallback((orderedIds: string[], message?: string) => {
+    if (requestLocked) {
+      announceRequestLock();
+      return;
+    }
     const next = reorderProjects(projectsRef.current, orderedIds);
     projectsRef.current = next;
     setProjects(next);
     void saveProjects(next);
     setAnnounce(message ?? "已调整文章顺序。");
-  }, []);
+  }, [requestLocked, announceRequestLock]);
 
   const handleDeleteProject = useCallback(
     async (id: string) => {
+      if (requestLocked) {
+        announceRequestLock();
+        return;
+      }
       const target = projects.find((p) => p.id === id);
       if (
         target &&
@@ -414,15 +452,25 @@ export default function Home() {
       }
       setAnnounce("已删除文章。");
     },
-    [projects, activeProjId],
+    [projects, activeProjId, requestLocked, announceRequestLock],
   );
 
   // ── 审阅 ──
   const runReview = useCallback(async () => {
     if (!doc) return;
+    if (requestLocked) {
+      announceRequestLock();
+      return;
+    }
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
+    const requestId = ++reviewRequestSeq.current;
+    const requestDoc = {
+      id: doc.id,
+      revision: doc.revision,
+      checksum: doc.checksum,
+    };
     setReviewUi({ phase: "loading" });
     setSelectedId(null);
     const prefs = settingsToRequestBody(settings);
@@ -448,10 +496,26 @@ export default function Home() {
       if (!res.ok) {
         throw new Error(data?.error?.message ?? `审阅失败（HTTP ${res.status}）`);
       }
-      setReviews(data.items as ReviewItem[]);
+      if (reviewRequestSeq.current !== requestId) return;
+      const current = latestRef.current.doc;
+      if (
+        !current ||
+        current.id !== requestDoc.id ||
+        current.revision !== requestDoc.revision ||
+        current.checksum !== requestDoc.checksum ||
+        data.documentRevision !== requestDoc.revision ||
+        data.checksum !== requestDoc.checksum
+      ) {
+        throw new Error("正文状态已变化，本次审阅结果未应用。请重新审阅。");
+      }
+      const nextReviews = data.items as ReviewItem[];
+      latestRef.current.reviews = nextReviews;
+      setReviews(nextReviews);
       setReviewUi({ phase: "done", summary: data.documentSummary ?? "" });
-      setAnnounce(`审阅完成，共 ${(data.items as ReviewItem[]).length} 条建议。`);
+      setSaveState("saving");
+      setAnnounce(`审阅完成，共 ${nextReviews.length} 条建议。`);
     } catch (e) {
+      if (reviewRequestSeq.current !== requestId) return;
       if (e instanceof Error && e.name === "AbortError") {
         setReviewUi({ phase: "idle" });
         return;
@@ -460,11 +524,15 @@ export default function Home() {
         phase: "error",
         message: e instanceof Error ? e.message : "审阅失败。",
       });
+    } finally {
+      if (reviewRequestSeq.current === requestId) abortRef.current = null;
     }
-  }, [doc, mode, settings]);
+  }, [doc, mode, settings, requestLocked, announceRequestLock]);
 
   const cancelReview = useCallback(() => {
+    reviewRequestSeq.current += 1;
     abortRef.current?.abort();
+    abortRef.current = null;
     setReviewUi({ phase: "idle" });
   }, []);
 
@@ -517,11 +585,12 @@ export default function Home() {
     [handleBodySelect, setAnchorTop],
   );
 
-  // 接受某条 edit 前的文本快照（撤销时还原正文用）：reviewId → (blockId → 原文)
-  const acceptSnapshotRef = useRef<Map<string, Map<string, string>>>(new Map());
-
   const handleAccept = useCallback(
     (id: string): boolean => {
+      if (requestLocked) {
+        announceRequestLock();
+        return false;
+      }
       if (!doc) return false;
       const item = reviews.find((r) => r.id === id);
       if (!item || item.status !== "open" || item.kind !== "edit") {
@@ -532,31 +601,39 @@ export default function Home() {
               r.id === id ? { ...r, status: "accepted" as const } : r,
             ),
           );
+          setSaveState("saving");
           return true;
         }
         return false;
       }
-      const blockId =
-        item.scope.type === "range" || item.scope.type === "block"
-          ? item.scope.blockId
-          : null;
-      const before = blockId
-        ? doc.blocks.find((b) => b.id === blockId)?.text
-        : undefined;
+      const acceptedBlockId = item.scope.type === "block" ? item.scope.blockId : null;
+      const acceptedSnapshot =
+        acceptedBlockId !== null && item.replacement !== undefined
+          ? {
+              before: doc.blocks.find((block) => block.id === acceptedBlockId)?.text ?? "",
+              after: item.replacement,
+            }
+          : undefined;
       const ok = editorRef.current?.applyEdit(item);
-      if (!ok || !blockId || before === undefined) return false;
-      acceptSnapshotRef.current.set(id, new Map([[blockId, before]]));
+      if (!ok) return false;
       setReviews((rs) =>
         rs.map((r) =>
-          r.id === id ? { ...r, status: "accepted" as const } : r,
+          r.id === id
+            ? { ...r, status: "accepted" as const, acceptedSnapshot }
+            : r,
         ),
       );
+      setSaveState("saving");
       return true;
     },
-    [doc, reviews],
+    [doc, reviews, requestLocked, announceRequestLock],
   );
 
   const handleReject = useCallback((id: string) => {
+    if (requestLocked) {
+      announceRequestLock();
+      return;
+    }
     setReviews((rs) =>
       rs.map((r) =>
         r.id === id && r.status === "open"
@@ -564,23 +641,34 @@ export default function Home() {
           : r,
       ),
     );
-  }, []);
+    setSaveState("saving");
+  }, [requestLocked, announceRequestLock]);
 
   const handleRevert = useCallback((id: string) => {
-    // 若该建议接受时改过正文，先还原（PLAN 5.1 撤销）
-    const snapshot = acceptSnapshotRef.current.get(id);
-    if (snapshot) {
-      editorRef.current?.revertBlockTexts(snapshot);
-      acceptSnapshotRef.current.delete(id);
+    if (requestLocked) {
+      announceRequestLock();
+      return;
+    }
+    const item = reviews.find((r) => r.id === id);
+    if (!item || (item.status !== "accepted" && item.status !== "rejected")) return;
+    // 已接受的文本修改只做安全反向定位：目标已被继续编辑时绝不恢复整段旧快照。
+    if (item.status === "accepted" && item.kind === "edit") {
+      const ok = editorRef.current?.revertEdit(item) ?? false;
+      if (!ok) {
+        setChatError("正文已变化，无法安全撤销这条修改。");
+        setAnnounce("正文已变化，无法安全撤销这条修改。");
+        return;
+      }
     }
     setReviews((rs) =>
       rs.map((r) =>
         r.id === id && (r.status === "accepted" || r.status === "rejected")
-          ? { ...r, status: "open" as const }
+          ? { ...r, status: "open" as const, acceptedSnapshot: undefined }
           : r,
       ),
     );
-  }, []);
+    setSaveState("saving");
+  }, [reviews, requestLocked, announceRequestLock]);
 
   /** 当前查看的聊天节点（消息列表显示它的轮次；上下文回落也用它，见 chatContext） */
   const activeNode = useMemo(
@@ -673,6 +761,10 @@ export default function Home() {
   const sendChat = useCallback(
     async (message: string) => {
       if (!doc) return;
+      if (requestLocked) {
+        announceRequestLock();
+        return;
+      }
       // 规则 11：无选区且无选中建议时禁止提问（想问全文请自行全选）
       if (chatForbidden) {
         setChatError("请先选中正文中的词、段落，或选中一条审阅建议，再提问。");
@@ -712,6 +804,7 @@ export default function Home() {
         : [...baseNodes, nodeWithUser];
       latestRef.current.nodes = withUser;
       setNodes(withUser);
+      activeNodeIdRef.current = nodeId;
       setActiveNodeId(nodeId);
       setChatTurns(nodeWithUser.turns);
       setChatError(null);
@@ -720,7 +813,7 @@ export default function Home() {
 
       // 规则 24：节点边界即上下文边界。history 取本节点全部轮次（不含跨节点），
       // blocks 用 packBlocks 取锚点段 ±1 段，建议只带锚点段的 open 建议。
-      const history = nodeWithUser.turns
+      const history = targetNode.turns
         .map((t) => ({ role: t.role, content: t.content }));
       const blocks = packBlocks(ctx);
       const anchorBlockId =
@@ -743,6 +836,12 @@ export default function Home() {
       chatAbortRef.current?.abort();
       const controller = new AbortController();
       chatAbortRef.current = controller;
+      const requestId = ++chatRequestSeq.current;
+      const requestDoc = {
+        id: doc.id,
+        revision: doc.revision,
+        checksum: doc.checksum,
+      };
       const prefs = settingsToRequestBody(settings);
 
       try {
@@ -780,6 +879,16 @@ export default function Home() {
         if (!res.ok) {
           throw new Error(data?.error?.message ?? `对话失败（HTTP ${res.status}）`);
         }
+        if (chatRequestSeq.current !== requestId) return;
+        const current = latestRef.current.doc;
+        if (
+          !current ||
+          current.id !== requestDoc.id ||
+          current.revision !== requestDoc.revision ||
+          current.checksum !== requestDoc.checksum
+        ) {
+          throw new Error("正文状态已变化，本次回复未写入。请重新提问。");
+        }
         const reply: ChatTurn =
           data.type === "answer_with_changes" && data.changeSet
             ? {
@@ -801,20 +910,24 @@ export default function Home() {
         );
         latestRef.current.nodes = repliedNodes;
         setNodes(repliedNodes);
-        if (activeProjRef.current?.doc.id === doc.id || activeProjId === null) {
+        if (activeNodeIdRef.current === nodeId) {
           setChatTurns(nodeWithReply.turns);
         }
         // 回复到达也算活动；立即落库，免得用户在 500ms 防抖窗口内刷新丢掉这轮消息。
         // 显式传含回复的节点：setNodes 里同步的 latestRef 可能被 effect 覆盖回旧快照。
         void persistProjectNow(repliedNodes);
       } catch (e) {
+        if (chatRequestSeq.current !== requestId) return;
         if (e instanceof Error && e.name === "AbortError") {
           // 用户取消：不加错误
         } else {
           setChatError(e instanceof Error ? e.message : "对话失败。");
         }
       } finally {
-        setChatBusy(false);
+        if (chatRequestSeq.current === requestId) {
+          chatAbortRef.current = null;
+          setChatBusy(false);
+        }
       }
     },
     [
@@ -825,9 +938,10 @@ export default function Home() {
       reviews,
       contextReview,
       packBlocks,
-      activeProjId,
       settings,
       persistProjectNow,
+      requestLocked,
+      announceRequestLock,
     ],
   );
 
@@ -855,6 +969,9 @@ export default function Home() {
     (nodeId: string, turnIndex: number) => {
       const node = nodes.find((n) => n.id === nodeId);
       if (!node) return;
+      // 时间线明确切到某个节点时，让节点锚点成为唯一上下文，避免旧选区/建议盖过它。
+      setSelection(null);
+      setSelectedId(null);
       setActiveNodeId(nodeId);
       setChatTurns(node.turns);
       setAnnounce(`已切换到聊天节点。`);
@@ -893,6 +1010,10 @@ export default function Home() {
   /** 规则 13：时间线行内删除该节点全部讨论（直接删，不弹确认） */
   const handleDeleteNode = useCallback(
     (nodeId: string) => {
+      if (requestLocked) {
+        announceRequestLock();
+        return;
+      }
       setNodes((ns) => {
         const next = ns.filter((n) => n.id !== nodeId);
         // 删的是当前查看的节点 → 切到剩余的最新节点或清空
@@ -906,7 +1027,7 @@ export default function Home() {
       setSaveState("saving");
       setAnnounce("已删除该节点讨论。");
     },
-    [activeNodeId],
+    [activeNodeId, requestLocked, announceRequestLock],
   );
 
   /** 阶段 6：点击正文聊天锚点标记 → 切到对应节点对话 */
@@ -914,6 +1035,10 @@ export default function Home() {
     (nodeId: string) => {
       const node = nodes.find((n) => n.id === nodeId);
       if (!node) return;
+      // Do not clear selection here: this callback also fires while the user
+      // double-clicks an existing anchor to select the same text again.
+      // A normal single click collapses the Tiptap selection by itself.
+      setSelectedId(null);
       setActiveNodeId(nodeId);
       setChatTurns(node.turns);
       // 若聊天区被最小化，展开以便看到对话
@@ -937,6 +1062,10 @@ export default function Home() {
   const applyOpinion = useCallback(
     async (id: string) => {
       if (!doc) return;
+      if (requestLocked) {
+        announceRequestLock();
+        return;
+      }
       const item = reviews.find((r) => r.id === id);
       if (!item) return;
       // 收窄出 blockId（document 级没有）
@@ -946,6 +1075,12 @@ export default function Home() {
           : undefined;
       setApplyingOpinionId(id);
       setChatError(null);
+      const requestId = ++changeSetRequestSeq.current;
+      const requestDoc = {
+        id: doc.id,
+        revision: doc.revision,
+        checksum: doc.checksum,
+      };
       const prefs = settingsToRequestBody(settings);
       try {
         const res = await fetch("/api/change-set", {
@@ -977,19 +1112,43 @@ export default function Home() {
         if (!res.ok) {
           throw new Error(data?.error?.message ?? `生成修改失败（HTTP ${res.status}）`);
         }
+        if (changeSetRequestSeq.current !== requestId) return;
+        const current = latestRef.current.doc;
+        if (
+          !current ||
+          current.id !== requestDoc.id ||
+          current.revision !== requestDoc.revision ||
+          current.checksum !== requestDoc.checksum ||
+          data.changeSet?.documentRevision !== requestDoc.revision
+        ) {
+          throw new Error("正文状态已变化，本次修改集未打开。请重新生成。");
+        }
         openChangeSet(data.changeSet as ChangeSet);
       } catch (e) {
+        if (changeSetRequestSeq.current !== requestId) return;
         setChatError(e instanceof Error ? e.message : "生成修改集失败。");
       } finally {
-        setApplyingOpinionId(null);
+        if (changeSetRequestSeq.current === requestId) setApplyingOpinionId(null);
       }
     },
-    [doc, reviews, packBlocks, settings, openChangeSet],
+    [
+      doc,
+      reviews,
+      packBlocks,
+      settings,
+      openChangeSet,
+      requestLocked,
+      announceRequestLock,
+    ],
   );
 
   // ── 修改集：接受选中 / 放弃 ──
   const acceptChangeSet = useCallback(
     (editIds: string[]) => {
+      if (requestLocked) {
+        announceRequestLock();
+        return;
+      }
       if (!doc || !activeChangeSet) return;
       const subset: ChangeSet = {
         ...activeChangeSet,
@@ -1009,7 +1168,13 @@ export default function Home() {
       }
       closeChangeSet();
     },
-    [doc, activeChangeSet, closeChangeSet],
+    [
+      doc,
+      activeChangeSet,
+      closeChangeSet,
+      requestLocked,
+      announceRequestLock,
+    ],
   );
 
   const discardChangeSet = useCallback(() => closeChangeSet(), [closeChangeSet]);
@@ -1028,6 +1193,10 @@ export default function Home() {
   }, [doc]);
 
   const clearAll = useCallback(async () => {
+    if (requestLocked) {
+      announceRequestLock();
+      return;
+    }
     if (!window.confirm("确定要清空本地保存的草稿与数据吗？当前编辑器内容也会被重置。")) {
       return;
     }
@@ -1038,6 +1207,7 @@ export default function Home() {
     setNodes([]);
     setActiveNodeId(null);
     setChatTurns([]);
+    setSelection(null);
     setProjects([]);
     projectsRef.current = [];
     activeProjRef.current = null;
@@ -1046,16 +1216,26 @@ export default function Home() {
     setSelectedId(null);
     setReviewUi({ phase: "idle" });
     setSaveState("saving");
-  }, []);
+  }, [requestLocked, announceRequestLock]);
 
   const loadSample = useCallback(() => {
+    if (requestLocked) {
+      announceRequestLock();
+      return;
+    }
     const { doc: d } = buildSampleDocument();
     setDoc(d);
     setReviews(buildSampleReview(d));
+    setNodes([]);
+    setActiveNodeId(null);
+    setChatTurns([]);
+    setSelection(null);
     setSelectedId(null);
+    setChatError(null);
+    setChangeSetOpen(false);
     setReviewUi({ phase: "idle" });
     setSaveState("saving");
-  }, []);
+  }, [requestLocked, announceRequestLock]);
 
   const openCount = useMemo(
     () => reviews.filter((r) => r.status === "open").length,
@@ -1116,6 +1296,8 @@ export default function Home() {
         />
         <input
           value={doc.title}
+          disabled={requestLocked}
+          title={requestLocked ? "请求处理中，请等待完成后再修改标题" : undefined}
           // 改标题也是一次内容编辑：必须同样置 saving（否则防抖保存不触发，
           // 标题既不落库、也不算「活动」——改完刷新就丢，且不会把文章置顶）。
           // 不走 handleDocChange 是为了跳过多余的锚点校验：标题不参与 block 定位。
@@ -1152,6 +1334,7 @@ export default function Home() {
           <button
             type="button"
             onClick={runReview}
+            disabled={requestLocked}
             title="开始审阅（Cmd/Ctrl+Enter）"
             className={buttonClass("primary", "sm")}
           >
@@ -1221,6 +1404,7 @@ export default function Home() {
           onCreatedShown={() => setJustCreatedId(null)}
           open={historyOpen}
           onOpenChange={setHistoryOpen}
+          interactionLocked={requestLocked}
         />
 
         <div className="grid min-w-0 flex-1 grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(750px,1fr)_360px]">
@@ -1235,6 +1419,7 @@ export default function Home() {
               onSelectionChange={setSelection}
               chatNodes={nodes}
               onSelectChatAnchor={handleSelectChatAnchor}
+              readOnly={requestLocked}
             />
 
             {/* 修改集预览（对话或按意见生成时弹出）。常驻渲染：open 驱动进/出动画，
@@ -1271,7 +1456,7 @@ export default function Home() {
                 anchorStale={anchorStale}
                 turns={chatTurns}
                 busy={chatBusy}
-                sendDisabled={chatForbidden}
+                sendDisabled={chatForbidden || requestLocked}
                 minimized={chatMinimized}
                 onToggleMinimize={() => setChatMinimized((v) => !v)}
                 onSend={sendChat}
@@ -1301,6 +1486,7 @@ export default function Home() {
               onChat={handleSelect}
               onApplyOpinion={applyOpinion}
               applyingOpinionId={applyingOpinionId}
+              interactionLocked={requestLocked}
             />
           </div>
         </div>
@@ -1371,6 +1557,7 @@ export default function Home() {
         onSettingsChange={handleSettingsChange}
         onLoadSample={loadSample}
         onClearAll={clearAll}
+        dataActionsLocked={requestLocked}
       />
     </main>
   );

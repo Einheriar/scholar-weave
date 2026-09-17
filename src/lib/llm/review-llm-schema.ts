@@ -13,7 +13,6 @@ import {
  */
 
 export const LLMReviewItemSchema = z.object({
-  id: z.string().min(1),
   scope: ReviewScopeSchema,
   kind: z.enum(["opinion", "edit"]),
   category: ReviewCategorySchema,

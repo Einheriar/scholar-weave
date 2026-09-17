@@ -150,6 +150,8 @@ export async function POST(request: Request) {
     // 业务校验：edit 的 scope 不能是 document；opinion 不得带 replacement
     const full = {
       ...rawItem,
+      // 不信任 LLM 生成的标识，避免重复 ID 造成前端状态串联。
+      id: `review_${crypto.randomUUID()}`,
       status: "open" as const,
       documentRevision: reqBody.revision,
     };

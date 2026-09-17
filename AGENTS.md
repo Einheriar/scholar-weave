@@ -133,10 +133,10 @@ tests/e2e/                      # Playwright 用例（helpers.ts 里是 mock 与
   - `order` 在 Zod 里是 **`.optional()`**：`listProjects` 用 `safeParse` 读旧数据，必填会让缺字段的既有项目校验失败、被整条丢弃（看起来像历史全没了）。旧数据由 Dexie **v4** 的 upgrade 按当时的显示顺序回填；`listProjects` 用 `toArray()` 而非 `orderBy("order")` 也是同理——索引会**跳过**缺该字段的行。
 - **拖动排序的视觉是「浮起跟手 + 其余项滑开」，几句容易踩的线**：
   - **被拖条目的跟手位移写在 `transform: translateY()` 内联样式里，浮起的放大必须用独立的 `scale` 属性**——如果把 `scale()` 也写进 transform，JS 每帧重写 transform 时会把缩放覆盖掉。
-  - 拖动期间**只改 transform、不改 DOM 顺序**：边拖边重排会让行在指针下跳位，也会每帧触发 React 重渲染。其余条目让位一行高，靠 `.t-drag-shift` 的 transition 平滑滑开；松手先播回落再提交顺序（视觉与数据不错位）。
+  - 拖动期间**只改 transform、不改 DOM 顺序**：边拖边重排会让行在指针下跳位，也会每帧触发 React 重渲染。其余条目按相邻 `top` 差值让位（包含 `space-y-1` 的 4px 间距），靠 `.t-drag-shift` 的 transition 平滑滑开；拖动尚未结束时，即使某条位移回到 0 也必须保留该 transition 类，否则会出现「推开有果冻、回原位却瞬移」的不对称感。松手先播 `.t-drag-settle` 落位，再无过渡地提交顺序（视觉与数据不错位）。
   - **触发时机按「边缘重叠」而不是「中心过半」**（`dragTargetIndex`，阈值 `DRAG_TRIGGER_RATIO = 0` + 严格大于判定）。按中心判定时两个框已经叠上、甚至越过去了还不让位，用户明确要求「刚好盖住就开始滑动」；列表行间还有 4px 间距，所以实测下移 5px 即触发。落点与让位共用同一份**拖动开始时**的几何快照，不读邻居被让位后的实时位置，因此同一位移恒得同一落点、不会抖。
   - **几何快照要同时存 ref 和 state**：事件回调（松手算落点）读 **ref**——state 更新要等重渲染，在同一个事件处理链里读 state 拿到的是旧值（踩过：纯 state 时松手落点算错、顺序不提交）；渲染期（算每行位移）读 **state**——ref 不允许在渲染期读（`react-hooks/refs` 会报错）。
-  - 让位/回落过渡用带**过冲**的弹簧曲线 `cubic-bezier(0.34,0,0.64,1.4)`（末端冲过约 5% 再回弹，即「果冻」感），**不要**改用项目通行的 ease-out `(0.22,1,0.36,1)`——它前 1/3 时间走完八成行程，让位看起来是「一闪就到位」。时长与 `ChatHistory.tsx` 的 `SETTLE_MS` 常量配套，改一处必须改另一处。
+  - **拖动让位与松手落位是两套节奏，不要再合并。** 其余条目让位继续用 300ms、带过冲的 `cubic-bezier(0.34,0,0.64,1.4)`，保留「果冻」感；被拖条目松手后改用 `.t-drag-settle`：180ms、无过冲的 `cubic-bezier(0.2,0.8,0.2,1)`，位置回落时同步收回 `scale`、阴影与提亮。`ChatHistory.tsx` 的 `LANDING_MS` 比 CSS 多留 10ms，结束后无过渡提交 DOM 顺序，避免「到位后还悬着、最后突然落一下」。
   - 让位几何是纯函数 `dragShifts` + 落点判定 `dragTargetIndex`（`chat-history.ts`），有单测与「落点与 `moveId` 一致」的一致性检查守着。
   - 拖动把手是**独立的小把手**（不是整行）：整行是「点开文章」按钮、内嵌删除按钮，拖动挂整行会和点击语义打架；把手带 `touch-action:none`，列表其余位置因此仍能正常滚动。
 - **`listProjects` 的排序依据是 `order`，`loadLatestProject` = 列表第一条**（不再是「最近活动时间最新」的那条）。改动排序语义时这两个函数要一起看。
@@ -203,11 +203,12 @@ tests/e2e/                      # Playwright 用例（helpers.ts 里是 mock 与
     - `Preferences`：指示器自身的偏好设置。
     关闭理由：本应用布局四角都有内容，实测指示器放哪个角都会遮挡——左下撞页脚文字与自绘浮动按钮、左上撞文档标题（≤1316px 视口）、右上撞「N 条待处理」徽标（900–1316px 视口）、右下撞版本号/段数行。而它主要服务于路由静态化排查，本项目只有 `/` 一个静态页、其余都是 API 路由，用不上；留着反而让人误以为界面有布局 bug。
     需要恢复时（例如以后加了动态路由段要排查渲染行为）：把 `next.config.ts` 里那行改成 `devIndicators: { position: "top-right" }`，或删掉该行使用默认的左下角；开发时也可以点开指示器选「Hide Dev Tools for this session」临时隐藏，不必改配置。编译与运行错误不受此开关影响，仍会照常弹出覆盖层。
-12. **`revision` 只是计数器，PLAN 10.5 设计的「响应回来时比对 revision/checksum」尚未接到产品代码里——不要以为它在生效。** 事实核查结果：
+12. **`revision` 只是计数器，但请求结果的版本防串写已经接入。** 当前约定：
     - `revision` 每改一次正文就 +1，**每敲一个字符算一次**（实测：清空后 1，输入 5 个字母后 6）。所以它的数值很大且没有"版本"含义，已从页脚移除。
-    - 客户端把 `revision`/`checksum` 发出去、服务端也把 `documentRevision` 原样带回，但**没有任何地方读取返回值做比对**；`isRevisionCompatible()` 目前只被 `tests/revisions.test.ts` 调用。
-    - 真正在防"建议过期"的是锚点定位：每次改动后 `handleDocChange` 用 `canLocateScope()` 重新按 `blockId + 原文 + 前后缀` 校验，定位失败即标 `stale`。机制有效，但不等价于设计意图。
-    - 若要补齐 PLAN 10.5，需要客户端在响应返回时比对 `documentRevision`/`checksum` 与当前文档，不一致则把该批建议标为可能过期。这是独立的一轮改动，不要顺手改掉 `revision` 字段本身（服务端协议与测试都用它）。
+    - 发起审阅、聊天、生成 ChangeSet 时，`page.tsx` 会捕获文档 `id + revision + checksum` 与请求世代号；响应回来后若当前正文已变化或请求已失效，结果不会写入当前现场。审阅和 ChangeSet 还会核对服务端回传的版本。
+    - 付费请求期间正文、标题、文章切换/新建/删除/排序、样例载入与清空数据会被锁定；取消审阅只让当前请求失效，不允许旧回调随后串写。
+    - ChangeSet 打开后允许用户继续编辑；预览和最终接受都基于**当前正文重新定位每条 edit**，定位失败或与其他 edit 重叠的条目不应用，而不是仅凭生成时的 revision 整批强行执行。
+    - 正文平时的建议过期判定仍靠锚点：`handleDocChange` 用 `canLocateScope()` 按 `blockId + 原文 + 前后缀` 校验，定位失败标 `stale`。`isRevisionCompatible()` 仍仅供测试，产品代码用更完整的直接比较。
 13. **Dexie 的 `version().stores()` 是「合并」语义，不是「每级都要列全」——但删表要显式写 `null`。** 加 `conversations` 表时我一度按「漏写会让旧表消失」去写注释，实测（Dexie 4，`tests/conversations.test.ts` 里留了守护用例）证明是错的：`version(2).stores({ conversations: "id" })` 之后 `documents` 依然在，`db.tables` 是 `["conversations","documents"]`。所以**新增表时多写一行旧表是"为了可读"而不是"为了不丢表"**；真要删表，必须写 `documents: null`。别把这条理解反了去"修" `src/lib/storage/db.ts`。
 14. **新增/改动 IndexedDB 表结构时，同时看一眼「清空数据」是否覆盖到它。** 设置面板的「清空数据」调的是 `clearAll`，它会同时清 `documents` 与 `conversations`；以后再加表，忘了加进去就会出现「清空后刷新又冒出来」的怪象。
 15. **退出动画必须带 `animation-fill-mode: forwards`，且不要和「延迟卸载」分开记。** 约定 8 的「closing 状态 + `onAnimationEnd` 后卸载」只解决了一半：动画播完到 React 响应事件、提交卸载之间至少还有一帧，没有 fill 的话元素样式会回落到自然位置（抽屉就是 `translateX(0)` 完全可见），表现是「收进去之后闪一下才消失」。进入动画同理用 `both` 防首帧闪烁。排查这类闪烁别靠肉眼，用 `requestAnimationFrame` 逐帧采样 `getBoundingClientRect()`，一帧的跳变立刻现形（实测修复前采样到 x 从 -225 跳回 0）。
@@ -220,6 +221,9 @@ tests/e2e/                      # Playwright 用例（helpers.ts 里是 mock 与
 22. **E2E 选词要先处理浮动聊天区遮挡 + Decoration 拆词**——聊天区 `sticky bottom` 会遮住编辑器下方的词（点击落在面板上选不中），且 chat-anchor Decoration 会把词拆成多个文本节点（`getByText(子串)` 命中整段）。`selectTextInEditor` 的做法：用 `document.createRange` + `TreeWalker` 找到 needle 的精确文本节点坐标，先滚到聊天区（`[aria-label="上下文对话"]`）上方，单词直接 `dblclick`，**多词短语先双击词尾再 Shift+点词首**（方向反了会缩回只选第一个词）。断言用上下文标签里「选区「…」」的原文前缀（标签截断到 12 字符），别全等。
 23. **`letter-spacing` 会在最后一个字后面也追加字距，且布局把它算进宽度——文字因此不居中，而且用 `Range.getBoundingClientRect()` 自测发现不了。** 「新文章」按钮用 `tracking-[0.3em]`（18px → 5.4px）凑宽度时，`justify-center` 居中的是「三字 + 末尾 5.4px 空白」，墨迹左偏半个字距（实测墨迹中心比按钮中心左 2.708px，右空隙比左大整整一个字距 5.4px）。**我反复"验证通过"是量错了对象**：`Range` 返回的是 advance 宽度（含末尾留白），它的中心当然与容器中心重合，所以每次都报"差 0.008px，已居中"；肉眼看的墨迹中心才是真的。修法是包一层 `-mr-[0.3em]` 用负边距抵消尾随留白（通用手法）。教训有两层：(1) **不要拿 `letter-spacing` 当宽度调节器**，它必然带上末尾留白；(2) 量"文字居中"要量**逐字符 Range 的并集去掉末字字距**，或直接 `getClientRects()` 逐字看墨迹，别量整段 advance 盒再说"居中了"。
 24. **「出现动画」的起始态不能写进常驻 class，否则所有没在动的元素都会被它压成 0——曾把整个历史项目列表变成一片空白。** 给新建项目做「占位生长」时，把 `display:grid; grid-template-rows:0fr` 写在 `.t-toast-rise` 基础规则里、无条件挂到每条 `li` 上，结果**没挂动画态的条目行高全是 0**，用户看到的是「之前的项目都不见了」（数据其实都在，量 `li.getBoundingClientRect().height === 0` 即现形）。两条修正同时做才干净：(1) **起始态只写进 `@keyframes`，基础 class 不写**（`animation: toast-rise-rows ... both`），这样动画被禁用/未挂类时元素都是自然高度；(2) **rising 结构只挂在会动的那一条上**，普通条目走普通 `li`（`{rising ? <div className="t-toast-content">{body}</div> : body}`）。另外动画用 `@keyframes` 而非 `transition`：新挂载元素直接带最终样式不触发 transition（没有起始帧可比），关键帧在挂载时自然播放。**教训：CSS 里「只该临时存在」的起始值，一旦写进常驻规则就会永久生效。**
+25. **LLM 输出里的 ID 不可信，也不属于 wire 协议。** `LLMReviewItemSchema` / `LLMConcreteEditSchema` 不要求模型返回 `id`；即使模型多输出了该字段，Zod 解析后也会剥离。三个 API 路由统一在服务端用 `crypto.randomUUID()` 生成 `review_*` / `edit_*`，前端绝不能用模型给的 ID 做 React key 或状态身份。
+26. **一个自然段内部正式支持 `\n`。** `DocumentState.blocks[].text` 用换行字符表示 Shift+Enter，`tiptap-convert.ts` 双向映射为 ProseMirror `hardBreak`。所有程序化替换必须走 `textToPMContent()`，不能直接把 replacement 当 HTML/富文本插入；否则会丢换行，且类似 `<b>` 的原文会被解释成标签。
+27. **单条 edit 撤销必须是安全反向操作。** range edit 用当前正文中的 `replacement + prefix/suffix` 重新定位，找不到或不唯一就拒绝；block edit 接受时把 `{before, after}` 存入 `ReviewItem.acceptedSnapshot`，只有当前整段仍严格等于 `after` 才恢复 `before`。不要退回仅存在内存的整段快照，也不要覆盖用户接受后继续做的编辑。
 
 ## 有意为之的取舍（不要当 bug 改掉）
 

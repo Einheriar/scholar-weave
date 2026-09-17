@@ -13,8 +13,24 @@ export type PMDocNode = {
 export type PMParagraph = {
   type: "paragraph";
   attrs?: { blockId?: string | null };
-  content?: Array<{ type: "text"; text: string }>;
+  content?: PMInlineNode[];
 };
+
+export type PMInlineNode =
+  | { type: "text"; text: string }
+  | { type: "hardBreak" };
+
+/** 把模型中的换行字符编码成 Tiptap 的 hardBreak inline 节点。 */
+export function textToPMContent(text: string): PMInlineNode[] | undefined {
+  if (!text) return undefined;
+  const content: PMInlineNode[] = [];
+  const lines = text.split("\n");
+  lines.forEach((line, index) => {
+    if (line) content.push({ type: "text", text: line });
+    if (index < lines.length - 1) content.push({ type: "hardBreak" });
+  });
+  return content.length > 0 ? content : undefined;
+}
 
 export function docToTiptap(doc: DocumentState): PMDocNode {
   return {
@@ -22,7 +38,7 @@ export function docToTiptap(doc: DocumentState): PMDocNode {
     content: doc.blocks.map((b) => ({
       type: "paragraph",
       attrs: { blockId: b.id },
-      content: b.text ? [{ type: "text", text: b.text }] : undefined,
+      content: textToPMContent(b.text),
     })),
   };
 }
@@ -37,8 +53,7 @@ export function tiptapToBlocks(json: PMDocNode): TiptapBlock[] {
     .map((p) => ({
       blockId: (p.attrs?.blockId as string) ?? "",
       text: (p.content ?? [])
-        .filter((c) => c.type === "text")
-        .map((c) => c.text)
+        .map((c) => (c.type === "hardBreak" ? "\n" : c.text))
         .join(""),
     }));
 }
