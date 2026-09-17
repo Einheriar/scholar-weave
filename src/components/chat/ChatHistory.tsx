@@ -314,8 +314,8 @@ function HistoryList({
           </div>
         </div>
       ) : (
-        <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-border bg-surface px-3 py-2">
-          <h2 className="text-xs font-semibold tracking-tight text-text-muted">
+        <div className="sticky top-0 z-10 flex items-center justify-between gap-2 bg-surface px-3 py-2">
+          <h2 className="relative top-px text-sm leading-5 font-semibold tracking-tight text-text-muted">
             历史记录
           </h2>
           <button
@@ -325,6 +325,7 @@ function HistoryList({
             title={interactionLocked ? lockTitle : "新建文章"}
             onClick={() => onNew()}
             className={buttonClass("secondary", "xs")}
+            style={{ fontSize: "0.875rem", lineHeight: "1.25rem" }}
           >
             新文章
           </button>
