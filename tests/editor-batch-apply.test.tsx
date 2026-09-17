@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createRef } from "react";
 import { act, fireEvent, render, waitFor } from "@testing-library/react";
 import {
@@ -56,8 +56,21 @@ describe("DocumentEditor 批量应用与撤销（阶段 4）", () => {
     });
   });
 
-  it("单条建议修改由卡片负责，不进入普通正文撤销栈", async () => {
-    const { doc, ref, getLatest, view } = setup(["hello world."]);
+  it("单条建议接受后可从右上角原子撤销正文与建议状态", async () => {
+    const doc = createDocument("t", ["hello world."]);
+    const ref = createRef<DocumentEditorHandle>();
+    const onReviewEditUndo = vi.fn();
+    let latest = doc;
+    const view = render(
+      <DocumentEditor
+        ref={ref}
+        document={doc}
+        onDocumentChange={(next) => {
+          latest = next;
+        }}
+        onReviewEditUndo={onReviewEditUndo}
+      />,
+    );
     const item: ReviewItem = {
       id: "review-native-history",
       documentRevision: doc.revision,
@@ -76,9 +89,101 @@ describe("DocumentEditor 批量应用与撤销（阶段 4）", () => {
       status: "open",
     };
 
-    expect(ref.current!.applyEdit(item)).toBe(true);
-    await waitFor(() => expect(getLatest().blocks[0].text).toBe("hello earth."));
-    expect(view.getByRole("button", { name: "撤销正文编辑" })).toBeDisabled();
+    act(() => {
+      expect(ref.current!.applyEdit(item)).toBe(true);
+    });
+    const undo = view.getByRole("button", { name: "撤销正文编辑" });
+    await waitFor(() => {
+      expect(latest.blocks[0].text).toBe("hello earth.");
+      expect(undo).toBeEnabled();
+    });
+    view.rerender(
+      <DocumentEditor
+        ref={ref}
+        document={latest}
+        onDocumentChange={(next) => {
+          latest = next;
+        }}
+        onReviewEditUndo={onReviewEditUndo}
+      />,
+    );
+
+    fireEvent.click(undo);
+    await waitFor(() => {
+      expect(onReviewEditUndo).toHaveBeenCalledWith(item.id);
+      expect(latest.blocks[0].text).toBe("hello world.");
+      expect(undo).toBeDisabled();
+    });
+  });
+
+  it("建议接受后的手动编辑先撤销，随后 Ctrl+Z 再撤销建议", async () => {
+    const doc = createDocument("t", ["hello world."]);
+    const ref = createRef<DocumentEditorHandle>();
+    const onReviewEditUndo = vi.fn();
+    let latest = doc;
+    const renderEditor = () => (
+      <DocumentEditor
+        ref={ref}
+        document={latest}
+        onDocumentChange={(next) => {
+          latest = next;
+        }}
+        onReviewEditUndo={onReviewEditUndo}
+      />
+    );
+    const view = render(renderEditor());
+    const item: ReviewItem = {
+      id: "review-ordered-history",
+      documentRevision: doc.revision,
+      scope: {
+        type: "range",
+        blockId: doc.blocks[0].id,
+        original: "world",
+        suffix: ".",
+      },
+      kind: "edit",
+      category: "grammar",
+      severity: "suggestion",
+      title: "test",
+      explanation: "test",
+      replacement: "earth",
+      status: "open",
+    };
+
+    act(() => {
+      expect(ref.current!.applyEdit(item)).toBe(true);
+    });
+    await waitFor(() => expect(latest.blocks[0].text).toBe("hello earth."));
+    view.rerender(renderEditor());
+
+    act(() => {
+      expect(
+        ref.current!.applyBlockTexts(
+          new Map([[doc.blocks[0].id, "hello earth!"]]),
+        ),
+      ).toBe(true);
+    });
+    await waitFor(() => expect(latest.blocks[0].text).toBe("hello earth!"));
+    view.rerender(renderEditor());
+
+    const undo = view.getByRole("button", { name: "撤销正文编辑" });
+    fireEvent.click(undo);
+    await waitFor(() => {
+      expect(latest.blocks[0].text).toBe("hello earth.");
+      expect(onReviewEditUndo).not.toHaveBeenCalled();
+      expect(undo).toBeEnabled();
+    });
+    view.rerender(renderEditor());
+
+    fireEvent.keyDown(view.getByLabelText("文档编辑器"), {
+      key: "z",
+      ctrlKey: true,
+    });
+    await waitFor(() => {
+      expect(latest.blocks[0].text).toBe("hello world.");
+      expect(onReviewEditUndo).toHaveBeenCalledWith(item.id);
+      expect(undo).toBeDisabled();
+    });
   });
 
   it("readOnly 会同步到 Tiptap，禁止输入但保留编辑器内容", async () => {

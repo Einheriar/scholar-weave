@@ -10,6 +10,7 @@ import {
 } from "react";
 import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
+import { closeHistory, undoDepth } from "@tiptap/pm/history";
 import { BlockIdExtension } from "./BlockIdExtension";
 import {
   ReviewDecorationExtension,
@@ -64,6 +65,16 @@ export type DocumentEditorProps = {
   onSelectChatAnchor?: (nodeId: string) => void;
   /** 请求处理中锁定正文编辑，但仍允许滚动与选择文本 */
   readOnly?: boolean;
+  /** 右上角撤销入口撤回一条已接受建议后，同步恢复建议状态 */
+  onReviewEditUndo?: (id: string) => void;
+  /** 已接受建议因正文继续变化而无法安全撤销时通知上层 */
+  onReviewEditUndoUnavailable?: () => void;
+};
+
+type ReviewUndoEntry = {
+  item: ReviewItem;
+  /** 接受建议时原生 Tiptap 历史所处的深度，用于与后续手动编辑保持撤销顺序。 */
+  nativeDepth: number;
 };
 
 /**
@@ -84,10 +95,14 @@ export const DocumentEditor = forwardRef<
     chatNodes = [],
     onSelectChatAnchor,
     readOnly = false,
+    onReviewEditUndo,
+    onReviewEditUndoUnavailable,
   },
   ref,
 ) {
   const [canUndo, setCanUndo] = useState(false);
+  const reviewUndoStackRef = useRef<ReviewUndoEntry[]>([]);
+  const performUndoRef = useRef<(() => boolean) | null>(null);
   // 用 ref 持有最新的回调与文档，避免闭包过期；在 effect 中同步，不在渲染期写 ref
   const onChangeRef = useRef(onDocumentChange);
   const docRef = useRef(document);
@@ -97,18 +112,30 @@ export const DocumentEditor = forwardRef<
   const onSelChangeRef = useRef(onSelectionChange);
   const chatNodesRef = useRef<ChatNode[]>(chatNodes);
   const onChatAnchorRef = useRef(onSelectChatAnchor);
+  const onReviewEditUndoRef = useRef(onReviewEditUndo);
+  const onReviewEditUndoUnavailableRef = useRef(onReviewEditUndoUnavailable);
   /** 惰性持有 editor.view，供 extensions 闭包内访问 DOM（不进 deps，避免重建） */
   const viewRef = useRef<Editor["view"] | null>(null);
   useEffect(() => {
     onChangeRef.current = onDocumentChange;
-    docRef.current = document;
+    // 编辑器的命令会先同步推进 docRef，再等待父组件提交新 props。
+    // 子组件自己的状态更新可能抢先触发一次旧 props 重渲染，不能让旧 revision
+    // 把刚完成的编辑快照覆盖掉。
+    if (
+      document.id !== docRef.current.id ||
+      document.revision >= docRef.current.revision
+    ) {
+      docRef.current = document;
+    }
     reviewRef.current = reviewItems;
     selectedRef.current = selectedReviewId;
     onSelectRef.current = onSelectReview;
     onSelChangeRef.current = onSelectionChange;
     chatNodesRef.current = chatNodes;
     onChatAnchorRef.current = onSelectChatAnchor;
-  }, [onDocumentChange, document, reviewItems, selectedReviewId, onSelectReview, onSelectionChange, chatNodes, onSelectChatAnchor]);
+    onReviewEditUndoRef.current = onReviewEditUndo;
+    onReviewEditUndoUnavailableRef.current = onReviewEditUndoUnavailable;
+  }, [onDocumentChange, document, reviewItems, selectedReviewId, onSelectReview, onSelectionChange, chatNodes, onSelectChatAnchor, onReviewEditUndo, onReviewEditUndoUnavailable]);
 
   const extensions = useMemo(
     () => [
@@ -170,6 +197,22 @@ export const DocumentEditor = forwardRef<
           "prose max-w-none focus:outline-none min-h-[60vh] py-7 pl-8 pr-16 leading-relaxed sm:py-9 sm:pl-10 sm:pr-16",
         "aria-label": "文档编辑器",
       },
+      handleKeyDown(_view, event) {
+        if (
+          event.ctrlKey &&
+          !event.altKey &&
+          !event.shiftKey &&
+          event.key.toLowerCase() === "z"
+        ) {
+          const handled = performUndoRef.current?.() ?? false;
+          if (handled) event.preventDefault();
+          return handled;
+        }
+        return false;
+      },
+    },
+    onBeforeCreate() {
+      reviewUndoStackRef.current = [];
     },
     onCreate() {
       setCanUndo(false);
@@ -206,7 +249,8 @@ export const DocumentEditor = forwardRef<
       onChangeRef.current(next);
     },
     onTransaction({ editor }) {
-      const nextCanUndo = editor.can().undo();
+      const nextCanUndo =
+        editor.can().undo() || reviewUndoStackRef.current.length > 0;
       setCanUndo((current) => (current === nextCanUndo ? current : nextCanUndo));
     },
     onSelectionUpdate({ editor }) {
@@ -236,6 +280,44 @@ export const DocumentEditor = forwardRef<
   useEffect(() => {
     if (!editor) return;
     editor.setEditable(!readOnly);
+  }, [editor, readOnly]);
+
+  useEffect(() => {
+    performUndoRef.current = () => {
+      if (!editor || readOnly) return false;
+
+      const stack = reviewUndoStackRef.current;
+      const latestReviewEdit = stack.at(-1);
+      const currentNativeDepth = undoDepth(editor.state);
+
+      // 接受建议本身不进入 ProseMirror 历史，以免正文和卡片状态分裂。
+      // 只有撤完它之后产生的普通编辑，才轮到这条建议被安全反向定位撤销。
+      if (
+        latestReviewEdit &&
+        currentNativeDepth <= latestReviewEdit.nativeDepth
+      ) {
+        const ok = revertSingleEdit(
+          editor,
+          docRef.current,
+          latestReviewEdit.item,
+        );
+        if (!ok) {
+          onReviewEditUndoUnavailableRef.current?.();
+          // 已经命中这条建议，只是安全校验拒绝恢复；仍需吃掉 Ctrl+Z，
+          // 避免继续落到 ProseMirror keymap 而意外撤销更早的普通编辑。
+          return true;
+        }
+        stack.pop();
+        onReviewEditUndoRef.current?.(latestReviewEdit.item.id);
+        setCanUndo(editor.can().undo() || stack.length > 0);
+        return true;
+      }
+
+      return editor.commands.undo();
+    };
+    return () => {
+      performUndoRef.current = null;
+    };
   }, [editor, readOnly]);
 
   // items / 选中项变化时触发 Decoration 重建（必须用同一个 PluginKey 作为 meta key）
@@ -284,7 +366,12 @@ export const DocumentEditor = forwardRef<
       if (!editor || item.kind !== "edit") return false;
       const pos = findItemPosition(editor, docRef.current, item);
       if (pos == null || item.replacement === undefined) return false;
-      editor
+
+      // 把建议接受前后的普通输入分成独立历史事件。建议本身仍走安全撤销栈，
+      // 但右上角按钮 / Ctrl+Z 会按时间顺序在两套历史之间调度。
+      editor.view.dispatch(closeHistory(editor.state.tr));
+      const nativeDepth = undoDepth(editor.state);
+      const applied = editor
         .chain()
         .focus()
         .insertContentAt(
@@ -295,6 +382,10 @@ export const DocumentEditor = forwardRef<
         // Keep it out of native history so Ctrl+Z cannot desync text and status.
         .setMeta("addToHistory", false)
         .run();
+      if (!applied) return false;
+      editor.view.dispatch(closeHistory(editor.state.tr));
+      reviewUndoStackRef.current.push({ item, nativeDepth });
+      setCanUndo(true);
       return true;
     },
     applyBlockTexts(newTextByBlock) {
@@ -304,7 +395,16 @@ export const DocumentEditor = forwardRef<
       return replaceBlockTexts(editor, oldTextByBlock);
     },
     revertEdit(item) {
-      return revertSingleEdit(editor, docRef.current, item);
+      const reverted = revertSingleEdit(editor, docRef.current, item);
+      if (!reverted) return false;
+      const index = reviewUndoStackRef.current.findLastIndex(
+        (entry) => entry.item.id === item.id,
+      );
+      if (index >= 0) reviewUndoStackRef.current.splice(index, 1);
+      setCanUndo(
+        Boolean(editor?.can().undo()) || reviewUndoStackRef.current.length > 0,
+      );
+      return true;
     },
   }));
 
@@ -320,7 +420,7 @@ export const DocumentEditor = forwardRef<
             aria-keyshortcuts="Control+Z"
             disabled={readOnly || !canUndo}
             onMouseDown={(event) => event.preventDefault()}
-            onClick={() => editor?.commands.undo()}
+            onClick={() => performUndoRef.current?.()}
             className="editor-undo-corner-button"
           >
             <span className="editor-undo-fold" aria-hidden="true">

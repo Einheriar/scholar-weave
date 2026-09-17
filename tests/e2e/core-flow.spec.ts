@@ -107,6 +107,7 @@ test.describe("核心流程：接受、撤销与复制", () => {
     await loadSample(page);
 
     const editorUndo = page.getByRole("button", { name: "撤销正文编辑" });
+    await expect(editorUndo).toBeVisible();
     await expect(editorUndo).toBeDisabled();
     const before = await paragraphTexts(page);
     expect(before[4]).toContain("may already been decided");
@@ -119,19 +120,17 @@ test.describe("核心流程：接受、撤销与复制", () => {
       .click();
 
     await expect(card(page, "review_edit_1").getByText("已接受")).toBeVisible();
-    // 单条建议由卡片自己的安全撤销负责，不污染普通正文撤销栈。
-    await expect(editorUndo).toBeDisabled();
+    // 单条建议保留安全反向定位，同时进入右上角统一撤销顺序。
+    await expect(editorUndo).toBeEnabled();
     await expect
       .poll(async () => (await paragraphTexts(page))[4])
       .toContain("may already have been decided");
 
-    // 撤销（同一张卡片的“撤销”按钮；接受后正文变化可能重排侧栏，重新滚进视野）
-    await scrollCardIntoView(page, "review_edit_1");
-    await card(page, "review_edit_1")
-      .getByRole("button", { name: "撤销", exact: true })
-      .click();
+    // 右上角撤销同时还原正文与建议卡状态。
+    await editorUndo.click();
 
     await expect(card(page, "review_edit_1").getByText("待处理")).toBeVisible();
+    await expect(editorUndo).toBeDisabled();
     await expect
       .poll(async () => (await paragraphTexts(page))[4])
       .toContain("may already been decided");

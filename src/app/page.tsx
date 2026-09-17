@@ -616,7 +616,10 @@ export default function Home() {
               after: item.replacement,
             }
           : undefined;
-      const ok = editorRef.current?.applyEdit(item);
+      const acceptedItem = acceptedSnapshot
+        ? { ...item, acceptedSnapshot }
+        : item;
+      const ok = editorRef.current?.applyEdit(acceptedItem);
       if (!ok) return false;
       setReviews((rs) =>
         rs.map((r) =>
@@ -671,6 +674,23 @@ export default function Home() {
     );
     setSaveState("saving");
   }, [reviews, requestLocked, announceRequestLock]);
+
+  const handleEditorReviewUndo = useCallback((id: string) => {
+    setReviews((rs) =>
+      rs.map((r) =>
+        r.id === id && r.status === "accepted"
+          ? { ...r, status: "open" as const, acceptedSnapshot: undefined }
+          : r,
+      ),
+    );
+    setSaveState("saving");
+    setAnnounce("已撤销接受的审阅修改。");
+  }, []);
+
+  const handleEditorReviewUndoUnavailable = useCallback(() => {
+    setChatError("正文已变化，无法安全撤销这条修改。");
+    setAnnounce("正文已变化，无法安全撤销这条修改。");
+  }, []);
 
   /** 当前查看的聊天节点（消息列表显示它的轮次；上下文回落也用它，见 chatContext） */
   const activeNode = useMemo(
@@ -1497,6 +1517,8 @@ export default function Home() {
               chatNodes={nodes}
               onSelectChatAnchor={handleSelectChatAnchor}
               readOnly={requestLocked}
+              onReviewEditUndo={handleEditorReviewUndo}
+              onReviewEditUndoUnavailable={handleEditorReviewUndoUnavailable}
             />
 
             {/* 修改集预览（对话或按意见生成时弹出）。常驻渲染：open 驱动进/出动画，

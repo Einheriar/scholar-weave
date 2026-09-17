@@ -524,7 +524,8 @@ body {
 
 /* 正文纸张右上角的撤销入口。
    默认态只露出一个小折角；可用时悬停或键盘聚焦会向纸面内展开，
-   折角使用与主操作按钮一致的纯品牌色，不加描边、渐变或阴影。 */
+   折角使用与主操作按钮一致的纯品牌色，不加描边、渐变或阴影；
+   无历史时仍可悬停展开，但改为低饱和灰绿色表达禁用。 */
 .editor-undo-corner {
   position: absolute;
   z-index: 10;
@@ -548,6 +549,15 @@ body {
 
 .editor-undo-corner-button:disabled {
   cursor: default;
+}
+
+.editor-undo-corner-button:disabled .editor-undo-fold {
+  color: color-mix(in srgb, var(--text-faint) 55%, var(--surface));
+  background-color: color-mix(
+    in srgb,
+    var(--brand) 14%,
+    var(--surface-muted)
+  );
 }
 
 .editor-undo-fold {
@@ -585,16 +595,25 @@ body {
     transform 240ms cubic-bezier(0.2, 0.85, 0.25, 1) 35ms;
 }
 
-.editor-undo-corner-button:not(:disabled):is(:hover, :focus-visible) .editor-undo-fold {
+.editor-undo-corner-button:is(:hover, :focus-visible) .editor-undo-fold {
   width: 3.5rem;
   height: 3.5rem;
+}
+
+.editor-undo-corner-button:not(:disabled):is(:hover, :focus-visible) .editor-undo-fold {
   background-color: var(--brand);
 }
 
-.editor-undo-corner-button:not(:disabled):is(:hover, :focus-visible) .editor-undo-relief {
+.editor-undo-corner-button:is(:hover, :focus-visible) .editor-undo-relief {
   animation: editor-undo-relief-wobble 520ms ease-out 55ms both;
   opacity: 1;
   transform: scale(1) translate(0, 0);
+}
+
+.editor-undo-corner-button:disabled:hover .editor-undo-relief {
+  filter:
+    drop-shadow(0 -1px 0 rgb(255 255 255 / 0.35))
+    drop-shadow(0 1.5px 0 color-mix(in srgb, var(--text-faint) 42%, transparent));
 }
 
 @keyframes editor-undo-relief-wobble {
