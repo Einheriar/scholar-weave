@@ -554,8 +554,8 @@ body {
   position: absolute;
   top: 0;
   right: 0;
-  width: 1.55rem;
-  height: 1.55rem;
+  width: 1.86rem;
+  height: 1.86rem;
   clip-path: polygon(0 0, 100% 0, 100% 100%);
   color: #fff;
   background-color: color-mix(in srgb, var(--brand) 42%, var(--surface));
