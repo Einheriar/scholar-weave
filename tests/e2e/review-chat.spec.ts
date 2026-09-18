@@ -508,6 +508,43 @@ test.describe("上下文对话（mock /api/chat）", () => {
     expect(await paragraphTexts(page)).toEqual(before);
   });
 
+  test("最后一条 LLM 回复可以原位重新生成且不重复提问", async ({ page }) => {
+    const requests: Array<{
+      message: string;
+      history: Array<{ role: string; content: string }>;
+    }> = [];
+    await page.route("**/api/chat", async (route) => {
+      requests.push(route.request().postDataJSON());
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          type: "answer",
+          answer: `第 ${requests.length} 版回复`,
+        }),
+      });
+    });
+    await gotoApp(page);
+    await loadSample(page);
+    await selectTextInEditor(page, "upstanding");
+
+    const question = "请解释这个词";
+    await sendChatMessage(page, question);
+    await expect(page.getByText("第 1 版回复", { exact: true })).toBeVisible();
+
+    const regenerate = page.getByRole("button", { name: "重新生成回复" });
+    await regenerate.hover();
+    await expect(page.getByRole("tooltip")).toHaveText("重新生成回复");
+    await regenerate.click();
+
+    await expect(page.getByText("第 2 版回复", { exact: true })).toBeVisible();
+    await expect(page.getByText("第 1 版回复", { exact: true })).toHaveCount(0);
+    await expect(page.getByText(question, { exact: true })).toHaveCount(1);
+    await expect(page.locator("[data-turn-index]")).toHaveCount(2);
+    expect(requests).toHaveLength(2);
+    expect(requests[1]).toMatchObject({ message: question, history: [] });
+  });
+
   test("对话失败时可原上下文重试且不重复提问", async ({ page }) => {
     await mockChatRoute(page, { withChanges: false, failFirst: true });
     await gotoApp(page);

@@ -70,7 +70,12 @@ const MODE_LABEL: Record<ReviewMode, string> = {
 type Selection = { blockId: string; text: string } | null;
 
 type LlmRetryAction =
-  | { type: "chat"; message: string; nodeId: string }
+  | {
+      type: "chat";
+      message: string;
+      nodeId: string;
+      replaceAssistantIndex?: number;
+    }
   | { type: "change-set"; reviewId: string };
 
 /** 聊天区高度（拖拽把手可调）的持久化 key 与范围 */
@@ -898,7 +903,11 @@ export default function Home() {
 
   // ── 对话（节点化：规则 7/8/10/11/24）──
   const sendChat = useCallback(
-    async (message: string, retryNodeId?: string) => {
+    async (
+      message: string,
+      retryNodeId?: string,
+      replaceAssistantIndex?: number,
+    ) => {
       const requestSnapshot = latestRef.current.doc;
       if (!requestSnapshot) return;
       if (requestLocked) {
@@ -941,7 +950,8 @@ export default function Home() {
         createdAt: new Date().toISOString(),
         turns: [],
       };
-      // 手动重试复用失败请求已经写入的最后一条 user turn，不能再插入一遍。
+      // 手动重试复用失败请求已经写入的最后一条 user turn；重新生成则保留整条
+      // 现有对话，等新结果成功后原位替换目标 assistant turn。两者都不能重复提问。
       const nodeWithUser: ChatNode = retryNode
         ? targetNode
         : {
@@ -967,9 +977,12 @@ export default function Home() {
       // 规则 24：节点边界即上下文边界。history 取本节点全部轮次（不含跨节点），
       // blocks 默认取锚点段 ±1 段；显式附带全文、完整选段或 document 节点取
       // 发送瞬间的最新全文。建议仍只带锚点段的 open 建议。
-      const historySource = retryNode
-        ? targetNode.turns.slice(0, -1)
-        : targetNode.turns;
+      const historySource =
+        replaceAssistantIndex !== undefined
+          ? targetNode.turns.slice(0, Math.max(0, replaceAssistantIndex - 1))
+          : retryNode
+            ? targetNode.turns.slice(0, -1)
+            : targetNode.turns;
       const history = historySource
         .map((t) => ({ role: t.role, content: t.content }));
       const requestRangeBlock =
@@ -1075,7 +1088,12 @@ export default function Home() {
               : { role: "assistant", content: data.answer ?? "" };
         const nodeWithReply: ChatNode = {
           ...nodeWithUser,
-          turns: [...nodeWithUser.turns, reply],
+          turns:
+            replaceAssistantIndex !== undefined
+              ? nodeWithUser.turns.map((turn, index) =>
+                  index === replaceAssistantIndex ? reply : turn,
+                )
+              : [...nodeWithUser.turns, reply],
         };
         // 等回复期间用户可能切走了：只有还停在这个项目上才同步聊天面板，
         // 否则只更新节点列表，不会把别人的轮次贴到当前项目里。
@@ -1098,7 +1116,12 @@ export default function Home() {
           // 用户取消：不加错误
         } else {
           setChatError(e instanceof Error ? e.message : "对话失败。");
-          setLlmRetry({ type: "chat", message, nodeId });
+          setLlmRetry({
+            type: "chat",
+            message,
+            nodeId,
+            replaceAssistantIndex,
+          });
         }
       } finally {
         if (chatRequestSeq.current === requestId) {
@@ -1118,6 +1141,21 @@ export default function Home() {
       requestLocked,
       announceRequestLock,
     ],
+  );
+
+  /** 只重新生成某条 assistant 回复，不重复插入对应的 user 提问。 */
+  const handleRegenerateChatReply = useCallback(
+    (nodeId: string, assistantTurnIndex: number) => {
+      const node = latestRef.current.nodes.find((entry) => entry.id === nodeId);
+      const assistantTurn = node?.turns[assistantTurnIndex];
+      const userTurn = node?.turns[assistantTurnIndex - 1];
+      if (assistantTurn?.role !== "assistant" || userTurn?.role !== "user") {
+        setAnnounce("无法找到这条回复对应的问题。");
+        return;
+      }
+      void sendChat(userTurn.content, nodeId, assistantTurnIndex);
+    },
+    [sendChat],
   );
 
   /**
@@ -1904,7 +1942,11 @@ export default function Home() {
                     onClick={() => {
                       const retry = llmRetry;
                       if (retry.type === "chat") {
-                        void sendChat(retry.message, retry.nodeId);
+                        void sendChat(
+                          retry.message,
+                          retry.nodeId,
+                          retry.replaceAssistantIndex,
+                        );
                       } else {
                         void applyOpinion(retry.reviewId);
                       }
@@ -1942,6 +1984,7 @@ export default function Home() {
                 minimized={chatMinimized}
                 onToggleMinimize={handleToggleChatMinimized}
                 onSend={sendChat}
+                onRegenerate={handleRegenerateChatReply}
                 onPreviewChangeSet={openChangeSet}
                 onUseReviewProposal={handleUseReviewProposal}
                 panelHeight={chatHeight}

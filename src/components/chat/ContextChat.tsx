@@ -41,6 +41,8 @@ export type ContextChatProps = {
   minimized: boolean;
   onToggleMinimize: () => void;
   onSend: (message: string) => void;
+  /** 重新生成当前节点最后一条 assistant 回复，并原位替换旧回复。 */
+  onRegenerate: (nodeId: string, assistantTurnIndex: number) => void;
   /** 打开某条回复附带的修改集预览 */
   onPreviewChangeSet: (changeSet: ChangeSet) => void;
   /** 将 assistant 轮次的候选意见转入审阅列表；已转换时定位到对应卡片 */
@@ -86,6 +88,7 @@ export function ContextChat({
   minimized,
   onToggleMinimize,
   onSend,
+  onRegenerate,
   onPreviewChangeSet,
   onUseReviewProposal,
   panelHeight,
@@ -409,7 +412,7 @@ export function ContextChat({
                   key={i}
                   data-turn-index={i}
                   className={
-                    "animate-item-in px-3 py-2 text-sm shadow-sm " +
+                    "relative animate-item-in px-3 py-2 text-sm shadow-sm " +
                     (t.role === "user"
                       ? "ml-10 rounded-2xl rounded-br-sm bg-brand text-white dark:text-neutral-950"
                       : "mr-10 rounded-2xl rounded-bl-sm bg-surface-muted text-foreground")
@@ -494,6 +497,36 @@ export function ContextChat({
                         </Tooltip>
                       )}
                     </div>
+                  )}
+                  {t.role === "assistant" && i === turns.length - 1 && (
+                    <span className="absolute -right-9 top-1/2 -translate-y-1/2">
+                      <Tooltip label="重新生成回复" side="right">
+                        <button
+                          type="button"
+                          aria-label="重新生成回复"
+                          disabled={busy || !activeNode}
+                          onClick={() => {
+                            if (activeNode) onRegenerate(activeNode.id, i);
+                          }}
+                          className="rounded-md p-1.5 text-text-faint transition-colors hover:bg-surface hover:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring disabled:cursor-default disabled:opacity-40"
+                        >
+                          <svg
+                            width="16"
+                            height="16"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            aria-hidden="true"
+                          >
+                            <path d="M20 11a8 8 0 1 0-2.34 5.66" />
+                            <path d="M20 4v7h-7" />
+                          </svg>
+                        </button>
+                      </Tooltip>
+                    </span>
                   )}
                 </div>
               ))}

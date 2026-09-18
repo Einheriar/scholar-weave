@@ -168,6 +168,7 @@ tests/e2e/                      # Playwright 用例（helpers.ts 里是 mock 与
 - **规则 11（无锚点默认禁发）**：无选区、无选中建议、也未主动进入固定全文节点时发送被禁用；显式开启「附带全文背景」或从节点时间线进入全文节点后可以直接基于全文提问。E2E 的局部聊天仍须先 `selectTextInEditor`。
 - **规则 12（stale 锚）**：锚点定位失败时节点仍可读，聊天区显示「原文已变更，以下为存档讨论」，正文里的锚点标记消失。
 - **规则 24（上下文边界 = 节点边界）**：发给模型的 history 只有本节点轮次；openReviews 只带锚点所在段落的 open 建议。
+- **重新生成只作用于当前节点最后一条 assistant 回复。** 回复右侧循环按钮通过统一 `Tooltip` 显示「重新生成回复」；点击后复用紧邻的 user 问题和该节点锚点，请求成功才原位替换旧 assistant turn，不追加第二个 user 气泡。重新生成失败后的「重试对话」必须继续保持替换语义，不能退化成追加一轮。
 - **全文上下文是显式授权，不是普通回退。** 默认仍要求人工选区或选中建议；只有开启聊天区的「包含全文」后，无局部锚点才可发送并创建／续接 document 节点。「总是」只把该开关持久化为浏览器默认值。完整选中一个自然段时自动附带全文，但节点仍是 range 锚点。发送必须从 `latestRef.current.doc` 捕获同一份最新快照，blocks、revision、checksum 与完整选段判断都基于该快照；局部模式的相邻段仅供理解，服务端必须过滤锚点段之外的 edits，不能只信提示词。
 - **修改集打开期间临时收起聊天。** 点击聊天回复里的「预览修改」先记录聊天原展开状态，再收起 sticky 聊天区并在收起后滚动校正，确保 `ChangeSetPreview` 不被遮挡；接受、放弃或 Escape 关闭后恢复原状态。预览期间主动展开聊天等同放弃本次预览并展开，但聊天轮次中的 changeSet 保留，之后可重开。此状态机与候选审阅意见的两步式转场相互独立。
 - **对话结论转审阅意见**：`/api/chat` 除 `answer` / `answer_with_changes` 外还支持 `answer_with_review`。模型只提供自包含的 `title/explanation/category/severity`，候选 ID 由服务端生成；模型不得提供 scope、kind、status、replacement 或文档版本。用户第一次点击气泡右下角“转为审阅意见”时，应用从当前 `ChatNode` 的可信锚点派生一条 `opinion/open` 建议并继续停留在聊天；候选写回 `convertedReviewId` 防止刷新后重复创建，按钮随后变为“查看审阅意见”，第二次点击才定位右侧卡片。range/block/document 直接继承节点锚，review 节点继承来源建议 scope；锚点 stale 或来源已不存在时禁止创建，绝不让 LLM 决定正文位置。按钮用轻量入场、抬升和按压反馈，采用无阴影平面样式，hover/focus 只改变主题色边框，并在 `prefers-reduced-motion` 下关闭位移动画。
