@@ -22,6 +22,11 @@ import {
   chatAnchorDecorationKey,
   type ChatAnchorDecorationConfig,
 } from "./ChatAnchorDecorationExtension";
+import {
+  ChangeSetPreviewDecorationExtension,
+  changeSetPreviewDecorationKey,
+  type ChangeSetPreviewDecorationConfig,
+} from "./ChangeSetPreviewDecorationExtension";
 import { PersistentSelectionExtension } from "./PersistentSelectionExtension";
 import {
   docToTiptap,
@@ -32,12 +37,13 @@ import {
 import type {
   ChatNode,
   ChatRangeLocator,
+  ConcreteEdit,
   DocumentBlock,
   DocumentState,
   ReviewItem,
 } from "@/lib/review-schema";
 import { computeChecksum } from "@/lib/revisions";
-import { locateRange } from "@/lib/anchoring";
+import { locateInText, locateRange } from "@/lib/anchoring";
 import {
   createChatRangeLocator,
   locateChatNodeRange,
@@ -71,6 +77,10 @@ export type DocumentEditorHandle = {
   revertBlockTexts: (oldTextByBlock: Map<string, string>) => boolean;
   /** 安全撤销一条 edit，不覆盖用户在接受后的其他编辑 */
   revertEdit: (item: ReviewItem) => boolean;
+  /** 临时高亮修改集中的一条具体修改；传 null 清除 */
+  previewChangeSetEdit: (edit: ConcreteEdit | null) => void;
+  /** 滚动到修改集中的具体修改，同时保留预览高亮 */
+  revealChangeSetEdit: (edit: ConcreteEdit) => boolean;
 };
 
 export type DocumentEditorProps = {
@@ -139,6 +149,9 @@ export const DocumentEditor = forwardRef<
   const onSelectRef = useRef(onSelectReview);
   const onSelChangeRef = useRef(onSelectionChange);
   const chatNodesRef = useRef<ChatNode[]>(chatNodes);
+  const changeSetPreviewRef = useRef<ChangeSetPreviewDecorationConfig>({
+    edit: null,
+  });
   const onChatAnchorRef = useRef(onSelectChatAnchor);
   const onChatRangeLocatorsChangeRef = useRef(onChatRangeLocatorsChange);
   const onReviewEditUndoRef = useRef(onReviewEditUndo);
@@ -217,6 +230,10 @@ export const DocumentEditor = forwardRef<
             onChatAnchorRef.current?.(nodeId);
           },
         }),
+      }),
+      ChangeSetPreviewDecorationExtension.configure({
+        getConfig: (): ChangeSetPreviewDecorationConfig =>
+          changeSetPreviewRef.current,
       }),
     ],
     [],
@@ -538,6 +555,24 @@ export const DocumentEditor = forwardRef<
       );
       return true;
     },
+    previewChangeSetEdit(edit) {
+      changeSetPreviewRef.current = { edit };
+      if (!editor) return;
+      editor.view.dispatch(
+        editor.state.tr.setMeta(changeSetPreviewDecorationKey, true),
+      );
+    },
+    revealChangeSetEdit(edit) {
+      changeSetPreviewRef.current = { edit };
+      if (!editor) return false;
+      editor.view.dispatch(
+        editor.state.tr.setMeta(changeSetPreviewDecorationKey, true),
+      );
+      const pos = findConcreteEditPosition(editor, edit);
+      if (!pos) return false;
+      scrollChatAnchorIntoReadableArea(editor, pos.from);
+      return true;
+    },
   }));
 
   return (
@@ -602,6 +637,28 @@ function findItemPosition(
     return { from: start + 1, to: start + node.nodeSize - 1 };
   }
   return null; // document 级无正文位置
+}
+
+/** Locate a concrete ChangeSet edit in the current ProseMirror document. */
+function findConcreteEditPosition(
+  editor: Editor,
+  edit: ConcreteEdit,
+): { from: number; to: number } | null {
+  const blockStart = blockStartPosition(editor, edit.blockId);
+  if (blockStart == null) return null;
+  const block = editor.state.doc.nodeAt(blockStart);
+  if (!block) return null;
+  const hit = locateInText(
+    block.textContent,
+    edit.original,
+    edit.prefix,
+    edit.suffix,
+  );
+  if (!hit.ok) return null;
+  return {
+    from: blockStart + 1 + hit.start,
+    to: blockStart + 1 + hit.end,
+  };
 }
 
 /**
@@ -673,7 +730,8 @@ function scrollChatAnchorIntoReadableArea(editor: Editor, position: number) {
     const delta = currentY - desiredY;
     if (Math.abs(delta) < 2) return;
     const reduce =
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches ||
+      (typeof window.matchMedia === "function" &&
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches) ||
       navigator.webdriver;
     window.scrollBy({ top: delta, behavior: reduce ? "auto" : "smooth" });
   });

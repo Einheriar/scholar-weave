@@ -145,6 +145,65 @@ test.describe("LLM 审阅（mock /api/review）", () => {
     await expect(page.getByText("按意见生成的修改（mock）。")).toBeVisible();
   });
 
+  test("按意见接受的修改集可从意见卡撤销，刷新后仍然有效", async ({
+    page,
+  }) => {
+    await mockReviewRoute(page);
+    await mockChangeSetRoute(page);
+    await gotoApp(page);
+    await page.getByRole("button", { name: "开始审阅" }).click();
+
+    const opinion = card(page, "m_doc");
+    await opinion.getByRole("button", { name: "按此意见修改" }).click();
+    const preview = page.getByRole("dialog", { name: "修改集预览" });
+    await preview.getByRole("button", { name: /全部接受/ }).click();
+
+    await expect
+      .poll(async () => (await paragraphTexts(page))[1])
+      .toContain("Deception may be defined");
+    await expect(opinion.getByLabel("状态：已接受")).toBeVisible();
+    await expect(page.getByRole("status").first()).toContainText("已保存到本地");
+
+    await page.reload();
+    const restoredOpinion = card(page, "m_doc");
+    await expect(restoredOpinion.getByLabel("状态：已接受")).toBeVisible();
+    await expect
+      .poll(async () => (await paragraphTexts(page))[1])
+      .toContain("Deception may be defined");
+
+    await restoredOpinion
+      .getByRole("button", { name: "撤销", exact: true })
+      .click();
+    await expect
+      .poll(async () => (await paragraphTexts(page))[1])
+      .toContain("Deception can be defined");
+    await expect(restoredOpinion.getByLabel("状态：待处理")).toBeVisible();
+    await expect(
+      restoredOpinion.getByRole("button", { name: "按此意见修改" }),
+    ).toBeVisible();
+
+    // 右上角正文撤销保持原行为；随后意见卡撤销只需同步恢复意见状态。
+    await restoredOpinion
+      .getByRole("button", { name: "按此意见修改" })
+      .click();
+    await page
+      .getByRole("dialog", { name: "修改集预览" })
+      .getByRole("button", { name: /全部接受/ })
+      .click();
+    await page.getByRole("button", { name: "撤销正文编辑" }).click();
+    await expect
+      .poll(async () => (await paragraphTexts(page))[1])
+      .toContain("Deception can be defined");
+    await expect(restoredOpinion.getByLabel("状态：已接受")).toBeVisible();
+    await restoredOpinion
+      .getByRole("button", { name: "撤销", exact: true })
+      .click();
+    await expect(restoredOpinion.getByLabel("状态：待处理")).toBeVisible();
+    await expect
+      .poll(async () => (await paragraphTexts(page))[1])
+      .toContain("Deception can be defined");
+  });
+
   test("接受 mock 修改会改正文，撤销后还原", async ({ page }) => {
     await mockReviewRoute(page);
     await gotoApp(page);
@@ -929,6 +988,28 @@ test.describe("上下文对话（mock /api/chat）", () => {
     await expect(dialog.getByText("overlooking the interpersonal dimension")).toBeVisible();
     // 打开预览时焦点进入面板（无障碍：焦点管理）
     await expect(dialog.locator(":focus")).toHaveCount(1);
+
+    // 预览项与正文精确联动：悬停即高亮，点击后即使移开指针也保留高亮并定位。
+    const locateEdit = dialog.getByRole("button", {
+      name: /定位修改：更符合学术行文/,
+    });
+    const bodyHighlight = page.locator(
+      '[data-changeset-preview-edit-id="ce_1"]',
+    );
+    // 面板打开后首项会按既有焦点管理自动成为当前项。
+    await expect(bodyHighlight).toHaveText("overlooking the interpersonal part");
+    await locateEdit.click();
+    await page.mouse.move(0, 0);
+    await expect(bodyHighlight).toHaveText("overlooking the interpersonal part");
+    await expect
+      .poll(async () => {
+        const box = await bodyHighlight.boundingBox();
+        const viewportHeight = await page.evaluate(() => window.innerHeight);
+        return Boolean(
+          box && box.y >= 0 && box.y + box.height <= viewportHeight,
+        );
+      })
+      .toBe(true);
 
     // 普通放弃与 Escape 都恢复打开预览前的展开状态，且可以再次打开。
     await dialog.getByRole("button", { name: "放弃" }).click();

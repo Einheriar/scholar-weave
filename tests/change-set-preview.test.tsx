@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { ChangeSetPreview } from "@/components/review/ChangeSetPreview";
 import type { ChangeSet, DocumentState } from "@/lib/review-schema";
 
@@ -49,6 +49,8 @@ describe("ChangeSetPreview 关闭收尾", () => {
         onDiscard={() => {}}
         open
         onClosed={onClosed}
+        onPreviewEditChange={() => {}}
+        onRevealEdit={() => {}}
       />,
     );
 
@@ -61,6 +63,8 @@ describe("ChangeSetPreview 关闭收尾", () => {
           onDiscard={() => {}}
           open={false}
           onClosed={onClosed}
+          onPreviewEditChange={() => {}}
+          onRevealEdit={() => {}}
         />,
       );
     });
@@ -69,5 +73,31 @@ describe("ChangeSetPreview 关闭收尾", () => {
     });
 
     expect(onClosed).toHaveBeenCalledTimes(1);
+  });
+
+  it("悬停时联动正文高亮，点击时请求定位并保持当前项", () => {
+    const onPreviewEditChange = vi.fn();
+    const onRevealEdit = vi.fn();
+    const view = render(
+      <ChangeSetPreview
+        changeSet={changeSet}
+        document={doc}
+        onAccept={() => {}}
+        onDiscard={() => {}}
+        open
+        onClosed={() => {}}
+        onPreviewEditChange={onPreviewEditChange}
+        onRevealEdit={onRevealEdit}
+      />,
+    );
+
+    const locate = view.getByRole("button", { name: "定位修改：首字母大写" });
+    const row = locate.closest("li")!;
+    fireEvent.pointerEnter(row);
+    expect(onPreviewEditChange).toHaveBeenLastCalledWith(changeSet.edits[0]);
+
+    fireEvent.click(locate);
+    expect(onRevealEdit).toHaveBeenCalledWith(changeSet.edits[0]);
+    expect(locate).toHaveAttribute("aria-pressed", "true");
   });
 });

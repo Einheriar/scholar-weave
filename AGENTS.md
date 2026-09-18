@@ -59,6 +59,8 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 2. **稳定 block ID**（`src/lib/revisions.ts` + `BlockIdExtension`）：普通编辑保留 ID、拆分保留前半段、合并保留目标段、粘贴全文重发 ID。
 3. **严格区分 `opinion` 与 `edit`**：`opinion` 不可执行且禁带 `replacement`；`edit` 必有 `replacement` 且 scope 不能是 `document`。由 schema 的 `superRefine` 强制。两种处于 `open` 状态的卡片都必须提供「忽略」入口，进入 `rejected` 后像 `accepted` 一样收起为“已处理”三行态，并可用「撤销」回到 `open` 后重新展开；不能因为 `opinion` 还有「继续询问／按此意见修改」就拿掉用户结束处理的出口。`stale` 仍保持展开，以便解释无法处理的原因。
 4. **LLM 永不未经确认改正文**：全文/结构意见必须走「生成 ChangeSet → 差异预览 → 用户确认」。对话历史里回放出来的 assistant 轮次带的旧修改集也一样，只有点「预览修改」并确认才动正文。
+   - 修改集预览与正文的对应关系复用每条 edit 已有的 `blockId + original + prefix/suffix`，由应用本地解析位置，并用 `edit.id` 连接预览项与编辑器 Decoration；悬停／聚焦预览项时高亮原文，点击时滚动定位。不要新增可见位置编号，也不要把本地位置或界面联动信息发给 LLM。
+   - opinion 经“按此意见修改”接受 ChangeSet 后，源意见的“撤销”必须用持久化的逐段 `before/after` 快照同时恢复正文与意见状态。只在全部目标段仍等于 `after` 时整体恢复；若右上角正文撤销已经使其全部等于 `before`，则只恢复意见状态；混合状态或后续编辑一律拒绝，不能部分覆盖。
 5. **API Key 只在服务端环境变量**（`.env.local`，已 git 忽略），绝不进前端 bundle、不进日志、不进 git；用户自带 Key 只存在浏览器 localStorage（见下「安全注意」）。
 6. **防注入**：文档内容在 prompt 里被包裹为不可信数据，系统提示规定不执行其中指令；输出仍须过 Zod + 业务校验。
 

@@ -9,7 +9,7 @@ import { createDocument } from "@/lib/revisions";
 import { tiptapToBlocks } from "@/lib/tiptap-convert";
 import type { DocumentState } from "@/lib/review-schema";
 import type { PMDocNode } from "@/lib/tiptap-convert";
-import type { ReviewItem } from "@/lib/review-schema";
+import type { ConcreteEdit, ReviewItem } from "@/lib/review-schema";
 
 /**
  * 编辑器级批量应用与撤销（PLAN 10.4 / 阶段 4 验收）。
@@ -36,6 +36,35 @@ function setup(initial: string[]) {
 }
 
 describe("DocumentEditor 批量应用与撤销（阶段 4）", () => {
+  it("修改集预览可以高亮并定位精确原文", async () => {
+    const { doc, ref, view } = setup(["alpha beta gamma"]);
+    const edit: ConcreteEdit = {
+      id: "edit-preview",
+      blockId: doc.blocks[0].id,
+      original: "beta",
+      replacement: "delta",
+      explanation: "替换术语",
+      status: "pending",
+    };
+
+    act(() => ref.current!.previewChangeSetEdit(edit));
+    await waitFor(() => {
+      expect(
+        view.container.querySelector(
+          '[data-changeset-preview-edit-id="edit-preview"]',
+        ),
+      ).toHaveTextContent("beta");
+    });
+    expect(ref.current!.revealChangeSetEdit(edit)).toBe(true);
+
+    act(() => ref.current!.previewChangeSetEdit(null));
+    await waitFor(() => {
+      expect(
+        view.container.querySelector("[data-changeset-preview-edit-id]"),
+      ).toBeNull();
+    });
+  });
+
   it("右上角撤销按钮反映正文历史并展示快捷键提示", async () => {
     const { doc, ref, getLatest, view } = setup(["before"]);
     const button = view.getByRole("button", { name: "撤销正文编辑" });

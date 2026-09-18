@@ -16,6 +16,10 @@ export type ChangeSetPreviewProps = {
   /** 显隐：常驻渲染，靠 className 播进/出动画，closing 播完才卸载 */
   open: boolean;
   onClosed: () => void;
+  /** 把当前指向的修改同步高亮到正文；null 清除高亮 */
+  onPreviewEditChange: (edit: ConcreteEdit | null) => void;
+  /** 点击一项时滚动到正文中的精确位置 */
+  onRevealEdit: (edit: ConcreteEdit) => void;
 };
 
 /**
@@ -30,6 +34,8 @@ export function ChangeSetPreview({
   onDiscard,
   open,
   onClosed,
+  onPreviewEditChange,
+  onRevealEdit,
 }: ChangeSetPreviewProps) {
   const { applicable, rejected } = useMemo(
     () => prepareChangeSet(doc, changeSet),
@@ -43,6 +49,9 @@ export function ChangeSetPreview({
   const [checked, setChecked] = useState<Set<string>>(
     () => new Set(applicableIds),
   );
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [focusedId, setFocusedId] = useState<string | null>(null);
+  const [pinnedId, setPinnedId] = useState<string | null>(null);
 
   // 键盘焦点管理：打开时进入预览，关闭时回到触发它的控件
   const panelRef = useRef<HTMLDivElement>(null);
@@ -121,6 +130,18 @@ export function ChangeSetPreview({
     for (const e of changeSet.edits) m.set(e.id, e);
     return m;
   }, [changeSet]);
+  const activeId = open ? (hoveredId ?? focusedId ?? pinnedId) : null;
+
+  useEffect(() => {
+    onPreviewEditChange(activeId ? (editById.get(activeId) ?? null) : null);
+  }, [activeId, editById, onPreviewEditChange]);
+
+  useEffect(
+    () => () => {
+      onPreviewEditChange(null);
+    },
+    [onPreviewEditChange],
+  );
 
   return (
     <div
@@ -157,7 +178,22 @@ export function ChangeSetPreview({
         {applicable.map((r) => (
           <li
             key={r.edit.id}
-            className="flex items-start gap-2 rounded-xl border border-border bg-surface p-2.5 shadow-sm transition-colors"
+            data-change-edit-id={r.edit.id}
+            data-active={activeId === r.edit.id ? "true" : undefined}
+            onPointerEnter={() => setHoveredId(r.edit.id)}
+            onPointerLeave={() => setHoveredId(null)}
+            onFocusCapture={() => setFocusedId(r.edit.id)}
+            onBlurCapture={(event) => {
+              const next = event.relatedTarget;
+              if (!(next instanceof Node) || !event.currentTarget.contains(next)) {
+                setFocusedId(null);
+              }
+            }}
+            className={`flex items-start gap-2 rounded-xl border bg-surface p-2.5 shadow-sm transition-[border-color,box-shadow] ${
+              activeId === r.edit.id
+                ? "border-brand-ring ring-1 ring-brand-ring"
+                : "border-border"
+            }`}
           >
             <input
               type="checkbox"
@@ -166,7 +202,16 @@ export function ChangeSetPreview({
               className="mt-1 accent-[#0da678]"
               aria-label={`选择修改：${r.edit.explanation || r.edit.original}`}
             />
-            <div className="min-w-0 flex-1 text-xs">
+            <button
+              type="button"
+              aria-label={`定位修改：${r.edit.explanation || r.edit.original}`}
+              aria-pressed={pinnedId === r.edit.id}
+              onClick={() => {
+                setPinnedId(r.edit.id);
+                onRevealEdit(r.edit);
+              }}
+              className="min-w-0 flex-1 cursor-pointer rounded-md text-left text-xs outline-none focus-visible:ring-2 focus-visible:ring-brand-ring"
+            >
               <div
                 data-change-original
                 className="min-w-0 break-words text-red-700 line-through decoration-red-400/60 dark:text-red-400"
@@ -184,7 +229,7 @@ export function ChangeSetPreview({
                   {renderMiniMarkdown(r.edit.explanation)}
                 </div>
               )}
-            </div>
+            </button>
           </li>
         ))}
       </ul>

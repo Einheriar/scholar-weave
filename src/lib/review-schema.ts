@@ -65,6 +65,15 @@ export const ReviewStatusSchema = z.enum([
 ]);
 export type ReviewStatus = z.infer<typeof ReviewStatusSchema>;
 
+export const AcceptedChangeSetSnapshotEntrySchema = z.object({
+  blockId: z.string().min(1),
+  before: z.string(),
+  after: z.string(),
+});
+export type AcceptedChangeSetSnapshotEntry = z.infer<
+  typeof AcceptedChangeSetSnapshotEntrySchema
+>;
+
 /**
  * 一条审阅建议。严格区分两类（PLAN 3.2）：
  * - opinion：审阅意见/模型判断，不能直接替换正文，不得带 replacement
@@ -88,6 +97,14 @@ export const ReviewItemSchema = z
      */
     acceptedSnapshot: z
       .object({ before: z.string(), after: z.string() })
+      .optional(),
+    /**
+     * opinion 经 ChangeSet 接受后的多段可逆快照。只有相关段落仍逐字等于 after
+     * 时才允许恢复，避免撤销覆盖用户后续编辑。
+     */
+    acceptedChangeSetSnapshot: z
+      .array(AcceptedChangeSetSnapshotEntrySchema)
+      .min(1)
       .optional(),
   })
   .superRefine((item, ctx) => {

@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   computeChangeSetApplication,
+  createAcceptedChangeSetSnapshot,
+  isAcceptedChangeSetAlreadyReverted,
   prepareChangeSet,
+  prepareAcceptedChangeSetRevert,
   rangesOverlap,
   resolveEdit,
 } from "@/lib/changeset";
@@ -91,6 +94,39 @@ describe("ChangeSet 预处理与批量应用（PLAN 10.4 / 阶段 4）", () => {
     const { oldTextByBlock } = computeChangeSetApplication(doc, set);
     expect(oldTextByBlock.get(b1)).toBe("hello world");
     expect(oldTextByBlock.get(b2)).toBe("second para");
+  });
+
+  it("修改集撤销快照仅在所有目标段仍等于接受后文本时恢复", () => {
+    const doc = createDocument("t", ["hello world", "second para"]);
+    const [b1, b2] = doc.blocks.map((x) => x.id);
+    const result = computeChangeSetApplication(
+      doc,
+      cs([
+        edit("e1", b1, "world", "there"),
+        edit("e2", b2, "second", "2nd"),
+      ]),
+    );
+    const snapshot = createAcceptedChangeSetSnapshot(result);
+    const acceptedDoc = {
+      ...doc,
+      blocks: doc.blocks.map((block) => ({
+        ...block,
+        text: result.newTextByBlock.get(block.id) ?? block.text,
+      })),
+    };
+
+    expect(prepareAcceptedChangeSetRevert(acceptedDoc, snapshot)).toEqual(
+      result.oldTextByBlock,
+    );
+    const editedAgain = {
+      ...acceptedDoc,
+      blocks: acceptedDoc.blocks.map((block, index) =>
+        index === 0 ? { ...block, text: `${block.text}!` } : block,
+      ),
+    };
+    expect(prepareAcceptedChangeSetRevert(editedAgain, snapshot)).toBeNull();
+    expect(isAcceptedChangeSetAlreadyReverted(doc, snapshot)).toBe(true);
+    expect(isAcceptedChangeSetAlreadyReverted(acceptedDoc, snapshot)).toBe(false);
   });
 
   it("跨多段的修改集分别应用", () => {

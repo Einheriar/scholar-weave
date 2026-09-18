@@ -26,6 +26,7 @@ import type {
   ChatContext,
   ChatNode,
   ChatTurn,
+  ConcreteEdit,
   DocumentState,
   Project,
   ReviewItem,
@@ -37,7 +38,12 @@ import {
   locateChatNodeRange,
   type ChatAnchorIssue,
 } from "@/lib/chat-range-anchor";
-import { computeChangeSetApplication } from "@/lib/changeset";
+import {
+  computeChangeSetApplication,
+  createAcceptedChangeSetSnapshot,
+  isAcceptedChangeSetAlreadyReverted,
+  prepareAcceptedChangeSetRevert,
+} from "@/lib/changeset";
 import { createDocument } from "@/lib/revisions";
 import { APP_VERSION } from "@/lib/version";
 import {
@@ -786,10 +792,42 @@ export default function Home() {
         return;
       }
     }
+    if (item.status === "accepted" && item.kind === "opinion") {
+      const snapshot = item.acceptedChangeSetSnapshot;
+      if (!snapshot) {
+        setLlmRetry(null);
+        setChatError("缺少可用的撤销记录，无法安全撤销这次修改集。");
+        setAnnounce("缺少可用的撤销记录，无法安全撤销这次修改集。");
+        return;
+      }
+      const current = latestRef.current.doc;
+      const oldTextByBlock = current
+        ? prepareAcceptedChangeSetRevert(current, snapshot)
+        : null;
+      const alreadyReverted = current
+        ? isAcceptedChangeSetAlreadyReverted(current, snapshot)
+        : false;
+      const ok = alreadyReverted
+        ? true
+        : oldTextByBlock
+          ? (editorRef.current?.revertBlockTexts(oldTextByBlock) ?? false)
+          : false;
+      if (!ok) {
+        setLlmRetry(null);
+        setChatError("正文已变化，无法安全撤销这次修改集。");
+        setAnnounce("正文已变化，无法安全撤销这次修改集。");
+        return;
+      }
+    }
     setReviews((rs) =>
       rs.map((r) =>
         r.id === id && (r.status === "accepted" || r.status === "rejected")
-          ? { ...r, status: "open" as const, acceptedSnapshot: undefined }
+          ? {
+              ...r,
+              status: "open" as const,
+              acceptedSnapshot: undefined,
+              acceptedChangeSetSnapshot: undefined,
+            }
           : r,
       ),
     );
@@ -1507,10 +1545,25 @@ export default function Home() {
     setChangeSetOpen(false);
   }, []);
   const handleChangeSetClosed = useCallback(() => {
+    editorRef.current?.previewChangeSetEdit(null);
     setChangeSetMounted(false);
     const restore = changeSetChatRestoreRef.current;
     changeSetChatRestoreRef.current = null;
     if (restore !== null) setChatMinimized(restore);
+  }, []);
+  const handlePreviewChangeSetEdit = useCallback(
+    (edit: ConcreteEdit | null) => {
+      editorRef.current?.previewChangeSetEdit(edit);
+    },
+    [],
+  );
+  const handleRevealChangeSetEdit = useCallback((edit: ConcreteEdit) => {
+    const revealed = editorRef.current?.revealChangeSetEdit(edit) ?? false;
+    setAnnounce(
+      revealed
+        ? `已定位修改：${edit.explanation || edit.original}`
+        : "该修改当前无法定位到正文。",
+    );
   }, []);
   const handleToggleChatMinimized = useCallback(() => {
     if (changeSetOpen && chatMinimized) {
@@ -1624,15 +1677,25 @@ export default function Home() {
         ...activeChangeSet,
         edits: activeChangeSet.edits.filter((e) => editIds.includes(e.id)),
       };
-      const { newTextByBlock } = computeChangeSetApplication(doc, subset);
+      const result = computeChangeSetApplication(doc, subset);
+      const { newTextByBlock } = result;
       if (newTextByBlock.size === 0) return;
-      editorRef.current?.applyBlockTexts(newTextByBlock);
+      const acceptedChangeSetSnapshot = createAcceptedChangeSetSnapshot(result);
+      if (acceptedChangeSetSnapshot.length !== newTextByBlock.size) return;
+      const applied = editorRef.current?.applyBlockTexts(newTextByBlock) ?? false;
+      if (!applied) return;
       // 与源意见关联：接受后把该意见标记为 accepted
       if (activeChangeSet.sourceReviewId) {
         const sid = activeChangeSet.sourceReviewId;
         setReviews((rs) =>
           rs.map((r) =>
-            r.id === sid ? { ...r, status: "accepted" as const } : r,
+            r.id === sid
+              ? {
+                  ...r,
+                  status: "accepted" as const,
+                  acceptedChangeSetSnapshot,
+                }
+              : r,
           ),
         );
       }
@@ -1996,6 +2059,8 @@ export default function Home() {
                 onClosed={handleChangeSetClosed}
                 onAccept={acceptChangeSet}
                 onDiscard={discardChangeSet}
+                onPreviewEditChange={handlePreviewChangeSetEdit}
+                onRevealEdit={handleRevealChangeSetEdit}
               />
             )}
 

@@ -1,4 +1,9 @@
-import type { ChangeSet, ConcreteEdit, DocumentState } from "./review-schema";
+import type {
+  AcceptedChangeSetSnapshotEntry,
+  ChangeSet,
+  ConcreteEdit,
+  DocumentState,
+} from "./review-schema";
 import { findBlockIndex } from "./revisions";
 import { locateInText } from "./anchoring";
 
@@ -97,6 +102,52 @@ export type ApplyResult = {
   appliedIds: string[];
   rejected: Map<string, string>;
 };
+
+/** 把一次已计算完成的修改集结果压成可持久化的逐段撤销快照。 */
+export function createAcceptedChangeSetSnapshot(
+  result: Pick<ApplyResult, "newTextByBlock" | "oldTextByBlock">,
+): AcceptedChangeSetSnapshotEntry[] {
+  const snapshot: AcceptedChangeSetSnapshotEntry[] = [];
+  for (const [blockId, after] of result.newTextByBlock) {
+    const before = result.oldTextByBlock.get(blockId);
+    if (before === undefined) continue;
+    snapshot.push({ blockId, before, after });
+  }
+  return snapshot;
+}
+
+/**
+ * 安全准备修改集撤销：所有目标段仍等于接受后的文本才返回恢复映射。
+ * 任意一段被继续编辑或丢失都整体拒绝，绝不做部分撤销。
+ */
+export function prepareAcceptedChangeSetRevert(
+  doc: DocumentState,
+  snapshot: AcceptedChangeSetSnapshotEntry[],
+): Map<string, string> | null {
+  if (snapshot.length === 0) return null;
+  const oldTextByBlock = new Map<string, string>();
+  for (const entry of snapshot) {
+    if (oldTextByBlock.has(entry.blockId)) return null;
+    const block = doc.blocks.find((candidate) => candidate.id === entry.blockId);
+    if (!block || block.text !== entry.after) return null;
+    oldTextByBlock.set(entry.blockId, entry.before);
+  }
+  return oldTextByBlock;
+}
+
+/** 判断正文是否已经由其他入口（例如右上角正文撤销）恢复到快照原文。 */
+export function isAcceptedChangeSetAlreadyReverted(
+  doc: DocumentState,
+  snapshot: AcceptedChangeSetSnapshotEntry[],
+): boolean {
+  return (
+    snapshot.length > 0 &&
+    snapshot.every((entry) => {
+      const block = doc.blocks.find((candidate) => candidate.id === entry.blockId);
+      return block?.text === entry.before;
+    })
+  );
+}
 
 /**
  * 计算批量接受的结果（纯函数，不触碰编辑器）。
