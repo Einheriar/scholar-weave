@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeSet, ConcreteEdit, DocumentState } from "@/lib/review-schema";
-import { prepareChangeSet } from "@/lib/changeset";
+import { prepareChangeSet, type PreparedChangeSet } from "@/lib/changeset";
 import { buttonClass } from "@/components/ui/button";
 import { renderMiniMarkdown } from "@/lib/mini-markdown";
 
@@ -10,7 +10,7 @@ export type ChangeSetPreviewProps = {
   changeSet: ChangeSet;
   document: DocumentState;
   /** 接受选中的修改（参数为被选中的 edit id 列表） */
-  onAccept: (editIds: string[]) => void;
+  onAccept: (editIds: string[]) => boolean;
   /** 放弃整个修改集（触发关闭动画，播完由 onClosed 卸载） */
   onDiscard: () => void;
   /** 显隐：常驻渲染，靠 className 播进/出动画，closing 播完才卸载 */
@@ -37,10 +37,16 @@ export function ChangeSetPreview({
   onPreviewEditChange,
   onRevealEdit,
 }: ChangeSetPreviewProps) {
-  const { applicable, rejected } = useMemo(
+  const prepared = useMemo(
     () => prepareChangeSet(doc, changeSet),
     [doc, changeSet],
   );
+  // Applying edits updates the document before the preview's exit animation
+  // finishes. Preserve the last valid result during that closing frame so the
+  // applied originals are not briefly reported as missing.
+  const [acceptedPrepared, setAcceptedPrepared] =
+    useState<PreparedChangeSet | null>(null);
+  const { applicable, rejected } = acceptedPrepared ?? prepared;
 
   const applicableIds = useMemo(
     () => applicable.map((r) => r.edit.id),
@@ -123,6 +129,11 @@ export function ChangeSetPreview({
       else next.add(id);
       return next;
     });
+
+  const accept = (ids: string[]) => {
+    setAcceptedPrepared(prepared);
+    if (!onAccept(ids)) setAcceptedPrepared(null);
+  };
 
   const selectedIds = applicableIds.filter((id) => checked.has(id));
   const editById = useMemo(() => {
@@ -254,7 +265,7 @@ export function ChangeSetPreview({
         <button
           type="button"
           disabled={selectedIds.length === 0}
-          onClick={() => onAccept(selectedIds)}
+          onClick={() => accept(selectedIds)}
           className={buttonClass("primary", "xs")}
         >
           接受选中（{selectedIds.length}）
@@ -262,7 +273,7 @@ export function ChangeSetPreview({
         <button
           type="button"
           disabled={applicableIds.length === 0}
-          onClick={() => onAccept(applicableIds)}
+          onClick={() => accept(applicableIds)}
           className={buttonClass("secondary", "xs")}
         >
           全部接受（{applicableIds.length}）

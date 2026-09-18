@@ -1670,20 +1670,20 @@ export default function Home() {
     (editIds: string[]) => {
       if (requestLocked) {
         announceRequestLock();
-        return;
+        return false;
       }
-      if (!doc || !activeChangeSet) return;
+      if (!doc || !activeChangeSet) return false;
       const subset: ChangeSet = {
         ...activeChangeSet,
         edits: activeChangeSet.edits.filter((e) => editIds.includes(e.id)),
       };
       const result = computeChangeSetApplication(doc, subset);
       const { newTextByBlock } = result;
-      if (newTextByBlock.size === 0) return;
+      if (newTextByBlock.size === 0) return false;
       const acceptedChangeSetSnapshot = createAcceptedChangeSetSnapshot(result);
-      if (acceptedChangeSetSnapshot.length !== newTextByBlock.size) return;
+      if (acceptedChangeSetSnapshot.length !== newTextByBlock.size) return false;
       const applied = editorRef.current?.applyBlockTexts(newTextByBlock) ?? false;
-      if (!applied) return;
+      if (!applied) return false;
       // 与源意见关联：接受后把该意见标记为 accepted
       if (activeChangeSet.sourceReviewId) {
         const sid = activeChangeSet.sourceReviewId;
@@ -1700,6 +1700,7 @@ export default function Home() {
         );
       }
       closeChangeSet();
+      return true;
     },
     [
       doc,

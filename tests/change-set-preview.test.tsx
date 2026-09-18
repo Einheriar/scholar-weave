@@ -45,7 +45,7 @@ describe("ChangeSetPreview 关闭收尾", () => {
       <ChangeSetPreview
         changeSet={changeSet}
         document={doc}
-        onAccept={() => {}}
+        onAccept={() => true}
         onDiscard={() => {}}
         open
         onClosed={onClosed}
@@ -59,7 +59,7 @@ describe("ChangeSetPreview 关闭收尾", () => {
         <ChangeSetPreview
           changeSet={changeSet}
           document={doc}
-          onAccept={() => {}}
+          onAccept={() => true}
           onDiscard={() => {}}
           open={false}
           onClosed={onClosed}
@@ -82,7 +82,7 @@ describe("ChangeSetPreview 关闭收尾", () => {
       <ChangeSetPreview
         changeSet={changeSet}
         document={doc}
-        onAccept={() => {}}
+        onAccept={() => true}
         onDiscard={() => {}}
         open
         onClosed={() => {}}
@@ -99,5 +99,42 @@ describe("ChangeSetPreview 关闭收尾", () => {
     fireEvent.click(locate);
     expect(onRevealEdit).toHaveBeenCalledWith(changeSet.edits[0]);
     expect(locate).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("接受成功后的退出帧不会用新正文误报原文定位失败", () => {
+    const view = render(
+      <ChangeSetPreview
+        changeSet={changeSet}
+        document={doc}
+        onAccept={() => true}
+        onDiscard={() => {}}
+        open
+        onClosed={() => {}}
+        onPreviewEditChange={() => {}}
+        onRevealEdit={() => {}}
+      />,
+    );
+
+    fireEvent.click(view.getByRole("button", { name: "全部接受（1）" }));
+    view.rerender(
+      <ChangeSetPreview
+        changeSet={changeSet}
+        document={{
+          ...doc,
+          blocks: [{ ...doc.blocks[0], text: "Hello World" }],
+          revision: 2,
+          checksum: "checksum-2",
+        }}
+        onAccept={() => true}
+        onDiscard={() => {}}
+        open={false}
+        onClosed={() => {}}
+        onPreviewEditChange={() => {}}
+        onRevealEdit={() => {}}
+      />,
+    );
+
+    expect(view.queryByText(/以下 1 条无法应用/)).not.toBeInTheDocument();
+    expect(view.getByRole("button", { name: "全部接受（1）" })).toBeInTheDocument();
   });
 });
