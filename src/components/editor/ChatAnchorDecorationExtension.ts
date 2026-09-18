@@ -2,8 +2,8 @@ import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { ChatNode, DocumentState } from "@/lib/review-schema";
-import { locateInText } from "@/lib/anchoring";
 import { canLocateScope } from "@/lib/anchoring";
+import { locateChatNodeRange } from "@/lib/chat-range-anchor";
 
 /**
  * 把聊天节点锚点渲染为编辑器里的视觉标记（锚点节点方案 / 正文锚点标记）。
@@ -50,21 +50,12 @@ function buildDecorations(
     const a = node.anchor;
 
     if (a.type === "range") {
-      // 锚点失效（原文被改/删）不画标记；复用 canLocateScope 老原则
-      if (!canLocateScope(document, {
-        type: "range",
-        blockId: a.blockId ?? "",
-        original: a.selectedText ?? "",
-      })) {
-        continue;
-      }
+      const hit = locateChatNodeRange(document, node);
+      if (!hit.ok) continue;
       const blockStart = a.blockId ? blockStarts.get(a.blockId) : undefined;
       if (blockStart === undefined) continue;
       const pmNode = doc.nodeAt(blockStart);
       if (!pmNode) continue;
-      const text = pmNode.textContent;
-      const hit = locateInText(text, a.selectedText ?? "");
-      if (!hit.ok) continue;
       const from = blockStart + 1 + hit.start;
       const to = blockStart + 1 + hit.end;
       decos.push(

@@ -390,6 +390,67 @@ test.describe("上下文对话（mock /api/chat）", () => {
     expect(captured[1].blocks).toHaveLength(paragraphs.length);
   });
 
+  test("重复词组首次提问后仍保持原选区锚点", async ({ page }) => {
+    let captured: ChatRequestCapture | null = null;
+    await mockChatRoute(page, {
+      onRequest: (body) => {
+        captured = body;
+      },
+    });
+    await gotoApp(page);
+    await loadSample(page);
+
+    // receiver 在同一自然段出现多次。旧实现仅凭文本反查，节点创建后会立刻
+    // 因多处命中而误报“原文已变更”。
+    await selectTextInEditor(page, "receiver");
+    await sendChatMessage(page, "解释这个词在句中的含义");
+    await expect(page.getByText("这是纯解释回复（mock）")).toBeVisible();
+
+    await expect(
+      page.getByText("原文已变更，以下为存档讨论"),
+    ).toHaveCount(0);
+    const reveal = page.getByRole("button", {
+      name: /定位到当前上下文正文：选区「receiver」/,
+    });
+    await expect(reveal).toBeEnabled();
+    await reveal.click();
+    await expect(page.locator('[aria-label="上下文对话"]')).toContainText(
+      "receiver",
+    );
+
+    expect(captured).not.toBeNull();
+    expect(captured!.context).toMatchObject({
+      type: "range",
+      selectedText: expect.stringMatching(/^receiver\s*$/),
+    });
+    expect(captured!.context).not.toHaveProperty("rangeLocator");
+
+    // 当前会话里分别在锚点前后输入，ProseMirror transaction mapping 应把
+    // 新位置写回节点；刷新后仍须精确恢复，而不是重新依赖重复文本猜位置。
+    await reveal.click();
+    await page.keyboard.press("ArrowLeft");
+    await page.keyboard.type("near ");
+    await reveal.click();
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.type(" context");
+    await expect(
+      page.getByText("原文已变更，以下为存档讨论"),
+    ).toHaveCount(0);
+    await expect(page.getByRole("status").first()).toContainText("已保存到本地");
+
+    await page.reload();
+    await expect(page.locator(".ProseMirror")).toBeVisible();
+    await expect(page.getByText("这是纯解释回复（mock）")).toBeVisible();
+    await expect(
+      page.getByText("原文已变更，以下为存档讨论"),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("button", {
+        name: /定位到当前上下文正文：选区「receiver」/,
+      }),
+    ).toBeEnabled();
+  });
+
   test("局部选区消失后仍可取消本次附带全文背景", async ({ page }) => {
     await gotoApp(page);
     await loadSample(page);

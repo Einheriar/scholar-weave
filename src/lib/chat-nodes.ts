@@ -97,6 +97,8 @@ export function reviewScopeFromNode(
             type: "range",
             blockId: anchor.blockId,
             original: anchor.selectedText,
+            prefix: node.rangeLocator?.prefix,
+            suffix: node.rangeLocator?.suffix,
           }
         : null;
     case "review": {

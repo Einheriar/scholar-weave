@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DocumentEditor,
+  type ChatRangeLocatorUpdate,
   type DocumentEditorHandle,
+  type EditorSelection,
 } from "@/components/editor/DocumentEditor";
 import { ReviewSidebar } from "@/components/review/ReviewSidebar";
 import { ChangeSetPreview } from "@/components/review/ChangeSetPreview";
@@ -30,7 +32,11 @@ import type {
 } from "@/lib/review-schema";
 import type { ReviewMode } from "@/lib/llm/review-llm-schema";
 import { buildSampleDocument, buildSampleReview } from "@/lib/sample-data";
-import { canLocateScope } from "@/lib/anchoring";
+import { canLocateScope, locateRange } from "@/lib/anchoring";
+import {
+  locateChatNodeRange,
+  type ChatAnchorIssue,
+} from "@/lib/chat-range-anchor";
 import { computeChangeSetApplication } from "@/lib/changeset";
 import { createDocument } from "@/lib/revisions";
 import { APP_VERSION } from "@/lib/version";
@@ -67,7 +73,7 @@ const MODE_LABEL: Record<ReviewMode, string> = {
   deep_review: "深度审阅",
 };
 
-type Selection = { blockId: string; text: string } | null;
+type Selection = EditorSelection | null;
 
 type LlmRetryAction =
   | {
@@ -632,6 +638,31 @@ export default function Home() {
     }
   }, []);
 
+  /**
+   * ProseMirror knows the exact transaction mapping while the editor is open.
+   * Persist that trusted local mapping so repeated edits do not force a later
+   * text-only guess. This metadata remains outside ChatContext and LLM input.
+   */
+  const handleChatRangeLocatorsChange = useCallback(
+    (updates: ChatRangeLocatorUpdate[]) => {
+      if (updates.length === 0) return;
+      const byId = new Map(
+        updates.map((entry) => [entry.nodeId, entry.rangeLocator]),
+      );
+      let changed = false;
+      const nextNodes = latestRef.current.nodes.map((node) => {
+        const rangeLocator = byId.get(node.id);
+        if (!rangeLocator) return node;
+        changed = true;
+        return { ...node, rangeLocator };
+      });
+      if (!changed) return;
+      latestRef.current.nodes = nextNodes;
+      setNodes(nextNodes);
+    },
+    [],
+  );
+
   const handleSelect = useCallback(
     (id: string) => {
       // 侧栏发起的选中不带正文锚点；清掉 anchorTop 防止侧栏误用上一轮的旧坐标
@@ -943,13 +974,27 @@ export default function Home() {
           ? (ctx.selectedText ?? "")
           : existing?.originalText ??
             (anchorReview?.scope.type === "range" ? anchorReview.scope.original : "");
-      const targetNode: ChatNode = existing ?? {
-        id: nodeId,
-        anchor: ctx,
-        originalText,
-        createdAt: new Date().toISOString(),
-        turns: [],
-      };
+      const selectedRangeLocator =
+        ctx.type === "range" &&
+        selection?.rangeLocator &&
+        selection.blockId === ctx.blockId &&
+        selection.text === ctx.selectedText
+          ? selection.rangeLocator
+          : undefined;
+      const targetNode: ChatNode = existing
+        ? !existing.rangeLocator &&
+          selectedRangeLocator &&
+          existing.anchor.blockId === selection?.blockId
+          ? { ...existing, rangeLocator: selectedRangeLocator }
+          : existing
+        : {
+            id: nodeId,
+            anchor: ctx,
+            rangeLocator: selectedRangeLocator,
+            originalText,
+            createdAt: new Date().toISOString(),
+            turns: [],
+          };
       // 手动重试复用失败请求已经写入的最后一条 user turn；重新生成则保留整条
       // 现有对话，等新结果成功后原位替换目标 assistant turn。两者都不能重复提问。
       const nodeWithUser: ChatNode = retryNode
@@ -1140,6 +1185,7 @@ export default function Home() {
       persistProjectNow,
       requestLocked,
       announceRequestLock,
+      selection,
     ],
   );
 
@@ -1251,17 +1297,34 @@ export default function Home() {
     ],
   );
 
-  /** 规则 12：所有节点的锚点失效状态，供当前标签与时间线竖条共用。 */
-  const staleNodeIds = useMemo(() => {
-    if (!doc) return new Set<string>();
-    return new Set(
-      nodes
-        .filter((node) => isChatNodeAnchorStale(node, doc, reviews))
-        .map((node) => node.id),
-    );
+  /** 规则 12：区分原文变化与仍有文本但无法唯一消歧。 */
+  const anchorIssues = useMemo(() => {
+    const issues = new Map<string, ChatAnchorIssue>();
+    if (!doc) return issues;
+    for (const node of nodes) {
+      const issue = getChatNodeAnchorIssue(node, doc, reviews);
+      if (issue) issues.set(node.id, issue);
+    }
+    return issues;
   }, [nodes, doc, reviews]);
+  const staleNodeIds = useMemo(
+    () => new Set(anchorIssues.keys()),
+    [anchorIssues],
+  );
+  const ambiguousNodeIds = useMemo(
+    () =>
+      new Set(
+        [...anchorIssues]
+          .filter(([, issue]) => issue === "ambiguous")
+          .map(([nodeId]) => nodeId),
+      ),
+    [anchorIssues],
+  );
   const anchorStale = displayedChatNode
     ? staleNodeIds.has(displayedChatNode.id)
+    : false;
+  const anchorAmbiguous = displayedChatNode
+    ? ambiguousNodeIds.has(displayedChatNode.id)
     : false;
 
   /** 固定全文入口始终可选；没有真实对话节点时先进入虚拟态，首次发送再落库。 */
@@ -1400,7 +1463,11 @@ export default function Home() {
           : null;
       const revealed = editorRef.current?.revealChatAnchor(node, reviewItem) ?? false;
       if (!revealed) {
-        setAnnounce("原文已变更，无法定位这个聊天节点。");
+        setAnnounce(
+          ambiguousNodeIds.has(node.id)
+            ? "存在多处相同文字，无法唯一确定原选区。"
+            : "原文已变更，无法定位这个聊天节点。",
+        );
         return;
       }
 
@@ -1415,7 +1482,7 @@ export default function Home() {
       }
       setAnnounce(`已定位到聊天节点「${node.originalText || "讨论"}」的正文锚点。`);
     },
-    [nodes, doc, reviews],
+    [nodes, doc, reviews, ambiguousNodeIds],
   );
 
   // 打开预览时暂时收起 sticky 聊天区，避免 z-40 的聊天面板把修改集完全盖住。
@@ -1911,6 +1978,7 @@ export default function Home() {
               selectedReviewId={selectedId}
               onSelectReview={handleBodySelectAnchor}
               onSelectionChange={handleEditorSelectionChange}
+              onChatRangeLocatorsChange={handleChatRangeLocatorsChange}
               chatNodes={nodes}
               onSelectChatAnchor={handleSelectChatAnchor}
               readOnly={requestLocked}
@@ -1971,6 +2039,7 @@ export default function Home() {
                 nodes={nodes}
                 activeNode={displayedChatNode}
                 anchorStale={anchorStale}
+                anchorAmbiguous={anchorAmbiguous}
                 turns={displayedChatTurns}
                 busy={chatBusy}
                 sendDisabled={chatForbidden || requestLocked}
@@ -1994,6 +2063,7 @@ export default function Home() {
                 onRevealAnchor={handleRevealChatAnchor}
                 onDeleteNode={handleDeleteNode}
                 staleNodeIds={staleNodeIds}
+                ambiguousNodeIds={ambiguousNodeIds}
               />
             </div>
           </div>
@@ -2093,26 +2163,30 @@ export default function Home() {
   );
 }
 
-function isChatNodeAnchorStale(
+function getChatNodeAnchorIssue(
   node: ChatNode,
   doc: DocumentState,
   reviews: ReviewItem[],
-): boolean {
+): ChatAnchorIssue | null {
   const anchor = node.anchor;
-  if (anchor.type === "document") return false;
+  if (anchor.type === "document") return null;
   if (anchor.type === "block") {
-    return !canLocateScope(doc, {
+    return canLocateScope(doc, {
       type: "block",
       blockId: anchor.blockId ?? "",
-    });
+    })
+      ? null
+      : "changed";
   }
   if (anchor.type === "range") {
-    return !canLocateScope(doc, {
-      type: "range",
-      blockId: anchor.blockId ?? "",
-      original: anchor.selectedText ?? "",
-    });
+    const hit = locateChatNodeRange(doc, node);
+    return hit.ok ? null : hit.reason === "ambiguous" ? "ambiguous" : "changed";
   }
   const item = reviews.find((review) => review.id === anchor.reviewId);
-  return item ? !canLocateScope(doc, item.scope) : true;
+  if (!item) return "changed";
+  if (item.scope.type === "range") {
+    const hit = locateRange(doc, item.scope);
+    return hit.ok ? null : hit.reason === "ambiguous" ? "ambiguous" : "changed";
+  }
+  return canLocateScope(doc, item.scope) ? null : "changed";
 }

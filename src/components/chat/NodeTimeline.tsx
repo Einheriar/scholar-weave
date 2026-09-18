@@ -16,6 +16,8 @@ export type NodeTimelineProps = {
   documentContextActive: boolean;
   /** 当前无法可靠定位到正文的节点 id */
   staleNodeIds: ReadonlySet<string>;
+  /** stale 节点中因重复文本无法唯一消歧的节点 id */
+  ambiguousNodeIds: ReadonlySet<string>;
   /** 点击端点：切到该节点并滚动到对应轮次（规则 19） */
   onJump: (nodeId: string, turnIndex: number) => void;
   /** 点击节点身份竖条：切到并定位该节点的正文锚点 */
@@ -53,6 +55,7 @@ export function NodeTimeline({
   activeNodeId,
   documentContextActive,
   staleNodeIds,
+  ambiguousNodeIds,
   onJump,
   onRevealAnchor,
   onSelectDocument,
@@ -161,6 +164,7 @@ export function NodeTimeline({
             node={documentEntry}
             isActive={documentContextActive}
             anchorStale={false}
+            anchorAmbiguous={false}
             dimmed={hover !== null && hover.row !== 0}
             lit={hover?.row === 0}
             onShowTip={(content) => showTip(0, documentEntry, content)}
@@ -176,6 +180,7 @@ export function NodeTimeline({
               node={node}
               isActive={node.id === activeNodeId}
               anchorStale={staleNodeIds.has(node.id)}
+              anchorAmbiguous={ambiguousNodeIds.has(node.id)}
               dimmed={hover !== null && hover.row !== row + 1}
               lit={hover?.row === row + 1}
               onShowTip={(content) => showTip(row + 1, node, content)}
@@ -212,6 +217,7 @@ function NodeRow({
   node,
   isActive,
   anchorStale,
+  anchorAmbiguous,
   dimmed,
   lit,
   onShowTip,
@@ -224,6 +230,7 @@ function NodeRow({
   node: ChatNode;
   isActive: boolean;
   anchorStale: boolean;
+  anchorAmbiguous: boolean;
   /** 其它行正被 hover：本行压暗，突出焦点那行 */
   dimmed: boolean;
   /** 本行正被 hover（端点上）：提亮 */
@@ -320,7 +327,13 @@ function NodeRow({
         </Tooltip>
       ) : (
         <Tooltip
-          label={anchorStale ? "原文已变更，无法定位" : "定位到正文锚点"}
+          label={
+            anchorStale
+              ? anchorAmbiguous
+                ? "无法唯一确定原选区"
+                : "原文已变更，无法定位"
+              : "定位到正文锚点"
+          }
         >
           <button
             type="button"

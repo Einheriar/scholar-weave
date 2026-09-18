@@ -151,6 +151,27 @@ export const ChatContextSchema = z.object({
 export type ChatContext = z.infer<typeof ChatContextSchema>;
 
 /**
+ * 浏览器本地生成的 range 锚定证据。它只随 ChatNode 持久化，不属于
+ * ChatContext，也不会进入发给模型的请求或提示词。
+ */
+export const ChatRangeLocatorSchema = z
+  .object({
+    /** 选区在建档时段落文本中的 UTF-16 起止偏移 */
+    start: z.number().int().nonnegative(),
+    end: z.number().int().positive(),
+    /** 短上下文用于正文变化后的安全消歧 */
+    prefix: z.string(),
+    suffix: z.string(),
+    /** 建档时所在段落的完整快照，用于位置迁移与最终校验 */
+    blockText: z.string(),
+  })
+  .refine((value) => value.end > value.start, {
+    message: "range locator 的 end 必须大于 start",
+    path: ["end"],
+  });
+export type ChatRangeLocator = z.infer<typeof ChatRangeLocatorSchema>;
+
+/**
  * 对话回复中由模型提出、但尚未进入审阅列表的候选意见。
  * id 由服务端生成；转换后的 reviewId 写回候选，防止刷新后重复创建。
  * scope / kind / status / documentRevision 一律由客户端依据聊天节点和当前文档补齐，
@@ -216,6 +237,8 @@ export type Conversation = z.infer<typeof ConversationSchema>;
 export const ChatNodeSchema = z.object({
   id: z.string().min(1),
   anchor: ChatContextSchema,
+  /** range 节点的本地定位证据；optional 以兼容 0.3.0 及更早项目 */
+  rangeLocator: ChatRangeLocatorSchema.optional(),
   originalText: z.string(),
   createdAt: z.string(),
   turns: z.array(ChatTurnSchema),

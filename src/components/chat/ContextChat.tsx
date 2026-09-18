@@ -23,6 +23,8 @@ export type ContextChatProps = {
   activeNode: ChatNode | null;
   /** 当前节点锚点是否已失效（原文被改/删，规则 12；由 page 用 canLocateScope 判定） */
   anchorStale: boolean;
+  /** 锚点原文仍存在，但存在多个等价位置，无法安全判断原选区 */
+  anchorAmbiguous: boolean;
   turns: ChatTurn[];
   busy: boolean;
   /** 默认无选区且无建议时禁发；显式包含全文后由 page 解锁。 */
@@ -58,6 +60,8 @@ export type ContextChatProps = {
   onRevealAnchor: (nodeId: string) => void;
   /** 当前无法可靠定位到正文的节点 id */
   staleNodeIds: ReadonlySet<string>;
+  /** stale 节点中因重复文本无法唯一消歧的节点 id */
+  ambiguousNodeIds: ReadonlySet<string>;
   /** 时间线行内删除该节点全部讨论（规则 13） */
   onDeleteNode: (nodeId: string) => void;
 };
@@ -77,6 +81,7 @@ export function ContextChat({
   nodes,
   activeNode,
   anchorStale,
+  anchorAmbiguous,
   turns,
   busy,
   sendDisabled,
@@ -97,6 +102,7 @@ export function ContextChat({
   onSelectDocumentNode,
   onRevealAnchor,
   staleNodeIds,
+  ambiguousNodeIds,
   onDeleteNode,
 }: ContextChatProps) {
   const [draft, setDraft] = useState("");
@@ -305,7 +311,13 @@ export function ContextChat({
             <span className="shrink-0">当前上下文：</span>
             {activeNode ? (
               <Tooltip
-                label={anchorStale ? "原文已变更，无法定位" : "定位到正文锚点"}
+                label={
+                  anchorStale
+                    ? anchorAmbiguous
+                      ? "无法唯一确定原选区"
+                      : "原文已变更，无法定位"
+                    : "定位到正文锚点"
+                }
               >
                 <button
                   type="button"
@@ -383,7 +395,9 @@ export function ContextChat({
 
           {anchorStale && (
             <p className="mx-3.5 mt-3 rounded-lg bg-surface-muted px-3 py-2 text-xs text-text-muted">
-              原文已变更，以下为存档讨论
+              {anchorAmbiguous
+                ? "存在多处相同文字，无法唯一确定原选区；以下为存档讨论"
+                : "原文已变更，以下为存档讨论"}
             </p>
           )}
 
@@ -436,7 +450,9 @@ export function ContextChat({
                         <Tooltip
                           label={
                             !t.reviewProposal.convertedReviewId && anchorStale
-                              ? "原文已变化，无法转为审阅意见"
+                              ? anchorAmbiguous
+                                ? "无法唯一确定原选区，不能转为审阅意见"
+                                : "原文已变化，无法转为审阅意见"
                               : undefined
                           }
                           side="top"
@@ -683,6 +699,7 @@ export function ContextChat({
           activeNodeId={activeNode?.id ?? null}
           documentContextActive={documentContextActive}
           staleNodeIds={staleNodeIds}
+          ambiguousNodeIds={ambiguousNodeIds}
           closing={timelineClosing}
           onClosingEnd={() => {
             setClosingDone(true);

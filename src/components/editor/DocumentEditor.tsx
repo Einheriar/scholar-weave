@@ -29,10 +29,32 @@ import {
   tiptapToBlocks,
   type PMDocNode,
 } from "@/lib/tiptap-convert";
-import type { DocumentState, DocumentBlock, ReviewItem, ChatNode } from "@/lib/review-schema";
+import type {
+  ChatNode,
+  ChatRangeLocator,
+  DocumentBlock,
+  DocumentState,
+  ReviewItem,
+} from "@/lib/review-schema";
 import { computeChecksum } from "@/lib/revisions";
 import { locateRange } from "@/lib/anchoring";
+import {
+  createChatRangeLocator,
+  locateChatNodeRange,
+} from "@/lib/chat-range-anchor";
 import { Tooltip } from "@/components/ui/tooltip";
+
+export type EditorSelection = {
+  blockId: string;
+  text: string;
+  /** 本地定位证据，不会作为 ChatContext 发给模型 */
+  rangeLocator?: ChatRangeLocator;
+};
+
+export type ChatRangeLocatorUpdate = {
+  nodeId: string;
+  rangeLocator: ChatRangeLocator;
+};
 
 export type DocumentEditorHandle = {
   /** 把编辑器滚动并选中到某条建议对应的正文位置（侧栏→正文定位） */
@@ -61,11 +83,13 @@ export type DocumentEditorProps = {
   /** 点击正文标记时回调（正文→侧栏定位），带标记的视口纵坐标供侧栏对齐 */
   onSelectReview?: (id: string, viewportTop: number | null) => void;
   /** 用户选区变化回调：当前选中的（blockId, 文本），无选区时为 null；建议定位的程序化选区不会上报 */
-  onSelectionChange?: (sel: { blockId: string; text: string } | null) => void;
+  onSelectionChange?: (sel: EditorSelection | null) => void;
   /** 聊天节点锚点（阶段 6）：被聊过的文字画点状下划线，点击跳节点 */
   chatNodes?: ChatNode[];
   /** 点击正文聊天锚点标记时回调（正文→聊天区对应节点） */
   onSelectChatAnchor?: (nodeId: string) => void;
+  /** 正文事务安全映射 range 锚点后，把新位置写回本地节点 */
+  onChatRangeLocatorsChange?: (updates: ChatRangeLocatorUpdate[]) => void;
   /** 请求处理中锁定正文编辑，但仍允许滚动与选择文本 */
   readOnly?: boolean;
   /** 右上角撤销入口撤回一条已接受建议后，同步恢复建议状态 */
@@ -97,6 +121,7 @@ export const DocumentEditor = forwardRef<
     onSelectionChange,
     chatNodes = [],
     onSelectChatAnchor,
+    onChatRangeLocatorsChange,
     readOnly = false,
     onReviewEditUndo,
     onReviewEditUndoUnavailable,
@@ -115,6 +140,7 @@ export const DocumentEditor = forwardRef<
   const onSelChangeRef = useRef(onSelectionChange);
   const chatNodesRef = useRef<ChatNode[]>(chatNodes);
   const onChatAnchorRef = useRef(onSelectChatAnchor);
+  const onChatRangeLocatorsChangeRef = useRef(onChatRangeLocatorsChange);
   const onReviewEditUndoRef = useRef(onReviewEditUndo);
   const onReviewEditUndoUnavailableRef = useRef(onReviewEditUndoUnavailable);
   /**
@@ -141,9 +167,10 @@ export const DocumentEditor = forwardRef<
     onSelChangeRef.current = onSelectionChange;
     chatNodesRef.current = chatNodes;
     onChatAnchorRef.current = onSelectChatAnchor;
+    onChatRangeLocatorsChangeRef.current = onChatRangeLocatorsChange;
     onReviewEditUndoRef.current = onReviewEditUndo;
     onReviewEditUndoUnavailableRef.current = onReviewEditUndoUnavailable;
-  }, [onDocumentChange, document, reviewItems, selectedReviewId, onSelectReview, onSelectionChange, chatNodes, onSelectChatAnchor, onReviewEditUndo, onReviewEditUndoUnavailable]);
+  }, [onDocumentChange, document, reviewItems, selectedReviewId, onSelectReview, onSelectionChange, chatNodes, onSelectChatAnchor, onChatRangeLocatorsChange, onReviewEditUndo, onReviewEditUndoUnavailable]);
 
   const extensions = useMemo(
     () => [
@@ -258,10 +285,57 @@ export const DocumentEditor = forwardRef<
       docRef.current = next;
       onChangeRef.current(next);
     },
-    onTransaction({ editor }) {
+    onTransaction({ editor, transaction }) {
       const nextCanUndo =
         editor.can().undo() || reviewUndoStackRef.current.length > 0;
       setCanUndo((current) => (current === nextCanUndo ? current : nextCanUndo));
+
+      if (transaction.docChanged) {
+        const updates: ChatRangeLocatorUpdate[] = [];
+        for (const node of chatNodesRef.current) {
+          const anchor = node.anchor;
+          const locator = node.rangeLocator;
+          if (
+            anchor.type !== "range" ||
+            !anchor.blockId ||
+            !anchor.selectedText ||
+            !locator
+          ) {
+            continue;
+          }
+          const oldBlockStart = blockStartInPmDocument(
+            transaction.before,
+            anchor.blockId,
+          );
+          const newBlockStart = blockStartInPmDocument(
+            transaction.doc,
+            anchor.blockId,
+          );
+          if (oldBlockStart == null || newBlockStart == null) continue;
+
+          const mappedFrom = transaction.mapping.mapResult(
+            oldBlockStart + 1 + locator.start,
+            1,
+          );
+          const mappedTo = transaction.mapping.mapResult(
+            oldBlockStart + 1 + locator.end,
+            -1,
+          );
+          if (mappedFrom.deleted || mappedTo.deleted) continue;
+
+          const nextBlock = transaction.doc.nodeAt(newBlockStart);
+          if (!nextBlock) continue;
+          const start = mappedFrom.pos - newBlockStart - 1;
+          const end = mappedTo.pos - newBlockStart - 1;
+          const nextText = nextBlock.textContent;
+          if (nextText.slice(start, end) !== anchor.selectedText) continue;
+          const rangeLocator = createChatRangeLocator(nextText, start, end);
+          if (rangeLocator) updates.push({ nodeId: node.id, rangeLocator });
+        }
+        if (updates.length > 0) {
+          onChatRangeLocatorsChangeRef.current?.(updates);
+        }
+      }
     },
     onSelectionUpdate({ editor }) {
       if (locatingReviewRef.current) return;
@@ -276,15 +350,30 @@ export const DocumentEditor = forwardRef<
       // 找到选区起点所在的段落 blockId
       const $from = editor.state.doc.resolve(from);
       let blockId: string | null = null;
+      let paragraphDepth: number | null = null;
+      let blockText = "";
       for (let d = $from.depth; d >= 0; d--) {
         const node = $from.node(d);
         if (node.type.name === "paragraph") {
           blockId = (node.attrs.blockId as string) ?? null;
+          paragraphDepth = d;
+          blockText = node.textContent;
           break;
         }
       }
       const text = editor.state.doc.textBetween(from, to, " ", " ");
-      cb(blockId ? { blockId, text } : null);
+      if (!blockId || paragraphDepth === null) {
+        cb(null);
+        return;
+      }
+      const paragraphStart = $from.start(paragraphDepth);
+      const start = from - paragraphStart;
+      const end = to - paragraphStart;
+      const rangeLocator =
+        blockText.slice(start, end) === text
+          ? createChatRangeLocator(blockText, start, end) ?? undefined
+          : undefined;
+      cb({ blockId, text, rangeLocator });
     },
   }, [document.id]);
 
@@ -546,11 +635,7 @@ function findChatAnchorPosition(
     return { from: start + 1, to: start + 1, selectRange: false };
   }
   if (!anchor.blockId || !anchor.selectedText) return null;
-  const hit = locateRange(doc, {
-    type: "range",
-    blockId: anchor.blockId,
-    original: anchor.selectedText,
-  });
+  const hit = locateChatNodeRange(doc, node);
   if (!hit.ok) return null;
   const blockStart = blockStartPosition(editor, anchor.blockId);
   if (blockStart == null) return null;
@@ -604,6 +689,25 @@ function blockStartPosition(editor: Editor, blockId: string): number | null {
       return false;
     }
     return node.type.name !== "paragraph";
+  });
+  return found;
+}
+
+/** Find a paragraph's absolute start in an arbitrary ProseMirror document. */
+function blockStartInPmDocument(
+  doc: Editor["state"]["doc"],
+  blockId: string,
+): number | null {
+  let found: number | null = null;
+  doc.descendants((node, pos) => {
+    if (
+      found === null &&
+      node.type.name === "paragraph" &&
+      node.attrs.blockId === blockId
+    ) {
+      found = pos;
+    }
+    return found === null;
   });
   return found;
 }
