@@ -117,7 +117,9 @@ describe("POST /api/review", () => {
     expect(res.status).toBe(200);
     expect((await res.json()).documentSummary).toBe("纠错后结构有效。");
     expect(gen).toHaveBeenCalledTimes(2);
-    expect(gen.mock.calls[1][0].at(-1)?.content).toContain("上一条回复未通过结构校验");
+    expect(gen.mock.calls[1][0].at(-1)?.content).toContain(
+      "The previous response failed structured validation",
+    );
     expect(gen.mock.calls[1][1]).toMatchObject({ temperature: 0 });
   });
 
@@ -333,6 +335,6 @@ describe("POST /api/review", () => {
     const messages = gen.mock.calls[0][0];
     const sys = messages[0].content;
     expect(sys).toContain("in-group favoritism");
-    expect(sys).toContain("不得修改");
+    expect(sys).toContain("never modify them");
   });
 });

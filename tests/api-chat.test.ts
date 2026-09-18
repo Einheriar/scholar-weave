@@ -345,7 +345,7 @@ describe("POST /api/chat", () => {
     );
     const sys = gen.mock.calls[0][0][0].content;
     expect(sys).toContain("删除多余助词");
-    expect(sys).toContain("审阅建议");
+    expect(sys).toContain("Review suggestion under discussion");
   });
 
   it("参数不合法 → 400", async () => {

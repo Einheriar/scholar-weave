@@ -51,7 +51,7 @@ function parseStructuredContent<S extends z.ZodType>(
     return {
       ok: false,
       code: "llm_bad_json",
-      detail: "输出不是可解析的 JSON。",
+      detail: "The output is not valid parseable JSON.",
     };
   }
   const parsed = schema.safeParse(json);
@@ -59,14 +59,14 @@ function parseStructuredContent<S extends z.ZodType>(
     const detail = parsed.error.issues
       .slice(0, 6)
       .map((issue) => {
-        const path = issue.path.length > 0 ? issue.path.join(".") : "根对象";
+        const path = issue.path.length > 0 ? issue.path.join(".") : "root object";
         return `${path}: ${issue.message}`;
       })
-      .join("；");
+      .join("; ");
     return {
       ok: false,
       code: "llm_schema_mismatch",
-      detail: detail || "输出字段不符合协议。",
+      detail: detail || "The output fields do not conform to the protocol.",
     };
   }
   return { ok: true, data: parsed.data };
@@ -84,9 +84,9 @@ function buildRepairMessages(
     {
       role: "user",
       content:
-        `上一条回复未通过结构校验：${detail}\n` +
-        "请只修正 JSON 的语法和字段结构，不改变原有判断、建议或修改内容。" +
-        "严格遵循最初系统消息中的输出协议，只输出一个 JSON 对象，不要代码围栏或解释。",
+        `The previous response failed structured validation: ${detail}\n` +
+        "Correct only the JSON syntax and field structure. Do not change the original judgments, suggestions, or edit content. " +
+        "Follow the output protocol in the original system message exactly. Output one JSON object only, with no code fences or explanation.",
     },
   ];
 }
