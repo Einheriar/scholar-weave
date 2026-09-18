@@ -82,7 +82,7 @@ ScholarWeave 使用 OpenAI 兼容的聊天协议，可以连接 OpenAI、DeepSee
 网页预设保存在当前浏览器的 `localStorage` 中，保存后立即生效，不会写入项目文件，也不会被 Git 提交。由于 API Key 会以明文形式保存在浏览器本地，这种方式只适合在可信的个人设备上使用。
 
 <p align="center">
-  <img src="doc/image/modelconfig.png" alt="模型配置" width="640">
+  <img src="doc/image/modelconfig.png" alt="模型配置" width="430">
 </p>
 
 ## 功能使用

@@ -82,7 +82,7 @@ Open **Settings → Model** to create and switch between multiple model presets.
 Web presets are stored in the current browser's `localStorage`. They take effect immediately after being saved, are never written into project files, and cannot be committed through Git. Because API keys are stored as plaintext in the browser, this method should only be used on a trusted personal device.
 
 <p align="center">
-  <img src="doc/image/modelconfig.png" alt="Model configuration" width="640">
+  <img src="doc/image/modelconfig.png" alt="Model configuration" width="430">
 </p>
 
 ## Using ScholarWeave
