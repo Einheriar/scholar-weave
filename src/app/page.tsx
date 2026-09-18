@@ -41,7 +41,11 @@ import {
   reorderProjects,
   upsertProject,
 } from "@/lib/chat-history";
-import { findNodeByAnchor, reviewScopeFromNode } from "@/lib/chat-nodes";
+import {
+  findNodeByAnchor,
+  reviewScopeFromNode,
+  VIRTUAL_DOCUMENT_NODE_ID,
+} from "@/lib/chat-nodes";
 import {
   clearAllProjects,
   deleteProject as deleteStoredProject,
@@ -119,8 +123,33 @@ export default function Home() {
     return window.localStorage.getItem(CHAT_INCLUDE_FULL_ALWAYS_KEY) === "true";
   });
   const handleToggleIncludeFullDocument = useCallback(() => {
-    setIncludeFullDocument((current) => !current);
-  }, []);
+    const next = !includeFullDocument;
+    setIncludeFullDocument(next);
+    // 没有任何局部锚点或正在查看的节点时，开启全文背景等同于进入固定全文入口。
+    // 已在局部节点中聊天时只附加全文，不切换节点。
+    if (next && !selection && !selectedId && activeNodeId === null) {
+      const documentNode = findNodeByAnchor(nodes, { type: "document" });
+      const nextNodeId = documentNode?.id ?? VIRTUAL_DOCUMENT_NODE_ID;
+      setActiveNodeId(nextNodeId);
+      setChatTurns(documentNode?.turns ?? []);
+    }
+    // 主开关优先：关闭本次全文背景时，同时解除浏览器级默认。
+    if (!next && alwaysIncludeFullDocument) {
+      setAlwaysIncludeFullDocument(false);
+      try {
+        window.localStorage.setItem(CHAT_INCLUDE_FULL_ALWAYS_KEY, "false");
+      } catch {
+        /* localStorage 不可用时只保留本次会话状态 */
+      }
+    }
+  }, [
+    activeNodeId,
+    alwaysIncludeFullDocument,
+    includeFullDocument,
+    nodes,
+    selectedId,
+    selection,
+  ]);
   const handleToggleAlwaysIncludeFullDocument = useCallback(() => {
     const next = !alwaysIncludeFullDocument;
     setAlwaysIncludeFullDocument(next);
@@ -754,16 +783,19 @@ export default function Home() {
     () => nodes.find((n) => n.id === activeNodeId) ?? null,
     [nodes, activeNodeId],
   );
-  const documentNode = useMemo(
-    () => findNodeByAnchor(nodes, { type: "document" }) ?? null,
-    [nodes],
-  );
-  const showingExplicitDocument =
-    includeFullDocument && !selection && !selectedId;
-  const displayedChatNode = showingExplicitDocument ? documentNode : activeNode;
-  const displayedChatTurns = showingExplicitDocument
-    ? documentNode?.turns ?? []
-    : chatTurns;
+  /**
+   * 全文节点可能尚未产生过消息，此时 activeNodeId 指向只存在于界面的虚拟入口。
+   * 默认“附带全文背景”且没有其它锚点时也视为进入全文节点。
+   */
+  const documentContextActive =
+    activeNodeId === VIRTUAL_DOCUMENT_NODE_ID ||
+    activeNode?.anchor.type === "document" ||
+    (activeNodeId === null &&
+      !selection &&
+      !selectedId &&
+      includeFullDocument);
+  const displayedChatNode = activeNode;
+  const displayedChatTurns = chatTurns;
 
   /** 完整选中一个自然段时自动附带全文，但仍保留该段作为讨论锚点。 */
   const fullParagraphSelected = useMemo(() => {
@@ -774,7 +806,7 @@ export default function Home() {
     );
   }, [doc, selection]);
   const effectiveIncludeFullDocument =
-    includeFullDocument || fullParagraphSelected;
+    includeFullDocument || fullParagraphSelected || documentContextActive;
 
   // 上下文联动（2026-09-16 反馈修订）：点击侧栏/正文的另一条建议、或在正文里
   // 划出新选区时，聊天视图同步切到该上下文对应的节点——「看什么就聊什么」，
@@ -803,7 +835,8 @@ export default function Home() {
     // 两者皆空：不动——保持正在查看的节点（chatContext 回退链的 activeNode 一级）
   }, [selection, selectedId]);
 
-  // ── 上下文计算：选区 > 选中建议 > 显式全文 > 正在查看的节点 > 全文 ──
+  // ── 上下文计算：选区 > 选中建议 > 正在查看的节点 > 固定全文入口 ──
+  // “附带全文背景”只控制发给模型的 blocks，不得把局部聊天改挂到全文节点。
   const chatContext: ChatContext = useMemo(() => {
     if (selection && selection.text.trim()) {
       return {
@@ -821,15 +854,19 @@ export default function Home() {
         return { type: "review", reviewId: item.id };
       }
     }
-    // 用户明确开启全文且没有局部锚点时，允许直接创建/续接全文节点。
-    if (includeFullDocument) return { type: "document" };
     // 无选区、无选中建议时，沿用正在查看的节点锚点（焦点不丢）
     if (activeNode) return activeNode.anchor;
+    // 虚拟全文入口尚未落库，但已经是明确选中的讨论节点。
+    if (documentContextActive) return { type: "document" };
     return { type: "document" };
-  }, [selection, selectedId, reviews, includeFullDocument, activeNode]);
+  }, [selection, selectedId, reviews, activeNode, documentContextActive]);
 
-  /** 默认仍要求局部锚点；显式包含全文时允许无选区直接创建全文节点。 */
-  const chatForbidden = !selection && !selectedId && !includeFullDocument;
+  /** 默认仍要求局部锚点；固定全文入口与显式附带全文都允许无选区提问。 */
+  const chatForbidden =
+    !selection &&
+    !selectedId &&
+    !includeFullDocument &&
+    !documentContextActive;
 
   const contextReview = useMemo(
     () =>
@@ -874,13 +911,13 @@ export default function Home() {
       const retryNode = retryNodeId
         ? latestRef.current.nodes.find((node) => node.id === retryNodeId)
         : undefined;
-      // 默认要求局部锚点；显式包含全文时允许无选区直接提问。
+      // 默认要求局部锚点；固定全文入口或显式附带全文时允许无选区直接提问。
       if (!retryNode && chatForbidden) {
         setLlmRetry(null);
         setChatError(
-          "请先选中正文中的词、段落或一条审阅建议，或开启“包含全文”后再提问。",
+          "请先选中正文中的词、段落或一条审阅建议，或开启“附带全文背景”后再提问。",
         );
-        setAnnounce("提问前请先选择上下文或开启包含全文。");
+        setAnnounce("提问前请先选择上下文或开启附带全文背景。");
         return;
       }
       const ctx = retryNode?.anchor ?? chatContext;
@@ -931,7 +968,7 @@ export default function Home() {
       setSaveState("saving");
 
       // 规则 24：节点边界即上下文边界。history 取本节点全部轮次（不含跨节点），
-      // blocks 默认取锚点段 ±1 段；显式包含全文、完整选段或 document 节点取
+      // blocks 默认取锚点段 ±1 段；显式附带全文、完整选段或 document 节点取
       // 发送瞬间的最新全文。建议仍只带锚点段的 open 建议。
       const historySource = retryNode
         ? targetNode.turns.slice(0, -1)
@@ -1192,6 +1229,27 @@ export default function Home() {
     ? staleNodeIds.has(displayedChatNode.id)
     : false;
 
+  /** 固定全文入口始终可选；没有真实对话节点时先进入虚拟态，首次发送再落库。 */
+  const handleSelectDocumentNode = useCallback(() => {
+    if (requestLocked) {
+      announceRequestLock();
+      return;
+    }
+    const documentNode = findNodeByAnchor(latestRef.current.nodes, {
+      type: "document",
+    });
+    const nextNodeId = documentNode?.id ?? VIRTUAL_DOCUMENT_NODE_ID;
+    setSelection(null);
+    setSelectedId(null);
+    activeNodeIdRef.current = nextNodeId;
+    setActiveNodeId(nextNodeId);
+    setChatTurns(documentNode?.turns ?? []);
+    setChatMinimized(false);
+    setLlmRetry(null);
+    setChatError(null);
+    setAnnounce("已切换到全文聊天节点。");
+  }, [requestLocked, announceRequestLock]);
+
   /** 规则 19：点时间线端点 → 切到该节点对话并滚动到对应轮次 */
   const handleJumpToTurn = useCallback(
     (nodeId: string, turnIndex: number) => {
@@ -1242,20 +1300,35 @@ export default function Home() {
         announceRequestLock();
         return;
       }
-      setNodes((ns) => {
-        const next = ns.filter((n) => n.id !== nodeId);
-        // 删的是当前查看的节点 → 切到剩余的最新节点或清空
+      const currentNodes = latestRef.current.nodes;
+      const target = currentNodes.find((node) => node.id === nodeId);
+      if (!target) return;
+      const next = currentNodes.filter((node) => node.id !== nodeId);
+      latestRef.current.nodes = next;
+      setNodes(next);
+      if (target.anchor.type === "document") {
+        // 全文入口固定存在：清空真实节点后回到虚拟 0 问状态。
         if (activeNodeId === nodeId) {
-          const last = next[next.length - 1];
-          setActiveNodeId(last?.id ?? null);
-          setChatTurns(last?.turns ?? []);
+          activeNodeIdRef.current = VIRTUAL_DOCUMENT_NODE_ID;
+          setActiveNodeId(VIRTUAL_DOCUMENT_NODE_ID);
+          setChatTurns([]);
         }
-        return next;
-      });
+      } else if (activeNodeId === nodeId) {
+        // 删的是当前局部节点 → 切到剩余的最新节点或清空。
+        const last = next[next.length - 1];
+        const nextActiveId = last?.id ?? null;
+        activeNodeIdRef.current = nextActiveId;
+        setActiveNodeId(nextActiveId);
+        setChatTurns(last?.turns ?? []);
+      }
       setLlmRetry(null);
       setChatError(null);
       setSaveState("saving");
-      setAnnounce("已删除该节点讨论。");
+      setAnnounce(
+        target.anchor.type === "document"
+          ? "已清空全文节点讨论。"
+          : "已删除该节点讨论。",
+      );
     },
     [activeNodeId, requestLocked, announceRequestLock],
   );
@@ -1860,6 +1933,7 @@ export default function Home() {
                 busy={chatBusy}
                 sendDisabled={chatForbidden || requestLocked}
                 includeFullDocument={effectiveIncludeFullDocument}
+                documentContextActive={documentContextActive}
                 alwaysIncludeFullDocument={alwaysIncludeFullDocument}
                 onToggleIncludeFullDocument={handleToggleIncludeFullDocument}
                 onToggleAlwaysIncludeFullDocument={
@@ -1873,6 +1947,7 @@ export default function Home() {
                 panelHeight={chatHeight}
                 onResize={handleChatResize}
                 onJumpToTurn={handleJumpToTurn}
+                onSelectDocumentNode={handleSelectDocumentNode}
                 onRevealAnchor={handleRevealChatAnchor}
                 onDeleteNode={handleDeleteNode}
                 staleNodeIds={staleNodeIds}

@@ -16,9 +16,11 @@ import type {
  * - block 锚：按 blockId 认（同一段反复问 = 同一节点）；
  * - document 锚：整篇共用固定全文档节点。
  *
- * 规则 11：无选区禁止提问（无 range 选区且无选中建议时不得发送），
- * 故 document 锚实际只在「用户自行全选」时经 range 进入，这里仍保留 document 分支兜底。
+ * 时间线始终展示一个虚拟全文入口；首次在其中发送时才创建并持久化真正的
+ * document 节点。虚拟 id 只存在于界面状态，绝不写入 Project.nodes。
  */
+
+export const VIRTUAL_DOCUMENT_NODE_ID = "__virtual_document_chat__";
 
 /** 在现有节点里找「身份相同」的那一个，找不到返回 null（由调用方决定新建） */
 export function findNodeByAnchor(

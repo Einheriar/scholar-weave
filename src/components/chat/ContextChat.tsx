@@ -29,6 +29,8 @@ export type ContextChatProps = {
   sendDisabled: boolean;
   /** 当前消息是否附带最新的完整文档上下文。 */
   includeFullDocument: boolean;
+  /** 当前正在查看全文节点；该节点天然附带全文背景，主体开关不可关闭。 */
+  documentContextActive: boolean;
   /** 是否将“包含全文”作为默认偏好。 */
   alwaysIncludeFullDocument: boolean;
   /** 切换当前消息的完整文档上下文。 */
@@ -48,6 +50,8 @@ export type ContextChatProps = {
   onResize: (height: number) => void;
   /** 点击时间线端点：切到该节点并滚动到对应轮次（规则 19） */
   onJumpToTurn: (nodeId: string, turnIndex: number) => void;
+  /** 切换到固定全文节点；即使还没有对话，该入口也始终存在。 */
+  onSelectDocumentNode: () => void;
   /** 点击节点竖条或当前上下文标签：定位到该节点的正文锚点 */
   onRevealAnchor: (nodeId: string) => void;
   /** 当前无法可靠定位到正文的节点 id */
@@ -75,6 +79,7 @@ export function ContextChat({
   busy,
   sendDisabled,
   includeFullDocument,
+  documentContextActive,
   alwaysIncludeFullDocument,
   onToggleIncludeFullDocument,
   onToggleAlwaysIncludeFullDocument,
@@ -86,6 +91,7 @@ export function ContextChat({
   panelHeight,
   onResize,
   onJumpToTurn,
+  onSelectDocumentNode,
   onRevealAnchor,
   staleNodeIds,
   onDeleteNode,
@@ -123,6 +129,7 @@ export function ContextChat({
   const listRef = useRef<HTMLDivElement>(null);
   const contextSwitchTimerRef = useRef<number | null>(null);
   const contextSwitchEndTimerRef = useRef<number | null>(null);
+  const fullContextControlRef = useRef<HTMLDivElement>(null);
   // 拖拽把手：记录起始高度与指针位置，pointermove 时差值调整
   const dragRef = useRef<{ startY: number; startHeight: number } | null>(null);
 
@@ -169,6 +176,19 @@ export function ContextChat({
     if (!text || busy || sendDisabled) return;
     setDraft("");
     onSend(text);
+  };
+
+  const toggleFullContextDefault = () => {
+    if (!alwaysIncludeFullDocument) {
+      const control = fullContextControlRef.current;
+      if (control) {
+        control.classList.remove("t-full-context-lock-confirm");
+        // Force a reflow so locking again can replay the one-shot confirmation.
+        void control.offsetWidth;
+        control.classList.add("t-full-context-lock-confirm");
+      }
+    }
+    onToggleAlwaysIncludeFullDocument();
   };
 
   /**
@@ -492,90 +512,132 @@ export function ContextChat({
             </div>
           </div>
 
-          <div className="flex items-end gap-2 border-t border-border p-2.5">
-            <textarea
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  submit();
+          <div className="border-t border-border p-2.5">
+            <div
+              data-chat-composer
+              className="rounded-2xl border border-border bg-surface transition-[border-color,box-shadow] has-[textarea:focus]:border-brand has-[textarea:focus]:ring-2 has-[textarea:focus]:ring-brand-ring"
+            >
+              <textarea
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    submit();
+                  }
+                }}
+                placeholder={
+                  sendDisabled
+                    ? "先选中正文或一条建议，或开启“附带全文背景”后提问…"
+                    : `针对${contextLabel}询问 LLM……（Enter 发送，Shift+Enter 换行）`
                 }
-              }}
-              placeholder={
-                sendDisabled
-                  ? "先选中正文或一条建议，或开启“包含全文”后提问…"
-                  : `针对${contextLabel}询问 LLM……（Enter 发送，Shift+Enter 换行）`
-              }
-              rows={2}
-              className="flex-1 resize-none rounded-xl border border-border bg-transparent px-3 py-2 text-sm transition-colors focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand-ring"
-              aria-label="对话输入框"
-            />
-            <div className="flex shrink-0 flex-col items-stretch gap-1">
-              <div
-                className="inline-flex self-end rounded-lg border border-border-strong bg-surface shadow-sm"
-                role="group"
-                aria-label="聊天范围"
-              >
-                <Tooltip
-                  label={
-                    includeFullDocument
-                      ? "本次提问将包含最新版本的全文"
-                      : "本次提问仅使用当前选区或建议的上下文"
+                rows={2}
+                className="block w-full resize-none bg-transparent px-3.5 pt-3 pb-1 text-sm focus:outline-none"
+                aria-label="对话输入框"
+              />
+              <div className="flex items-center justify-between gap-3 px-2.5 pb-2.5 pt-1">
+                <div
+                  ref={fullContextControlRef}
+                  className={
+                    "flex min-w-0 items-stretch overflow-hidden rounded-full border text-xs font-medium transition-[background-color,border-color,color,box-shadow] focus-within:ring-2 focus-within:ring-brand-ring " +
+                    (includeFullDocument
+                      ? "border-brand-ring bg-brand-soft text-brand"
+                      : "border-transparent bg-surface-muted text-text-muted hover:border-border-strong")
                   }
-                  side="top"
-                  align="end"
+                  role="group"
+                  aria-label="全文背景"
+                  onAnimationEnd={(event) => {
+                    if (event.target === event.currentTarget) {
+                      event.currentTarget.classList.remove(
+                        "t-full-context-lock-confirm",
+                      );
+                    }
+                  }}
                 >
+                  <Tooltip
+                    label={
+                      alwaysIncludeFullDocument
+                        ? "已固定：以后提问默认附带全文背景"
+                        : "固定为默认：以后提问自动附带全文背景"
+                    }
+                    side="top"
+                    align="start"
+                  >
+                    <button
+                      type="button"
+                      aria-pressed={alwaysIncludeFullDocument}
+                      aria-label="总是包含全文"
+                      onClick={toggleFullContextDefault}
+                      className={
+                        "inline-flex w-9 shrink-0 items-center justify-center border-r transition-[background-color,color] focus-visible:outline-none " +
+                        (alwaysIncludeFullDocument
+                          ? "border-brand bg-brand text-white dark:text-neutral-950"
+                          : "border-border text-text-faint hover:bg-surface hover:text-brand")
+                      }
+                    >
+                      <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 16 16"
+                        fill={alwaysIncludeFullDocument ? "currentColor" : "none"}
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                      >
+                        <path d="M5 2.5h6l-1 4 2 2H8.8v4.5L8 14l-.8-1V8.5H4l2-2z" />
+                      </svg>
+                    </button>
+                  </Tooltip>
+                  <Tooltip
+                    label={
+                      documentContextActive
+                        ? "全文节点始终附带最新版本的全文背景"
+                        : includeFullDocument
+                        ? "本次提问将附带最新版本的全文背景"
+                        : "本次提问仅使用当前选区或建议的局部背景"
+                    }
+                    side="top"
+                    align="end"
+                  >
+                    <button
+                      type="button"
+                      aria-pressed={includeFullDocument}
+                      aria-label="包含全文"
+                      disabled={documentContextActive}
+                      onClick={onToggleIncludeFullDocument}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 transition-colors hover:text-foreground focus-visible:outline-none disabled:cursor-default disabled:hover:text-brand"
+                    >
+                      <svg
+                        width="13"
+                        height="13"
+                        viewBox="0 0 16 16"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                      >
+                        <path d="M4 2.5h5l3 3v8H4z" />
+                        <path d="M9 2.5v3h3" />
+                      </svg>
+                      附带全文背景
+                    </button>
+                  </Tooltip>
+                </div>
+                <Tooltip label={sendDisabled ? "请先选中正文或一条建议，或开启“附带全文背景”" : undefined} side="top" align="end">
                   <button
                     type="button"
-                    aria-pressed={includeFullDocument}
-                    aria-label="包含全文"
-                    onClick={onToggleIncludeFullDocument}
-                    className={
-                      "rounded-l-lg px-2 py-1 text-[11px] font-medium transition-colors focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring " +
-                      (includeFullDocument
-                        ? "bg-brand-soft text-brand"
-                        : "text-text-muted hover:bg-surface-muted hover:text-foreground")
-                    }
+                    onClick={submit}
+                    disabled={busy || !draft.trim() || sendDisabled}
+                    className={`${buttonClass("primary", "md")} min-w-20`}
                   >
-                    包含全文
-                  </button>
-                </Tooltip>
-                <Tooltip
-                  label={
-                    alwaysIncludeFullDocument
-                      ? "已设为默认包含全文"
-                      : "设为默认：以后提问自动包含全文"
-                  }
-                  side="top"
-                  align="end"
-                >
-                  <button
-                    type="button"
-                    aria-pressed={alwaysIncludeFullDocument}
-                    aria-label="总是包含全文"
-                    onClick={onToggleAlwaysIncludeFullDocument}
-                    className={
-                      "rounded-r-lg border-l border-border-strong px-2 py-1 text-[11px] font-medium transition-colors focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring " +
-                      (alwaysIncludeFullDocument
-                        ? "bg-brand-soft text-brand"
-                        : "text-text-muted hover:bg-surface-muted hover:text-foreground")
-                    }
-                  >
-                    总是
+                    发送
                   </button>
                 </Tooltip>
               </div>
-              <Tooltip label={sendDisabled ? "请先选中正文或一条建议，或开启“包含全文”" : undefined} side="top" align="end">
-                <button
-                  type="button"
-                  onClick={submit}
-                  disabled={busy || !draft.trim() || sendDisabled}
-                  className={buttonClass("primary", "md")}
-                >
-                  发送
-                </button>
-              </Tooltip>
             </div>
           </div>
         </div>
@@ -586,6 +648,7 @@ export function ContextChat({
         <NodeTimeline
           nodes={nodes}
           activeNodeId={activeNode?.id ?? null}
+          documentContextActive={documentContextActive}
           staleNodeIds={staleNodeIds}
           closing={timelineClosing}
           onClosingEnd={() => {
@@ -595,6 +658,10 @@ export function ContextChat({
           onJump={(nodeId, turnIndex) => {
             closeTimeline();
             onJumpToTurn(nodeId, turnIndex);
+          }}
+          onSelectDocument={() => {
+            closeTimeline();
+            onSelectDocumentNode();
           }}
           onRevealAnchor={(nodeId) => {
             closeTimeline();

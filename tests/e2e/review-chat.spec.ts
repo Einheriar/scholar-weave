@@ -289,6 +289,129 @@ test.describe("上下文对话（mock /api/chat）", () => {
     ).toHaveAttribute("aria-pressed", "true");
   });
 
+  test("全文背景固定键与主开关遵循分层状态", async ({ page }) => {
+    await gotoApp(page);
+    await loadSample(page);
+    await selectTextInEditor(page, "upstanding");
+
+    const includeFull = page.getByRole("button", {
+      name: "包含全文",
+      exact: true,
+    });
+    const pinDefault = page.getByRole("button", { name: "总是包含全文" });
+
+    // 固定键开启全文背景并保存默认。
+    await pinDefault.click();
+    await expect(pinDefault).toHaveAttribute("aria-pressed", "true");
+    await expect(includeFull).toHaveAttribute("aria-pressed", "true");
+
+    // 再点固定键只解除默认，本次全文背景仍保持开启。
+    await pinDefault.click();
+    await expect(pinDefault).toHaveAttribute("aria-pressed", "false");
+    await expect(includeFull).toHaveAttribute("aria-pressed", "true");
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          window.localStorage.getItem("supergrammarly-chat-include-full-always"),
+        ),
+      )
+      .toBe("false");
+
+    // 主开关优先：固定状态下关闭本次范围会同时解除默认。
+    await pinDefault.click();
+    await expect(pinDefault).toHaveAttribute("aria-pressed", "true");
+    await includeFull.click();
+    await expect(includeFull).toHaveAttribute("aria-pressed", "false");
+    await expect(pinDefault).toHaveAttribute("aria-pressed", "false");
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          window.localStorage.getItem("supergrammarly-chat-include-full-always"),
+        ),
+      )
+      .toBe("false");
+  });
+
+  test("附带全文背景不会把局部聊天切换到全文节点", async ({ page }) => {
+    const captured: ChatRequestCapture[] = [];
+    await mockChatRoute(page, {
+      onRequest: (body) => {
+        captured.push(body);
+      },
+    });
+    await gotoApp(page);
+    await loadSample(page);
+    const paragraphs = await paragraphTexts(page);
+
+    await selectTextInEditor(page, "upstanding");
+    await sendChatMessage(page, "先解释这个词");
+    await expect.poll(() => captured.length).toBe(1);
+
+    const includeFull = page.getByRole("button", {
+      name: "包含全文",
+      exact: true,
+    });
+    await includeFull.click();
+    await expect(includeFull).toHaveAttribute("aria-pressed", "true");
+    await expect(includeFull).toBeEnabled();
+    await expect(page.locator('[aria-label="上下文对话"]')).toContainText(
+      "upstanding",
+    );
+
+    await sendChatMessage(page, "现在结合全文继续解释");
+    await expect.poll(() => captured.length).toBe(2);
+    expect(captured[1].context.type).toBe("range");
+    expect(captured[1].context.selectedText?.trim()).toBe("upstanding");
+    expect(captured[1].includeFullDocument).toBe(true);
+    expect(captured[1].blocks).toHaveLength(paragraphs.length);
+  });
+
+  test("节点历史始终提供可切换和清空的固定全文入口", async ({ page }) => {
+    let captured: ChatRequestCapture | null = null;
+    await mockChatRoute(page, {
+      onRequest: (body) => {
+        captured = body;
+      },
+    });
+    await gotoApp(page);
+    await loadSample(page);
+
+    await page.getByRole("button", { name: "聊天节点历史" }).click();
+    let timeline = page.getByRole("dialog", { name: "聊天节点历史" });
+    const documentEntry = timeline.getByRole("button", {
+      name: "切换到全文节点",
+    });
+    await expect(documentEntry).toBeVisible();
+    await expect(timeline.getByText("0 问", { exact: true })).toBeVisible();
+    await expect(
+      timeline.getByRole("button", { name: "清空全文节点讨论" }),
+    ).toHaveCount(0);
+
+    await documentEntry.click();
+    await expect(timeline).toHaveCount(0);
+    const includeFull = page.getByRole("button", {
+      name: "包含全文",
+      exact: true,
+    });
+    await expect(includeFull).toHaveAttribute("aria-pressed", "true");
+    await expect(includeFull).toBeDisabled();
+
+    await sendChatMessage(page, "从全文角度概括文章");
+    await expect.poll(() => captured).not.toBeNull();
+    expect(captured!.context).toEqual({ type: "document" });
+    expect(captured!.includeFullDocument).toBe(true);
+
+    await page.getByRole("button", { name: "聊天节点历史" }).click();
+    timeline = page.getByRole("dialog", { name: "聊天节点历史" });
+    await expect(timeline.getByText("1 问", { exact: true })).toBeVisible();
+    await timeline.getByRole("button", { name: "清空全文节点讨论" }).click();
+    await expect(timeline.getByRole("button", { name: "切换到全文节点" })).toBeVisible();
+    await expect(timeline.getByText("0 问", { exact: true })).toBeVisible();
+    await expect(
+      timeline.getByRole("button", { name: "清空全文节点讨论" }),
+    ).toHaveCount(0);
+  });
+
   test("完整选中一个自然段时会自动附带全文，但仍以该段为讨论锚点", async ({ page }) => {
     let captured: ChatRequestCapture | null = null;
     await mockChatRoute(page, {

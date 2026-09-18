@@ -31,7 +31,7 @@ describe("chat prompt document scope", () => {
     const prompt = promptFor(false);
     expect(prompt).toContain("相邻段落仅供理解，不能修改");
     expect(prompt).toContain(
-      "当前只提供了选区及相邻段落，我无法可靠检查或修改整篇文档。请开启“包含全文”后重新发送该要求。",
+      "当前只提供了选区及相邻段落，我无法可靠检查或修改整篇文档。请开启“附带全文背景”后重新发送该要求。",
     );
     expect(prompt).toContain("answer_with_review");
     expect(prompt).toContain("answer_with_changes");

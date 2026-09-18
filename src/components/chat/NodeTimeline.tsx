@@ -2,19 +2,26 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ChatNode } from "@/lib/review-schema";
-import { deriveNodeTitle } from "@/lib/chat-nodes";
+import {
+  deriveNodeTitle,
+  VIRTUAL_DOCUMENT_NODE_ID,
+} from "@/lib/chat-nodes";
 import { Tooltip } from "@/components/ui/tooltip";
 
 export type NodeTimelineProps = {
   nodes: ChatNode[];
   /** 当前查看的节点 id（当前节点行高亮，规则 18） */
   activeNodeId: string | null;
+  /** 当前是否正在查看固定全文节点（包括尚未持久化的虚拟入口）。 */
+  documentContextActive: boolean;
   /** 当前无法可靠定位到正文的节点 id */
   staleNodeIds: ReadonlySet<string>;
   /** 点击端点：切到该节点并滚动到对应轮次（规则 19） */
   onJump: (nodeId: string, turnIndex: number) => void;
   /** 点击节点身份竖条：切到并定位该节点的正文锚点 */
   onRevealAnchor: (nodeId: string) => void;
+  /** 点击固定全文入口：切换到全文聊天，不要求它已经产生过消息。 */
+  onSelectDocument: () => void;
   /** 行内删除该节点全部讨论（规则 13，直接删不弹确认） */
   onDeleteNode: (nodeId: string) => void;
   onClose: () => void;
@@ -44,9 +51,11 @@ const PAN_STEP = 2;
 export function NodeTimeline({
   nodes,
   activeNodeId,
+  documentContextActive,
   staleNodeIds,
   onJump,
   onRevealAnchor,
+  onSelectDocument,
   onDeleteNode,
   onClose,
   closing,
@@ -82,8 +91,20 @@ export function NodeTimeline({
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  // 按节点创建时间排序（规则 17）
-  const sorted = [...nodes].sort((a, b) =>
+  // 全文入口固定第一行。没有真实 document 节点时只构造界面虚拟项，首次发送才落库。
+  const persistedDocument =
+    nodes.find((node) => node.anchor.type === "document") ?? null;
+  const documentEntry: ChatNode = persistedDocument ?? {
+    id: VIRTUAL_DOCUMENT_NODE_ID,
+    anchor: { type: "document" },
+    originalText: "",
+    createdAt: "",
+    turns: [],
+  };
+  // 其余局部节点仍按创建时间排序（规则 17）
+  const sorted = nodes
+    .filter((node) => node.anchor.type !== "document")
+    .sort((a, b) =>
     a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0,
   );
 
@@ -136,23 +157,32 @@ export function NodeTimeline({
         </div>
 
         <ul className="space-y-1 p-2">
-          {sorted.length === 0 && (
-            <li className="px-3 py-4 text-xs leading-relaxed text-text-faint">
-              还没有聊天节点。选中正文里的词或段落提问后，这里会出现对应的讨论线。
-            </li>
-          )}
+          <NodeRow
+            node={documentEntry}
+            isActive={documentContextActive}
+            anchorStale={false}
+            dimmed={hover !== null && hover.row !== 0}
+            lit={hover?.row === 0}
+            onShowTip={(content) => showTip(0, documentEntry, content)}
+            onHideTip={() => setHover(null)}
+            onJump={onJump}
+            onRevealAnchor={onRevealAnchor}
+            onSelectDocument={onSelectDocument}
+            onDeleteNode={onDeleteNode}
+          />
           {sorted.map((node, row) => (
             <NodeRow
               key={node.id}
               node={node}
               isActive={node.id === activeNodeId}
               anchorStale={staleNodeIds.has(node.id)}
-              dimmed={hover !== null && hover.row !== row}
-              lit={hover?.row === row}
-              onShowTip={(content) => showTip(row, node, content)}
+              dimmed={hover !== null && hover.row !== row + 1}
+              lit={hover?.row === row + 1}
+              onShowTip={(content) => showTip(row + 1, node, content)}
               onHideTip={() => setHover(null)}
               onJump={onJump}
               onRevealAnchor={onRevealAnchor}
+              onSelectDocument={onSelectDocument}
               onDeleteNode={onDeleteNode}
             />
           ))}
@@ -188,6 +218,7 @@ function NodeRow({
   onHideTip,
   onJump,
   onRevealAnchor,
+  onSelectDocument,
   onDeleteNode,
 }: {
   node: ChatNode;
@@ -201,6 +232,7 @@ function NodeRow({
   onHideTip: () => void;
   onJump: (nodeId: string, turnIndex: number) => void;
   onRevealAnchor: (nodeId: string) => void;
+  onSelectDocument: () => void;
   onDeleteNode: (nodeId: string) => void;
 }) {
   const turns = node.turns;
@@ -209,6 +241,7 @@ function NodeRow({
     .filter(({ t }) => t.role === "user");
   const userTurnCount = userTurns.length;
   const nodeTitle = deriveNodeTitle(node);
+  const isDocument = node.anchor.type === "document";
 
   // 尺子卷轴：scrollLeft 状态驱动两端箭头显隐
   const rulerRef = useRef<HTMLDivElement>(null);
@@ -265,29 +298,51 @@ function NodeRow({
     >
       {/* 节点身份竖条仍是次要入口：视觉保持 3px，仅把命中区温和扩到 12×24px。
           它与轨道端点语义分工：竖条回正文，端点跳某次提问。 */}
-      <Tooltip
-        label={anchorStale ? "原文已变更，无法定位" : "定位到正文锚点"}
-      >
-        <button
-          type="button"
-          disabled={anchorStale}
-          onClick={() => onRevealAnchor(node.id)}
-          aria-label={`定位到节点「${nodeTitle}」的正文锚点`}
-          className={
-            "group -my-1 flex h-6 w-3 shrink-0 items-center justify-center rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-node-ring " +
-            (anchorStale ? "cursor-default opacity-45" : "cursor-pointer")
-          }
-        >
-          <span
+      {isDocument ? (
+        <Tooltip label="切换到全文节点">
+          <button
+            type="button"
+            onClick={onSelectDocument}
+            aria-label="切换到全文节点"
             className={
-              "h-4 w-[3px] rounded-full transition-all duration-150 " +
-              (isActive ? "bg-node-hover" : "bg-node") +
-              (anchorStale ? "" : " group-hover:w-[5px]")
+              "-my-1 inline-flex h-6 w-11 shrink-0 items-center justify-center gap-1 rounded-md text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-node-ring " +
+              (isActive
+                ? "bg-node text-white dark:text-neutral-950"
+                : "text-node hover:bg-node-soft")
             }
-            aria-hidden
-          />
-        </button>
-      </Tooltip>
+          >
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M4 2.5h5l3 3v8H4z" />
+              <path d="M9 2.5v3h3" />
+            </svg>
+            全文
+          </button>
+        </Tooltip>
+      ) : (
+        <Tooltip
+          label={anchorStale ? "原文已变更，无法定位" : "定位到正文锚点"}
+        >
+          <button
+            type="button"
+            disabled={anchorStale}
+            onClick={() => onRevealAnchor(node.id)}
+            aria-label={`定位到节点「${nodeTitle}」的正文锚点`}
+            className={
+              "group -my-1 flex h-6 w-3 shrink-0 items-center justify-center rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-node-ring " +
+              (anchorStale ? "cursor-default opacity-45" : "cursor-pointer")
+            }
+          >
+            <span
+              className={
+                "h-4 w-[3px] rounded-full transition-all duration-150 " +
+                (isActive ? "bg-node-hover" : "bg-node") +
+                (anchorStale ? "" : " group-hover:w-[5px]")
+              }
+              aria-hidden
+            />
+          </button>
+        </Tooltip>
+      )}
 
       {/* 尺子轨道：横向可滚，端点左对齐固定间距；scrollbar 隐藏，靠两端箭头卷动 */}
       <div className="relative min-w-16 flex-1">
@@ -336,29 +391,34 @@ function NodeRow({
       <span className="shrink-0 text-[11px] tabular-nums text-text-faint">
         {userTurnCount} 问
       </span>
-      {/* 行内删除（规则 13：删该行全部讨论，直接删不弹确认） */}
-      <Tooltip label="删除该节点讨论" side="left">
-        <button
-          type="button"
-          onClick={() => onDeleteNode(node.id)}
-          aria-label="删除该节点讨论"
-          className="shrink-0 rounded-md p-1 text-text-faint transition-colors hover:bg-surface hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring dark:hover:text-red-400"
+      {/* 固定全文入口不会消失：有讨论时这里只清空内容；0 问时不显示清空键。 */}
+      {(!isDocument || userTurnCount > 0) && (
+        <Tooltip
+          label={isDocument ? "清空全文节点讨论" : "删除该节点讨论"}
+          side="left"
         >
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          aria-hidden
-        >
-          <line x1="18" y1="6" x2="6" y2="18" />
-          <line x1="6" y1="6" x2="18" y2="18" />
-        </svg>
-        </button>
-      </Tooltip>
+          <button
+            type="button"
+            onClick={() => onDeleteNode(node.id)}
+            aria-label={isDocument ? "清空全文节点讨论" : "删除该节点讨论"}
+            className="shrink-0 rounded-md p-1 text-text-faint transition-colors hover:bg-surface hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring dark:hover:text-red-400"
+          >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            aria-hidden
+          >
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+          </button>
+        </Tooltip>
+      )}
     </li>
   );
 }
