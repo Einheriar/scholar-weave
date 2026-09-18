@@ -99,19 +99,19 @@ Review suggestions are grouped into three types:
 
 Most review suggestions can be handled with **Accept** or **Ignore**. Clicking a suggestion quickly locates the corresponding paragraph or phrase in the manuscript.
 
-<video src="doc/image/selectandcheck.webm" controls muted></video>
+![Review suggestion workflow](doc/image/selectandcheck.webp)
 
 ### Talk with the LLM
 
 When you want to discuss a specific passage, select it and ask the LLM a question. ScholarWeave sends both the selection and its containing paragraph as context.
 
-<video src="doc/image/LLM.webm" controls muted></video>
+![Contextual LLM conversation](doc/image/LLM.webp)
 
 ### Turn a conversation result into a review suggestion
 
 The result of an LLM conversation can also be converted into a review suggestion and applied through the same controlled workflow.
 
-<video src="doc/image/interactiontoreview.webm" controls muted></video>
+![Turn a conversation result into a review suggestion](doc/image/interactiontoreview.webp)
 
 ## Privacy
 

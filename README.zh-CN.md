@@ -98,19 +98,19 @@ ScholarWeave 使用 OpenAI 兼容的聊天协议，可以连接 OpenAI、DeepSee
 
 大多的审阅意见可以直接在窗口选择“接受”或者“忽略”来进行处理，单击意见可以迅速定位意见涉及的具体段落或者语句。
 
-<video src="doc/image/selectandcheck.webm" controls muted></video>
+![审阅意见交互演示](doc/image/selectandcheck.webp)
 
 ### 与LLM的交流
 
 如果有需要交流的地方，可以手动选取与LLM进行交流，系统会将整段内容与选区内容共同发送给LLM。
 
-<video src="doc/image/LLM.webm" controls muted></video>
+![与 LLM 进行上下文对话](doc/image/LLM.webp)
 
 ### 交流结果转化为审阅意见
 
 与LLM之间的交流同样可以转化为审阅意见并一键执行。
 
-<video src="doc/image/interactiontoreview.webm" controls muted></video>
+![将交流结果转化为审阅意见](doc/image/interactiontoreview.webp)
 
 ## 隐私
 
