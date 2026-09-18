@@ -306,6 +306,13 @@ export function ContextChat({
             )}
           </span>
         </span>
+        <button
+          type="button"
+          data-chat-header-toggle
+          onClick={onToggleMinimize}
+          aria-label="切换聊天区展开状态"
+          className="min-w-6 self-stretch flex-1 cursor-pointer rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring"
+        />
         <div className="flex shrink-0 items-center gap-1">
           <Tooltip label={minimized ? "展开聊天区" : "最小化聊天区"} align="end">
             <button

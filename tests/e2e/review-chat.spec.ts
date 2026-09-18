@@ -193,6 +193,33 @@ test.describe("LLM 审阅（mock /api/review）", () => {
 });
 
 test.describe("上下文对话（mock /api/chat）", () => {
+  test("标题栏空白区域可直接收起和展开聊天区", async ({ page }) => {
+    await gotoApp(page);
+    await loadSample(page);
+
+    const headerToggle = page.getByRole("button", {
+      name: "切换聊天区展开状态",
+    });
+    const chatBody = page.locator(".chat-body");
+    await expect(headerToggle).toBeVisible();
+    await expect(headerToggle).toHaveText("");
+    await expect
+      .poll(async () => (await headerToggle.boundingBox())?.width ?? 0)
+      .toBeGreaterThan(100);
+
+    await headerToggle.click();
+    await expect(page.getByRole("button", { name: "展开聊天区" })).toBeVisible();
+    await expect
+      .poll(async () => (await chatBody.boundingBox())?.height ?? -1)
+      .toBe(0);
+
+    await headerToggle.click();
+    await expect(page.getByRole("button", { name: "最小化聊天区" })).toBeVisible();
+    await expect
+      .poll(async () => (await chatBody.boundingBox())?.height ?? 0)
+      .toBeGreaterThan(0);
+  });
+
   test("无局部锚点时包含全文会解锁发送，并发送最新版本全文", async ({ page }) => {
     let captured: ChatRequestCapture | null = null;
     await mockChatRoute(page, {
