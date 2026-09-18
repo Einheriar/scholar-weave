@@ -1,25 +1,54 @@
-# ScholarAnchor
+<p align="center">
+  <strong>English</strong> · <a href="./README.zh-CN.md">简体中文</a>
+</p>
 
-> A local-first academic writing workspace with anchored reviews, contextual AI conversations, and user-controlled manuscript revisions.
+# ScholarWeave
 
-ScholarAnchor is an academic writing assistant for researchers who want feedback to stay connected to the exact part of a manuscript that prompted it. Review suggestions, source selections, and follow-up conversations live in one workspace, so you can move from **“what should change?”** to **“why?”** and then to a controlled revision without losing context.
+> A local-first academic writing workspace that weaves anchored selections, contextual AI conversations, and user-controlled manuscript revisions into one workflow.
 
-## Why ScholarAnchor
+ScholarWeave is an academic writing assistant for researchers. It keeps every piece of feedback connected to the exact source text that prompted it: review suggestions, manuscript selections, and follow-up discussions all live in the same workspace. You can move naturally from “what needs to change?” to “why?” and then apply the revision after confirming it, without losing context. It is designed for people who want LLM-assisted polishing while retaining close control over their papers.
 
-Most writing assistants treat feedback as a stream of disconnected messages. ScholarAnchor treats a manuscript as the center of the workflow:
+## Why ScholarWeave?
 
-- **Anchored feedback** — suggestions can target the whole document, a paragraph, or a precise text range.
-- **Contextual conversations** — ask the LLM about the current selection, a review suggestion, a paragraph, or the full document.
-- **Controlled revisions** — edits are previewed and confirmed before they touch the manuscript. Nothing silently rewrites your work.
-- **A clear review lifecycle** — accept, ignore, undo, and inspect stale suggestions without losing the original context.
-- **Local-first storage** — drafts and chat history stay in the current browser through IndexedDB.
-- **Built-in demo content** — the app opens with a sample manuscript, so the review workflow can be explored before connecting a model.
+Have you encountered these problems while revising a paper?
 
-![homepage](doc/image/homepage.png)
+Even a small change made through a chatbot can require repeatedly supplying the source text, background, and instructions. As the conversation grows, so does the context and the cost of every request. Models with strong prose and a refined sense of language are often expensive. Reducing the context can easily remove essential background, leaving you to copy, supplement, and explain it again. The process is cumbersome and interrupts the flow of writing.
+
+Agent-based applications reduce copying and pasting by editing the document directly, but their output is not always precise enough, and they often provide less flexible control over local wording, tone, and sentence structure.
+
+I wanted a tool between these two approaches:
+
+- Understand the structure of an article and assist with revisions like an agent, reducing repetitive copying and pasting.
+- Let users control the context precisely like a chatbot, avoiding unnecessary token usage.
+- Support focused discussion of a word, sentence, or individual change while still considering it within its paragraph or the full document.
+- Bring interactive model suggestions into a clear review workflow where the user chooses whether to accept, ignore, discuss, or revise them further.
+
+ScholarWeave is an implementation of that idea: an LLM-powered, Grammarly-like workflow for academic writing.
+
+At its core, it is still a conversation between a person and an LLM. Anchored selections, context management, and a review system keep each discussion centered on a clearly defined portion of the manuscript. The model provides language suggestions, while the user retains final control over the text and the revision process. The result is a human-led, LLM-assisted writing workflow that balances precision, efficiency, and cost.
+
+The project uses UI design and context management to make revising English papers less cumbersome without asking users to surrender control of their writing.
+
+I originally built ScholarWeave to revise my own academic papers. It currently focuses on language polishing and revision for English manuscripts, with Chinese as the fixed interface language. Interested users are welcome to adapt it for their own needs.
+
+My C: drive is currently critically short on space, so Tauri packaging is on hold for now.
+
+## Core capabilities
+
+ScholarWeave keeps the manuscript at the center of the workflow:
+
+- **Anchored feedback**: Suggestions can target the full document, a paragraph, or a precise text selection.
+- **Contextual conversations**: Ask the LLM about the current selection, a review suggestion, a paragraph, or the full document.
+- **Controlled revisions**: Every edit is previewed and confirmed before it touches the manuscript. Nothing silently rewrites your work.
+- **A clear review lifecycle**: Accept, ignore, undo, and inspect stale suggestions that can no longer be located.
+- **Local-first storage**: Drafts and chat history stay in the current browser through IndexedDB.
+- **Built-in demo content**: The app opens with a sample manuscript, so the complete review workflow can be explored before connecting a model.
+
+![ScholarWeave home page](doc/image/homepage.png)
 
 ## Quick start
 
-Requirements: **Node.js 20.9 or newer**.
+Requirement: **Node.js 20.9 or newer**.
 
 ```bash
 npm install
@@ -38,56 +67,75 @@ cp .env.example .env.local
 Copy-Item .env.example .env.local
 ```
 
-Then fill in the provider settings in `.env.local`, or configure an OpenAI-compatible provider in **Settings → Model**. `.env.local` is ignored by Git and must never be committed or shared.
+Then fill in the model provider settings in `.env.local`, or configure an OpenAI-compatible provider under **Settings → Model**. `.env.local` is ignored by Git and must never be committed or shared.
 
-## Supported model configuration
+## Model configuration
 
-The server uses the OpenAI-compatible chat protocol. You can connect OpenAI, DeepSeek, OpenRouter, or another compatible provider by setting:
+ScholarWeave uses the OpenAI-compatible chat protocol and can connect to OpenAI, DeepSeek, OpenRouter, and other services that provide a compatible API. Model details can be supplied through the local environment file described above or through the web interface.
 
-```env
-LLM_PROVIDER=openai
-OPENAI_API_KEY=your-key
-OPENAI_BASE_URL=https://api.deepseek.com
-LLM_MODEL=deepseek-flash
-```
+### Configure through the web interface
 
-The exact variables and provider notes are documented in [.env.example](./.env.example).
+Open **Settings → Model** to create and switch between multiple model presets. Each preset can store its own API key, base URL, model name, reasoning effort, and proxy settings, making it easy to move between models or providers.
 
-## Local distribution
+Web presets are stored in the current browser's `localStorage`. They take effect immediately after being saved, are never written into project files, and cannot be committed through Git. Because API keys are stored as plaintext in the browser, this method should only be used on a trusted personal device.
 
-To create a self-contained `dist/` directory for local distribution:
+![Model configuration](doc/image/modelconfig.png)
 
-```bash
-npm run package:app -- --without-env
-```
+## Using ScholarWeave
 
-The `--without-env` flag keeps your local credentials out of the package. On Windows, double-click `dist/start.cmd`; on macOS or Linux, run `./dist/start.sh`. The target machine still needs Node.js 20.9+.
+### Choose a review mode and start reviewing
 
-Build the package on the same operating system where it will be used, because the production bundle includes platform-specific native dependencies.
+First choose one of the three review modes: **Corrections only**, **Moderate polishing**, or **In-depth review**. These modes control the range and degree of LLM intervention. You can limit the review to clear language errors, or ask it to examine clarity, structural coherence, and the overall suitability of the writing style for an academic paper. After you click **Start review**, ScholarWeave sends the review request to the configured LLM.
 
-## Privacy model
+![Start review](doc/image/startreview.png)
+
+### Review suggestions
+
+Review suggestions are grouped into three types:
+
+- **Document**: Examines overall structure, argumentative order, writing style, and terminology consistency. These suggestions usually offer directions for improvement rather than directly rewriting the manuscript.
+- **Paragraph**: Examines the role and internal organization of one paragraph and how it connects to the surrounding text, including whether it should be split, merged, or reordered.
+- **Local**: Anchors to a specific word or sentence and displays the source text, proposed replacement, and reasoning. Once confirmed, the edit can be accepted directly.
+
+Most review suggestions can be handled with **Accept** or **Ignore**. Clicking a suggestion quickly locates the corresponding paragraph or phrase in the manuscript.
+
+<video src="doc/image/selectandcheck.webm" controls muted></video>
+
+### Talk with the LLM
+
+When you want to discuss a specific passage, select it and ask the LLM a question. ScholarWeave sends both the selection and its containing paragraph as context.
+
+<video src="doc/image/LLM.webm" controls muted></video>
+
+### Turn a conversation result into a review suggestion
+
+The result of an LLM conversation can also be converted into a review suggestion and applied through the same controlled workflow.
+
+<video src="doc/image/interactiontoreview.webm" controls muted></video>
+
+## Privacy
 
 - Drafts and conversation history are stored in the current browser's IndexedDB.
 - Starting a review or sending a chat message sends the relevant document context to the model provider selected by the user.
-- Server-side credentials stay in environment variables. A key entered in the settings panel is stored locally in browser storage for personal use.
-- The project does not include a hosted service, account system, or telemetry layer.
+- Server-side credentials stay in environment variables. A key entered in the settings panel is stored locally in the browser and is suitable only for personal use.
+- The project does not provide a hosted service, account system, or telemetry.
 
-Do not use the current prototype for confidential manuscripts until you have reviewed the provider's data-retention policy and the local-storage security model.
+Do not use the current prototype for confidential manuscripts until you have reviewed the provider's data-retention policy and the security of local browser storage.
 
 ## Technology
 
 - Next.js 16, React 19, and TypeScript
-- Tiptap 3 for the manuscript editor
-- Zod for runtime protocol validation
-- Dexie / IndexedDB for local persistence
-- Tailwind CSS for the interface
-- Vitest and Playwright for automated tests
+- Tiptap 3 editor
+- Zod runtime protocol validation
+- Dexie / IndexedDB local persistence
+- Tailwind CSS interface styling
+- Vitest and Playwright automated tests
 
 ## Project status
 
-ScholarAnchor is an actively developed prototype. The core review, anchoring, chat, persistence, and local packaging flows are implemented, but APIs and visual details may continue to evolve.
+ScholarWeave is still an actively developed prototype. The core review, anchoring, chat, persistence, and local packaging flows are implemented, but APIs and interface details may continue to change.
 
-For implementation conventions, architecture notes, packaging details, and troubleshooting, see [DEVELOPMENTER.md](./DEVELOPMENTER.md). Product planning and milestone history live in [plan/PLAN.md](./plan/PLAN.md) and [plan/CHANGELOG.md](./plan/CHANGELOG.md).
+For implementation conventions, architecture notes, packaging details, and troubleshooting, see [DEVELOPMENTER.md](./DEVELOPMENTER.md). Product planning and milestone history are recorded in [plan/CHANGELOG.md](./plan/CHANGELOG.md).
 
 ## Contributing
 
@@ -96,7 +144,3 @@ Issues, design feedback, and focused pull requests are welcome. Please read [DEV
 ## License
 
 This project is released under the [MIT License](./LICENSE). Third-party dependencies, fonts, and sample content may have their own licenses and are not relicensed by this project.
-
----
-
-中文简介：ScholarAnchor 是一个面向学术论文的本地优先写作工作台，将选区锚定、AI 审阅、上下文对话和可控修改放在同一条工作流中。所有正文修改都需要先预览、再由用户确认。
