@@ -518,6 +518,59 @@ test.describe("上下文对话（mock /api/chat）", () => {
     ).toHaveCount(0);
   });
 
+  test("全文与局部节点使用同宽身份列并对齐时间轴", async ({ page }) => {
+    await mockChatRoute(page);
+    await gotoApp(page);
+    await loadSample(page);
+    await selectTextInEditor(page, "upstanding");
+    await sendChatMessage(page, "建立一个局部聊天节点");
+    await expect(page.getByText("这是纯解释回复（mock）")).toBeVisible();
+
+    await page.getByRole("button", { name: "聊天节点历史" }).click();
+    const timeline = page.getByRole("dialog", { name: "聊天节点历史" });
+    const documentIdentity = timeline.locator('[data-node-identity="document"]');
+    const localIdentity = timeline.locator('[data-node-identity="local"]');
+    await expect(documentIdentity).toBeVisible();
+    await expect(localIdentity).toBeVisible();
+    await expect(documentIdentity.locator("svg")).toHaveCount(0);
+
+    const identityWidths = await Promise.all([
+      documentIdentity.evaluate((element) => element.getBoundingClientRect().width),
+      localIdentity.evaluate((element) => element.getBoundingClientRect().width),
+    ]);
+    expect(Math.abs(identityWidths[0] - identityWidths[1])).toBeLessThan(0.5);
+
+    const documentTextCenter = await documentIdentity.evaluate((element) => {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      const rect = range.getBoundingClientRect();
+      return rect.left + rect.width / 2;
+    });
+    const localMarkerCenter = await localIdentity
+      .locator("[data-node-marker]")
+      .evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        return rect.left + rect.width / 2;
+      });
+    expect(Math.abs(documentTextCenter - localMarkerCenter)).toBeLessThan(0.5);
+
+    const rulerStarts = await timeline
+      .locator("[data-node-ruler]")
+      .evaluateAll((elements) =>
+        elements.map((element) => element.getBoundingClientRect().left),
+      );
+    expect(rulerStarts).toHaveLength(2);
+    expect(Math.abs(rulerStarts[0] - rulerStarts[1])).toBeLessThan(0.5);
+
+    const identityToRulerGap = await documentIdentity.evaluate((element) => {
+      const ruler = element.closest("li")?.querySelector("[data-node-ruler]");
+      if (!ruler) return Number.NaN;
+      return ruler.getBoundingClientRect().left - element.getBoundingClientRect().right;
+    });
+    expect(identityToRulerGap).toBeGreaterThanOrEqual(3.5);
+    expect(identityToRulerGap).toBeLessThanOrEqual(4.5);
+  });
+
   test("完整选中一个自然段时会自动附带全文，但仍以该段为讨论锚点", async ({ page }) => {
     let captured: ChatRequestCapture | null = null;
     await mockChatRoute(page, {

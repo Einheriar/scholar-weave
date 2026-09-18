@@ -296,7 +296,7 @@ function NodeRow({
   return (
     <li
       className={
-        "flex items-center gap-2 rounded-lg px-3 py-1.5 transition-all duration-200 " +
+        "flex items-center gap-1 rounded-lg px-3 py-1.5 transition-all duration-200 " +
         rowBg +
         " " +
         (lit || isActive ? rowHover : "") +
@@ -311,17 +311,12 @@ function NodeRow({
             type="button"
             onClick={onSelectDocument}
             aria-label="切换到全文节点"
+            data-node-identity="document"
             className={
-              "-my-1 inline-flex h-6 w-11 shrink-0 items-center justify-center gap-1 rounded-md text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-node-ring " +
-              (isActive
-                ? "bg-node text-white dark:text-neutral-950"
-                : "text-node hover:bg-node-soft")
+              "-my-1 inline-flex h-6 w-8 shrink-0 items-center justify-center rounded-md text-xs font-semibold text-node transition-colors hover:text-node-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-node-ring " +
+              (isActive ? "text-node-hover" : "")
             }
           >
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M4 2.5h5l3 3v8H4z" />
-              <path d="M9 2.5v3h3" />
-            </svg>
             全文
           </button>
         </Tooltip>
@@ -340,12 +335,14 @@ function NodeRow({
             disabled={anchorStale}
             onClick={() => onRevealAnchor(node.id)}
             aria-label={`定位到节点「${nodeTitle}」的正文锚点`}
+            data-node-identity="local"
             className={
-              "group -my-1 flex h-6 w-3 shrink-0 items-center justify-center rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-node-ring " +
+              "group -my-1 flex h-6 w-8 shrink-0 items-center justify-center rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-node-ring " +
               (anchorStale ? "cursor-default opacity-45" : "cursor-pointer")
             }
           >
             <span
+              data-node-marker
               className={
                 "h-4 w-[3px] rounded-full transition-all duration-150 " +
                 (isActive ? "bg-node-hover" : "bg-node") +
@@ -358,7 +355,7 @@ function NodeRow({
       )}
 
       {/* 尺子轨道：横向可滚，端点左对齐固定间距；scrollbar 隐藏，靠两端箭头卷动 */}
-      <div className="relative min-w-16 flex-1">
+      <div data-node-ruler className="relative min-w-16 flex-1">
         <div
           ref={rulerRef}
           onScroll={syncArrows}
