@@ -94,16 +94,18 @@ npm run test:e2e
 npm run package:app
 ```
 
-产物在 `dist/`（约 70 MB）：
+产物在 `dist/`（Windows x64 当前约 35 MB）：
 
 ```text
 dist/
 ├─ app/            Next.js 服务本体，自带依赖，只需要系统有 Node
-│  └─ .env.local   密钥配置（打包时从项目根目录复制）
+│  └─ .env.local.example   服务端默认配置模板（公开分发包不含真实密钥）
 ├─ start.mjs       跨平台启动器（起服务 + 打开浏览器）
 ├─ start.cmd       Windows 双击入口
 └─ start.sh        Linux/macOS 双击入口
 ```
+
+公开分发时使用 `npm run package:app -- --without-env`，避免把本机 `.env.local` 复制进产物。用户可以直接在网页的“设置 → 模型”中填写 API Key；只有需要服务端默认配置时，才需要根据模板创建 `dist/app/.env.local`。
 
 启动方式：
 
@@ -120,7 +122,7 @@ dist/
 | 提示“端口 3000 已被占用” | 已有服务在跑，或别的程序占了。换端口：Windows `set PORT=3200 && node start.mjs`，Linux/macOS `PORT=3200 node start.mjs`，然后访问 http://localhost:3200 |
 | Windows 双击后窗口一闪而过 | 多半是没装 Node 或没加进 PATH。脚本会检查并提示；若仍一闪而过，就在该目录开 PowerShell 执行 `node start.mjs` 看完整报错。 |
 | 提示“未能自动打开浏览器” | 只是自动打开失败，服务已跑起来，手动访问提示里的地址即可。 |
-| 界面能打开但审阅报错 | 检查 `dist/app/.env.local` 是否存在、密钥是否正确。 |
+| 界面能打开但审阅报错 | 检查网页“设置 → 模型”中的配置；若使用服务端默认配置，再检查 `dist/app/.env.local` 是否存在、密钥是否正确。 |
 
 改端口的另一种方式：直接编辑 `start.mjs` 里 `const port = Number(process.env.PORT || 3000)` 的默认值。
 

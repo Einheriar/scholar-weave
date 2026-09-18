@@ -53,8 +53,9 @@ const port = Number(process.env.PORT || 3000);
 const url = \`http://localhost:\${port}\`;
 
 if (!existsSync(join(appDir, ".env.local"))) {
-  console.warn(
-    "⚠ 未找到 app/.env.local，LLM 相关功能会失败。请照 .env.local.example 创建。",
+  console.log(
+    "ℹ 未找到 app/.env.local。你仍可在网页的“设置 → 模型”中配置 API Key；" +
+      "只有使用服务端默认配置时，才需要按照 .env.local.example 创建该文件。",
   );
 }
 
@@ -224,7 +225,7 @@ process.stdout.write(
     "  Windows      双击 dist\\start.cmd（或在该目录执行 node start.mjs）",
     "  Linux/macOS  ./dist/start.sh（或 node dist/start.mjs）",
     "",
-    "密钥配置：把 .env.local 放在 dist/app 目录下。",
+    "密钥配置：可在网页“设置 → 模型”中填写；如需服务端默认配置，可把 .env.local 放在 dist/app 目录下。",
     "",
   ].join("\n"),
 );
