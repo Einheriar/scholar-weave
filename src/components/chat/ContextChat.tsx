@@ -429,7 +429,7 @@ export function ContextChat({
                     "relative animate-item-in px-3 py-2 text-sm shadow-sm " +
                     (t.role === "user"
                       ? "ml-10 rounded-2xl rounded-br-sm bg-brand text-white dark:text-neutral-950"
-                      : "mr-10 rounded-2xl rounded-bl-sm bg-surface-muted text-foreground")
+                      : "mr-14 rounded-2xl rounded-bl-sm bg-surface-muted text-foreground")
                   }
                 >
                   <div className="break-words leading-relaxed">
@@ -515,18 +515,20 @@ export function ContextChat({
                     </div>
                   )}
                   {t.role === "assistant" && i === turns.length - 1 && (
-                    <span className="absolute -right-9 top-1/2 -translate-y-1/2">
+                    <span className="absolute -right-12 top-1/2 -translate-y-1/2">
                       <Tooltip label="重新生成回复" side="right">
                         <button
                           type="button"
                           aria-label="重新生成回复"
+                          aria-busy={busy}
                           disabled={busy || !activeNode}
                           onClick={() => {
                             if (activeNode) onRegenerate(activeNode.id, i);
                           }}
-                          className="rounded-md p-1.5 text-text-faint transition-colors hover:bg-surface hover:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring disabled:cursor-default disabled:opacity-40"
+                          className="t-regenerate-reply"
                         >
                           <svg
+                            className="t-regenerate-reply-icon"
                             width="16"
                             height="16"
                             viewBox="0 0 24 24"

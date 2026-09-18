@@ -528,6 +528,75 @@ body {
   transform: translateY(0) scale(0.97);
 }
 
+/* 重新生成回复：静止时只露出图标，保留宽松命中区；悬停／聚焦后才浮出
+   按钮层级、阴影和抬升反馈。生成期间让循环箭头持续转动。 */
+@keyframes regenerate-button-in {
+  from { opacity: 0; transform: translateX(-4px) scale(0.82); }
+  72%  { opacity: 1; transform: translateX(0) scale(1.04); }
+  to   { opacity: 1; transform: translateX(0) scale(1); }
+}
+@keyframes regenerate-icon-spin {
+  to { transform: rotate(360deg); }
+}
+.t-regenerate-reply {
+  display: inline-flex;
+  width: 2.25rem;
+  height: 2.25rem;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 0.75rem;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  animation: regenerate-button-in 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  transition:
+    transform 150ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 150ms ease-out,
+    border-color 150ms ease-out,
+    background-color 150ms ease-out,
+    color 150ms ease-out;
+  will-change: transform;
+}
+.t-regenerate-reply:hover:not(:disabled),
+.t-regenerate-reply:focus-visible:not(:disabled) {
+  transform: translateY(-2px) scale(1.03);
+  background: var(--surface);
+  color: var(--brand);
+  box-shadow:
+    0 8px 20px color-mix(in srgb, var(--foreground) 14%, transparent),
+    0 2px 5px color-mix(in srgb, var(--brand) 13%, transparent);
+}
+.t-regenerate-reply:focus-visible {
+  outline: 2px solid var(--brand-ring);
+  outline-offset: 2px;
+}
+.t-regenerate-reply:active:not(:disabled) {
+  transform: translateY(1px) scale(0.93);
+  box-shadow:
+    0 1px 2px color-mix(in srgb, var(--foreground) 10%, transparent),
+    inset 0 1px 2px color-mix(in srgb, var(--foreground) 10%, transparent);
+  transition-duration: 70ms;
+}
+.t-regenerate-reply-icon {
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.t-regenerate-reply:hover:not(:disabled) .t-regenerate-reply-icon,
+.t-regenerate-reply:focus-visible:not(:disabled) .t-regenerate-reply-icon {
+  transform: rotate(-32deg);
+}
+.t-regenerate-reply:active:not(:disabled) .t-regenerate-reply-icon {
+  transform: rotate(18deg) scale(0.88);
+}
+.t-regenerate-reply[aria-busy="true"] .t-regenerate-reply-icon {
+  animation: regenerate-icon-spin 720ms linear infinite;
+}
+.t-regenerate-reply:disabled {
+  cursor: default;
+  opacity: 0.45;
+  box-shadow: none;
+}
+
 /* 审阅卡「接受」过场：覆盖全卡的勾号（Transitions.dev Success check 方案）。
    wrapper 驱动 淡入 + 80°旋正 + 模糊消散 + 微下落回弹；SVG path 描边画出来。
    用法：data-state="in" 触发出现，data-state="out" 播散去淡出（淡出后再卸载）。
@@ -740,6 +809,12 @@ body {
   .t-connection-input { animation: none !important; transform: none !important; }
   .t-connection-error { transition: none !important; }
   .t-review-proposal-action {
+    animation: none !important;
+    transform: none !important;
+    transition: none !important;
+  }
+  .t-regenerate-reply,
+  .t-regenerate-reply-icon {
     animation: none !important;
     transform: none !important;
     transition: none !important;

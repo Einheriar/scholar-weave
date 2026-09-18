@@ -706,8 +706,22 @@ test.describe("上下文对话（mock /api/chat）", () => {
     await expect(page.getByText("第 1 版回复", { exact: true })).toBeVisible();
 
     const regenerate = page.getByRole("button", { name: "重新生成回复" });
+    await expect(regenerate).toHaveClass(/t-regenerate-reply/);
+    const assistantBubble = page.locator("[data-turn-index]").last();
+    const [bubbleBox, regenerateBox] = await Promise.all([
+      assistantBubble.boundingBox(),
+      regenerate.boundingBox(),
+    ]);
+    expect(bubbleBox).not.toBeNull();
+    expect(regenerateBox).not.toBeNull();
+    expect(regenerateBox!.x - (bubbleBox!.x + bubbleBox!.width)).toBeGreaterThanOrEqual(8);
     await regenerate.hover();
     await expect(page.getByRole("tooltip")).toHaveText("重新生成回复");
+    await expect
+      .poll(() =>
+        regenerate.evaluate((element) => getComputedStyle(element).boxShadow),
+      )
+      .not.toBe("none");
     await regenerate.click();
 
     await expect(page.getByText("第 2 版回复", { exact: true })).toBeVisible();
