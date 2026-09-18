@@ -1701,7 +1701,10 @@ export default function Home() {
   return (
     // w-full 不可省：body 是 flex 列容器，交叉轴上的 auto 边距会让本元素按
     // fit-content 定宽（由内容撑开），正文一短整页就跟着变窄。
-    <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-6 py-6 2xl:max-w-[1400px]">
+    // lg 双栏至少需要 750 + 24 + 360 = 1134px，xl 再加 240px 历史栏和
+    // 24px 间距后至少需要 1398px。父容器还包含左右各 24px padding，因此让
+    // main 自身同步扩到 1182 / 1446px；状态条、顶栏和下方栏位才会共享右边界。
+    <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-6 py-6 lg:min-w-[1182px] xl:min-w-[1446px] 2xl:max-w-[1446px]">
       {/* 顶栏 */}
       <header className="mb-5 flex flex-wrap items-center gap-3 xl:grid xl:min-w-[1398px] xl:grid-cols-[15rem_1.5rem_minmax(0,1fr)_auto_minmax(0,1fr)_1.5rem_360px] xl:gap-0">
         {/* 窄屏才出现的「三条横线」：拉出左侧历史记录抽屉（宽屏有常驻左栏） */}

@@ -59,6 +59,28 @@ test.describe("LLM 审阅（mock /api/review）", () => {
     const history = page.getByRole("complementary", { name: "历史记录" });
     await expect(history.getByRole("button", { name: "新文章" })).toBeDisabled();
 
+    // 审阅状态条与右侧建议栏应在 lg / xl 两种布局下共享同一条右边界。
+    const loadingStatus = page
+      .getByRole("status")
+      .filter({ hasText: "正在审阅文档" });
+    for (const width of [1180, 1600]) {
+      await page.setViewportSize({ width, height: 800 });
+      await expect
+        .poll(async () => {
+          const [statusBox, sidebarBox] = await Promise.all([
+            loadingStatus.boundingBox(),
+            page
+              .getByRole("complementary", { name: "审阅建议侧栏" })
+              .boundingBox(),
+          ]);
+          if (!statusBox || !sidebarBox) return Number.POSITIVE_INFINITY;
+          return Math.abs(
+            statusBox.x + statusBox.width - (sidebarBox.x + sidebarBox.width),
+          );
+        })
+        .toBeLessThanOrEqual(1);
+    }
+
     releaseRequest();
     await expect(page.getByText("锁定测试完成")).toBeVisible();
     await expect(page.getByLabel("文档标题")).toBeEnabled();
