@@ -785,15 +785,12 @@ export default function Home() {
   );
   /**
    * 全文节点可能尚未产生过消息，此时 activeNodeId 指向只存在于界面的虚拟入口。
-   * 默认“附带全文背景”且没有其它锚点时也视为进入全文节点。
+   * 只有显式进入真实或虚拟全文节点才锁定全文背景开关；局部选区消失后仍开启的
+   * “附带全文背景”只是本次请求选项，不能据此自动升级为全文节点。
    */
   const documentContextActive =
     activeNodeId === VIRTUAL_DOCUMENT_NODE_ID ||
-    activeNode?.anchor.type === "document" ||
-    (activeNodeId === null &&
-      !selection &&
-      !selectedId &&
-      includeFullDocument);
+    activeNode?.anchor.type === "document";
   const displayedChatNode = activeNode;
   const displayedChatTurns = chatTurns;
 

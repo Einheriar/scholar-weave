@@ -360,10 +360,33 @@ test.describe("上下文对话（mock /api/chat）", () => {
 
     await sendChatMessage(page, "现在结合全文继续解释");
     await expect.poll(() => captured.length).toBe(2);
-    expect(captured[1].context.type).toBe("range");
-    expect(captured[1].context.selectedText?.trim()).toBe("upstanding");
+    expect(captured[1].context).toMatchObject({
+      type: "range",
+      selectedText: expect.stringMatching(/^upstanding\s*$/),
+    });
     expect(captured[1].includeFullDocument).toBe(true);
     expect(captured[1].blocks).toHaveLength(paragraphs.length);
+  });
+
+  test("局部选区消失后仍可取消本次附带全文背景", async ({ page }) => {
+    await gotoApp(page);
+    await loadSample(page);
+    await selectTextInEditor(page, "upstanding");
+
+    const includeFull = page.getByRole("button", {
+      name: "包含全文",
+      exact: true,
+    });
+    await includeFull.click();
+    await expect(includeFull).toHaveAttribute("aria-pressed", "true");
+
+    // 单击正文的其它位置会收起人工选区，但不应把“本次附带全文”误判为全文节点。
+    await page.locator(".ProseMirror p").first().click({ position: { x: 8, y: 8 } });
+    await expect(includeFull).toBeEnabled();
+
+    await includeFull.click();
+    await expect(includeFull).toHaveAttribute("aria-pressed", "false");
+    await expect(includeFull).toBeEnabled();
   });
 
   test("节点历史始终提供可切换和清空的固定全文入口", async ({ page }) => {
