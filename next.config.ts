@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 import pkg from "./package.json";
 
 const nextConfig: NextConfig = {
-  // 版本号唯一来源是 package.json，构建时内联给前端（页脚展示 v0.1.0 形式）。
+  // 版本号唯一来源是 package.json，构建时内联给前端（页脚展示 vX.Y.Z 形式）。
   // 用 NEXT_PUBLIC_ 前缀是因为它要出现在浏览器端；版本号不是敏感信息。
   env: {
     NEXT_PUBLIC_APP_VERSION: `v${pkg.version}`,
