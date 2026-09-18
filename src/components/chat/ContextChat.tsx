@@ -25,8 +25,16 @@ export type ContextChatProps = {
   anchorStale: boolean;
   turns: ChatTurn[];
   busy: boolean;
-  /** 规则 11：无选区且无选中建议时禁止提问（发送按钮禁用，由 page 拦截并提示） */
+  /** 默认无选区且无建议时禁发；显式包含全文后由 page 解锁。 */
   sendDisabled: boolean;
+  /** 当前消息是否附带最新的完整文档上下文。 */
+  includeFullDocument: boolean;
+  /** 是否将“包含全文”作为默认偏好。 */
+  alwaysIncludeFullDocument: boolean;
+  /** 切换当前消息的完整文档上下文。 */
+  onToggleIncludeFullDocument: () => void;
+  /** 切换“总是包含全文”偏好。 */
+  onToggleAlwaysIncludeFullDocument: () => void;
   /** 最小化（规则 22）：收起为只有头部的窄条，方便阅读正文腾空间 */
   minimized: boolean;
   onToggleMinimize: () => void;
@@ -66,6 +74,10 @@ export function ContextChat({
   turns,
   busy,
   sendDisabled,
+  includeFullDocument,
+  alwaysIncludeFullDocument,
+  onToggleIncludeFullDocument,
+  onToggleAlwaysIncludeFullDocument,
   minimized,
   onToggleMinimize,
   onSend,
@@ -485,23 +497,79 @@ export function ContextChat({
               }}
               placeholder={
                 sendDisabled
-                  ? "先选中正文中的词/段落，或选中一条建议，再提问…"
+                  ? "先选中正文或一条建议，或开启“包含全文”后提问…"
                   : `针对${contextLabel}询问 LLM……（Enter 发送，Shift+Enter 换行）`
               }
               rows={2}
               className="flex-1 resize-none rounded-xl border border-border bg-transparent px-3 py-2 text-sm transition-colors focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand-ring"
               aria-label="对话输入框"
             />
-            <Tooltip label={sendDisabled ? "请先选中正文或一条建议" : undefined} side="top" align="end">
-              <button
-                type="button"
-                onClick={submit}
-                disabled={busy || !draft.trim() || sendDisabled}
-                className={buttonClass("primary", "md")}
+            <div className="flex shrink-0 flex-col items-stretch gap-1">
+              <div
+                className="inline-flex self-end rounded-lg border border-border-strong bg-surface shadow-sm"
+                role="group"
+                aria-label="聊天范围"
               >
-                发送
-              </button>
-            </Tooltip>
+                <Tooltip
+                  label={
+                    includeFullDocument
+                      ? "本次提问将包含最新版本的全文"
+                      : "本次提问仅使用当前选区或建议的上下文"
+                  }
+                  side="top"
+                  align="end"
+                >
+                  <button
+                    type="button"
+                    aria-pressed={includeFullDocument}
+                    aria-label="包含全文"
+                    onClick={onToggleIncludeFullDocument}
+                    className={
+                      "rounded-l-lg px-2 py-1 text-[11px] font-medium transition-colors focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring " +
+                      (includeFullDocument
+                        ? "bg-brand-soft text-brand"
+                        : "text-text-muted hover:bg-surface-muted hover:text-foreground")
+                    }
+                  >
+                    包含全文
+                  </button>
+                </Tooltip>
+                <Tooltip
+                  label={
+                    alwaysIncludeFullDocument
+                      ? "已设为默认包含全文"
+                      : "设为默认：以后提问自动包含全文"
+                  }
+                  side="top"
+                  align="end"
+                >
+                  <button
+                    type="button"
+                    aria-pressed={alwaysIncludeFullDocument}
+                    aria-label="总是包含全文"
+                    onClick={onToggleAlwaysIncludeFullDocument}
+                    className={
+                      "rounded-r-lg border-l border-border-strong px-2 py-1 text-[11px] font-medium transition-colors focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring " +
+                      (alwaysIncludeFullDocument
+                        ? "bg-brand-soft text-brand"
+                        : "text-text-muted hover:bg-surface-muted hover:text-foreground")
+                    }
+                  >
+                    总是
+                  </button>
+                </Tooltip>
+              </div>
+              <Tooltip label={sendDisabled ? "请先选中正文或一条建议，或开启“包含全文”" : undefined} side="top" align="end">
+                <button
+                  type="button"
+                  onClick={submit}
+                  disabled={busy || !draft.trim() || sendDisabled}
+                  className={buttonClass("primary", "md")}
+                >
+                  发送
+                </button>
+              </Tooltip>
+            </div>
           </div>
         </div>
       </div>

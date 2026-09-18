@@ -35,6 +35,20 @@ export function buildChatMessages(req: ChatRequest): ChatMessage[] {
   // 解释语言：固定中文，与文档语言无关（用户是中文母语）
   const explanationLanguage = "中文";
   const contextDesc = CONTEXT_LABEL[req.context.type];
+  const fullDocumentAuthorized =
+    req.includeFullDocument || req.context.type === "document";
+  const scopeRule = fullDocumentAuthorized
+    ? "本轮已发送的全部段落都属于可见且可修改范围。"
+    : req.context.type === "range" || req.context.type === "block"
+      ? req.context.blockId
+        ? `只能修改锚点段落 blockId=${req.context.blockId}；相邻段落仅供理解，不能修改。`
+        : "当前没有可安全确认的锚点段落，不要生成可执行修改。"
+      : req.context.type === "review" && req.context.blockId
+        ? `只能修改审阅建议所在的锚点段落 blockId=${req.context.blockId}；其他段落仅供理解，不能修改。`
+        : "只能修改本轮实际发送的段落；不要猜测或声称修改未发送的正文。";
+  const visibilityRule = fullDocumentAuthorized
+    ? "用户已开启“包含全文”或当前就是全文上下文；本轮 blocks 是发送时从最新正文快照提取的完整内容。"
+    : "当前只提供了选区及相邻段落；未发送的正文不可见，也不能据此推断全文。";
   const reviewPart =
     req.context.type === "review" && req.reviewItem
       ? `\n当前讨论的建议：标题「${req.reviewItem.title}」，说明「${req.reviewItem.explanation}」，类别 ${req.reviewItem.category}。`
@@ -54,6 +68,11 @@ export function buildChatMessages(req: ChatRequest): ChatMessage[] {
   const system = `你是一个文档写作助手，正在就一份${language}文档与用户对话。当前对话上下文是：${contextDesc}。${reviewPart}${selectedPart}${openReviewsPart}
 你的解释/回答用${explanationLanguage}撰写（无论文档是什么语言）；涉及替换正文时，replacement 用${language}（与对应段落原文一致）。
 
+【本轮文档范围】
+- ${visibilityRule}
+- ${scopeRule}
+- 只能引用本轮 <document> 中真实出现的 blockId 和原文。不要虚构未发送段落、字符坐标或“已经检查全文”的结论。
+
 ${SAFETY}
 
 【回复协议】严格输出一个 JSON 对象，三选一：
@@ -69,10 +88,14 @@ ${EDIT_ANCHOR}
 
 【行为准则】
 - 只有用户明确要求修改时才返回 answer_with_changes；解释、比较、回答问题时用 answer。
+- 当当前范围不是全文、而用户要求检查或修改整篇文档（例如“统一全文术语”“把全文中的 A 都替换为 B”）时，必须返回 answer，并使用以下意思清晰的说明，不要返回 answer_with_changes 或 answer_with_review：
+  “当前只提供了选区及相邻段落，我无法可靠检查或修改整篇文档。请开启“包含全文”后重新发送该要求。”
+- 当用户要求修改当前可修改范围内的内容时，才返回 answer_with_changes；includeFullDocument 只在用户明确授权全文时成立。
 - 当讨论已经收敛为一个值得进入审阅流程的具体方案、但用户尚未要求立刻修改时，返回 answer_with_review。只给一个候选意见；若仍在比较多个方案、结论不确定、只是解释概念或与正文修改无关，继续使用 answer。
 - reviewProposal 必须自包含：完整写入讨论中达成的方案和用户限制，不能写“按上面所说”“采用第二种方案”等脱离聊天记录就无法理解的表述。不要输出 id、scope、kind、status、replacement 或 documentRevision，这些字段由应用依据当前聊天锚点补齐。
 - 修改要最小、精准，尊重用户附加的限制（如保留术语、更保守）。
 - 拿不准时不要生成修改，用 answer 说明。
+- 示例：局部选区上下文中用户说“统一全文术语”时，返回 answer 并说明需要开启“包含全文”；开启“包含全文”后同样要求才返回覆盖本轮全部 blocks 的 answer_with_changes；局部选区中用户说“改顺这句话所在段落”时，只修改锚点段落。
 - answer 字段支持受限 markdown（段落、# 标题、- 列表、1. 有序列表、**加粗**、*斜体*、\`行内代码\`），可用于结构化说明；不要输出链接或图片。
 
 【重写意图】当用户说"推倒重来 / 重写 / 我有瓶颈"时，走 answer_with_changes，把 3 个版本放进 answer 字段（用 ## 标题分节）：

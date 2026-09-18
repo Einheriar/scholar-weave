@@ -71,6 +71,7 @@ type LlmRetryAction =
 
 /** 聊天区高度（拖拽把手可调）的持久化 key 与范围 */
 const CHAT_HEIGHT_KEY = "supergrammarly-chat-height";
+const CHAT_INCLUDE_FULL_ALWAYS_KEY = "supergrammarly-chat-include-full-always";
 const DEFAULT_CHAT_HEIGHT = 320;
 const MIN_CHAT_H = 180;
 const MAX_CHAT_H = 720;
@@ -107,6 +108,32 @@ export default function Home() {
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
   /** 聊天区最小化（规则 22：收起为只有头部的窄条） */
   const [chatMinimized, setChatMinimized] = useState(false);
+  /** 当前聊天请求是否附带全文；保持到用户手动关闭。 */
+  const [includeFullDocument, setIncludeFullDocument] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem(CHAT_INCLUDE_FULL_ALWAYS_KEY) === "true";
+  });
+  /** 浏览器级默认值：开启后刷新、切项目仍默认包含全文。 */
+  const [alwaysIncludeFullDocument, setAlwaysIncludeFullDocument] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem(CHAT_INCLUDE_FULL_ALWAYS_KEY) === "true";
+  });
+  const handleToggleIncludeFullDocument = useCallback(() => {
+    setIncludeFullDocument((current) => !current);
+  }, []);
+  const handleToggleAlwaysIncludeFullDocument = useCallback(() => {
+    const next = !alwaysIncludeFullDocument;
+    setAlwaysIncludeFullDocument(next);
+    try {
+      window.localStorage.setItem(
+        CHAT_INCLUDE_FULL_ALWAYS_KEY,
+        String(next),
+      );
+    } catch {
+      /* localStorage 不可用时只保留本次会话状态 */
+    }
+    if (next) setIncludeFullDocument(true);
+  }, [alwaysIncludeFullDocument]);
   /** 聊天区高度 px（顶部拖拽把手可调；持久化到 localStorage） */
   const [chatHeight, setChatHeight] = useState<number>(() => {
     if (typeof window === "undefined") return DEFAULT_CHAT_HEIGHT;
@@ -158,6 +185,10 @@ export default function Home() {
   const reviewRequestSeq = useRef(0);
   const chatRequestSeq = useRef(0);
   const changeSetRequestSeq = useRef(0);
+  /** 打开修改集前的聊天展开状态，关闭预览时按方案 B 恢复。 */
+  const changeSetChatWasMinimizedRef = useRef(false);
+  /** null 表示项目切换等关闭路径无需恢复；boolean 表示预览关闭后的目标状态。 */
+  const changeSetChatRestoreRef = useRef<boolean | null>(null);
   /**
    * 防抖保存从 ref 读最新状态（doc/reviews/nodes/activeProjId），
    * 避免 setTimeout 闭包读到批处理前的旧值导致节点/建议丢失。
@@ -215,6 +246,9 @@ export default function Home() {
   }, []);
 
   const handleDocChange = useCallback((next: DocumentState) => {
+    // 事件回调里同步推进最新正文，确保用户刚编辑完就发送时，聊天请求读取到
+    // 当前版本，而不是等待 effect 后才更新的旧快照。
+    latestRef.current.doc = next;
     setDoc(next);
     setSaveState("saving");
     // 文本变化后双向校验锚点：open 定位失败标过期；stale 若因撤销/改回
@@ -720,6 +754,27 @@ export default function Home() {
     () => nodes.find((n) => n.id === activeNodeId) ?? null,
     [nodes, activeNodeId],
   );
+  const documentNode = useMemo(
+    () => findNodeByAnchor(nodes, { type: "document" }) ?? null,
+    [nodes],
+  );
+  const showingExplicitDocument =
+    includeFullDocument && !selection && !selectedId;
+  const displayedChatNode = showingExplicitDocument ? documentNode : activeNode;
+  const displayedChatTurns = showingExplicitDocument
+    ? documentNode?.turns ?? []
+    : chatTurns;
+
+  /** 完整选中一个自然段时自动附带全文，但仍保留该段作为讨论锚点。 */
+  const fullParagraphSelected = useMemo(() => {
+    if (!doc || !selection || !selection.text.trim()) return false;
+    const block = doc.blocks.find((entry) => entry.id === selection.blockId);
+    return Boolean(
+      block && block.text.trim() && block.text.trim() === selection.text.trim(),
+    );
+  }, [doc, selection]);
+  const effectiveIncludeFullDocument =
+    includeFullDocument || fullParagraphSelected;
 
   // 上下文联动（2026-09-16 反馈修订）：点击侧栏/正文的另一条建议、或在正文里
   // 划出新选区时，聊天视图同步切到该上下文对应的节点——「看什么就聊什么」，
@@ -748,9 +803,7 @@ export default function Home() {
     // 两者皆空：不动——保持正在查看的节点（chatContext 回退链的 activeNode 一级）
   }, [selection, selectedId]);
 
-  // ── 上下文计算：选区 > 选中建议 > 正在查看的节点 > 全文 ──
-  // 规则 11：无选区禁止提问；但选区空了（如点侧栏建议后光标收起）不该直接掉回「全文」——
-  // 只要还在某个节点/某条建议的上下文里，就保持它。兜底 document 仅迁移/占位。
+  // ── 上下文计算：选区 > 选中建议 > 显式全文 > 正在查看的节点 > 全文 ──
   const chatContext: ChatContext = useMemo(() => {
     if (selection && selection.text.trim()) {
       return {
@@ -768,13 +821,15 @@ export default function Home() {
         return { type: "review", reviewId: item.id };
       }
     }
+    // 用户明确开启全文且没有局部锚点时，允许直接创建/续接全文节点。
+    if (includeFullDocument) return { type: "document" };
     // 无选区、无选中建议时，沿用正在查看的节点锚点（焦点不丢）
     if (activeNode) return activeNode.anchor;
     return { type: "document" };
-  }, [selection, selectedId, reviews, activeNode]);
+  }, [selection, selectedId, reviews, includeFullDocument, activeNode]);
 
-  /** 规则 11 拦截：无选区且无选中建议时禁止提问（想问全文请自行全选） */
-  const chatForbidden = !selection && !selectedId;
+  /** 默认仍要求局部锚点；显式包含全文时允许无选区直接创建全文节点。 */
+  const chatForbidden = !selection && !selectedId && !includeFullDocument;
 
   const contextReview = useMemo(
     () =>
@@ -786,26 +841,32 @@ export default function Home() {
 
   /** 按上下文打包要发送给模型的段落 */
   const packBlocks = useCallback(
-    (ctx: ChatContext): Array<{ id: string; text: string }> => {
-      if (!doc) return [];
-      const all = doc.blocks.map((b) => ({ id: b.id, text: b.text }));
-      if (ctx.type === "document") return all;
+    (
+      sourceDoc: DocumentState,
+      ctx: ChatContext,
+      includeFull: boolean,
+    ): Array<{ id: string; text: string }> => {
+      const all = sourceDoc.blocks.map((b) => ({ id: b.id, text: b.text }));
+      if (includeFull || ctx.type === "document") return all;
       const bid = ctx.blockId;
       if (!bid) return all;
-      const idx = doc.blocks.findIndex((b) => b.id === bid);
+      const idx = sourceDoc.blocks.findIndex((b) => b.id === bid);
       if (idx < 0) return all;
       // 段落/选区/建议：发送该段 + 相邻段作为上下文
       const from = Math.max(0, idx - 1);
-      const to = Math.min(doc.blocks.length, idx + 2);
-      return doc.blocks.slice(from, to).map((b) => ({ id: b.id, text: b.text }));
+      const to = Math.min(sourceDoc.blocks.length, idx + 2);
+      return sourceDoc.blocks
+        .slice(from, to)
+        .map((b) => ({ id: b.id, text: b.text }));
     },
-    [doc],
+    [],
   );
 
   // ── 对话（节点化：规则 7/8/10/11/24）──
   const sendChat = useCallback(
     async (message: string, retryNodeId?: string) => {
-      if (!doc) return;
+      const requestSnapshot = latestRef.current.doc;
+      if (!requestSnapshot) return;
       if (requestLocked) {
         announceRequestLock();
         return;
@@ -813,11 +874,13 @@ export default function Home() {
       const retryNode = retryNodeId
         ? latestRef.current.nodes.find((node) => node.id === retryNodeId)
         : undefined;
-      // 规则 11：无选区且无选中建议时禁止提问（想问全文请自行全选）
+      // 默认要求局部锚点；显式包含全文时允许无选区直接提问。
       if (!retryNode && chatForbidden) {
         setLlmRetry(null);
-        setChatError("请先选中正文中的词、段落，或选中一条审阅建议，再提问。");
-        setAnnounce("提问前请先选中正文或一条建议。");
+        setChatError(
+          "请先选中正文中的词、段落或一条审阅建议，或开启“包含全文”后再提问。",
+        );
+        setAnnounce("提问前请先选择上下文或开启包含全文。");
         return;
       }
       const ctx = retryNode?.anchor ?? chatContext;
@@ -827,8 +890,11 @@ export default function Home() {
       const existing = retryNode ?? findNodeByAnchor(latestRef.current.nodes, ctx);
       const nodeId = existing?.id ?? `node_${crypto.randomUUID()}`;
       // 节点锚点原文快照：range 取选区原文；review 锚取建议定位到的原文（range/block 级）
+      const currentReviews = latestRef.current.reviews;
       const anchorReview =
-        ctx.type === "review" ? reviews.find((r) => r.id === ctx.reviewId) : undefined;
+        ctx.type === "review"
+          ? currentReviews.find((r) => r.id === ctx.reviewId)
+          : undefined;
       const originalText =
         ctx.type === "range"
           ? (ctx.selectedText ?? "")
@@ -865,13 +931,26 @@ export default function Home() {
       setSaveState("saving");
 
       // 规则 24：节点边界即上下文边界。history 取本节点全部轮次（不含跨节点），
-      // blocks 用 packBlocks 取锚点段 ±1 段，建议只带锚点段的 open 建议。
+      // blocks 默认取锚点段 ±1 段；显式包含全文、完整选段或 document 节点取
+      // 发送瞬间的最新全文。建议仍只带锚点段的 open 建议。
       const historySource = retryNode
         ? targetNode.turns.slice(0, -1)
         : targetNode.turns;
       const history = historySource
         .map((t) => ({ role: t.role, content: t.content }));
-      const blocks = packBlocks(ctx);
+      const requestRangeBlock =
+        ctx.type === "range"
+          ? requestSnapshot.blocks.find((block) => block.id === ctx.blockId)
+          : undefined;
+      const requestSelectsFullParagraph = Boolean(
+        requestRangeBlock?.text.trim() &&
+          requestRangeBlock.text.trim() === ctx.selectedText?.trim(),
+      );
+      const includeFullForRequest =
+        includeFullDocument ||
+        requestSelectsFullParagraph ||
+        ctx.type === "document";
+      const blocks = packBlocks(requestSnapshot, ctx, includeFullForRequest);
       const anchorBlockId =
         ctx.type === "range" || ctx.type === "block"
           ? ctx.blockId
@@ -880,7 +959,7 @@ export default function Home() {
             : undefined;
       // 规则 24：「范围内未处理建议」= 仅锚点所在段落（blockId 相同）的 open 建议
       const openReviews = anchorBlockId
-        ? reviews.filter(
+        ? currentReviews.filter(
             (r) =>
               r.status === "open" &&
               (r.scope.type === "block" || r.scope.type === "range") &&
@@ -894,9 +973,9 @@ export default function Home() {
       chatAbortRef.current = controller;
       const requestId = ++chatRequestSeq.current;
       const requestDoc = {
-        id: doc.id,
-        revision: doc.revision,
-        checksum: doc.checksum,
+        id: requestSnapshot.id,
+        revision: requestSnapshot.revision,
+        checksum: requestSnapshot.checksum,
       };
       const prefs = settingsToRequestBody(settings);
 
@@ -906,10 +985,11 @@ export default function Home() {
           headers: { "Content-Type": "application/json" },
           signal: controller.signal,
           body: JSON.stringify({
-            documentId: doc.id,
-            revision: doc.revision,
-            checksum: doc.checksum,
+            documentId: requestSnapshot.id,
+            revision: requestSnapshot.revision,
+            checksum: requestSnapshot.checksum,
             context: ctx,
+            includeFullDocument: includeFullForRequest,
             message,
             history,
             blocks,
@@ -994,12 +1074,11 @@ export default function Home() {
       }
     },
     [
-      doc,
       chatContext,
       chatForbidden,
       nodes,
-      reviews,
       packBlocks,
+      includeFullDocument,
       settings,
       persistProjectNow,
       requestLocked,
@@ -1109,7 +1188,9 @@ export default function Home() {
         .map((node) => node.id),
     );
   }, [nodes, doc, reviews]);
-  const anchorStale = activeNode ? staleNodeIds.has(activeNode.id) : false;
+  const anchorStale = displayedChatNode
+    ? staleNodeIds.has(displayedChatNode.id)
+    : false;
 
   /** 规则 19：点时间线端点 → 切到该节点对话并滚动到对应轮次 */
   const handleJumpToTurn = useCallback(
@@ -1229,15 +1310,42 @@ export default function Home() {
     [nodes, doc, reviews],
   );
 
-  // 打开：挂上预览框（未挂载态）并播进入动画；收起：只关 open 播退出动画，
-  // 播完由 ChangeSetPreview 的 onClosed 卸载（延迟卸载，约定 8/15）。
-  // 所有关闭路径（接受/放弃/新建/切文章/回复到达新修改集）都走收起，不直接卸载。
-  const openChangeSet = useCallback((cs: ChangeSet) => {
-    setActiveChangeSet(cs);
-    setChangeSetMounted(true);
-    setChangeSetOpen(true);
+  // 打开预览时暂时收起 sticky 聊天区，避免 z-40 的聊天面板把修改集完全盖住。
+  // 关闭动画结束后恢复打开前的状态；项目切换等外部关闭路径不走恢复。
+  const openChangeSet = useCallback(
+    (cs: ChangeSet) => {
+      if (!changeSetOpen) {
+        changeSetChatWasMinimizedRef.current = chatMinimized;
+      }
+      changeSetChatRestoreRef.current = null;
+      setChatMinimized(true);
+      setActiveChangeSet(cs);
+      setChangeSetMounted(true);
+      setChangeSetOpen(true);
+      setAnnounce("已打开修改集预览，聊天区已临时收起。");
+    },
+    [changeSetOpen, chatMinimized],
+  );
+  const closeChangeSet = useCallback((restoreMinimized?: boolean) => {
+    changeSetChatRestoreRef.current =
+      restoreMinimized ?? changeSetChatWasMinimizedRef.current;
+    setChangeSetOpen(false);
   }, []);
-  const closeChangeSet = useCallback(() => setChangeSetOpen(false), []);
+  const handleChangeSetClosed = useCallback(() => {
+    setChangeSetMounted(false);
+    const restore = changeSetChatRestoreRef.current;
+    changeSetChatRestoreRef.current = null;
+    if (restore !== null) setChatMinimized(restore);
+  }, []);
+  const handleToggleChatMinimized = useCallback(() => {
+    if (changeSetOpen && chatMinimized) {
+      // 预览期间主动展开聊天 = 放弃本次预览并展开。修改集仍留在聊天轮次中。
+      closeChangeSet(false);
+      setAnnounce("已放弃修改集预览，正在展开聊天区。");
+      return;
+    }
+    setChatMinimized((current) => !current);
+  }, [changeSetOpen, chatMinimized, closeChangeSet]);
 
   // ── 按意见生成修改集（opinion → ChangeSet）──
   const applyOpinion = useCallback(
@@ -1285,7 +1393,11 @@ export default function Home() {
             blocks:
               item.scope.type === "document"
                 ? doc.blocks.map((b) => ({ id: b.id, text: b.text }))
-                : packBlocks({ type: "review", reviewId: id, blockId: scopeBlockId }),
+                : packBlocks(
+                    doc,
+                    { type: "review", reviewId: id, blockId: scopeBlockId },
+                    false,
+                  ),
             language: "en",
             llmConfig: prefs.llmConfig,
           }),
@@ -1702,7 +1814,7 @@ export default function Home() {
                 changeSet={activeChangeSet}
                 document={doc}
                 open={changeSetOpen}
-                onClosed={() => setChangeSetMounted(false)}
+                onClosed={handleChangeSetClosed}
                 onAccept={acceptChangeSet}
                 onDiscard={discardChangeSet}
               />
@@ -1742,13 +1854,19 @@ export default function Home() {
                 context={chatContext}
                 contextReview={contextReview}
                 nodes={nodes}
-                activeNode={activeNode}
+                activeNode={displayedChatNode}
                 anchorStale={anchorStale}
-                turns={chatTurns}
+                turns={displayedChatTurns}
                 busy={chatBusy}
                 sendDisabled={chatForbidden || requestLocked}
+                includeFullDocument={effectiveIncludeFullDocument}
+                alwaysIncludeFullDocument={alwaysIncludeFullDocument}
+                onToggleIncludeFullDocument={handleToggleIncludeFullDocument}
+                onToggleAlwaysIncludeFullDocument={
+                  handleToggleAlwaysIncludeFullDocument
+                }
                 minimized={chatMinimized}
-                onToggleMinimize={() => setChatMinimized((v) => !v)}
+                onToggleMinimize={handleToggleChatMinimized}
                 onSend={sendChat}
                 onPreviewChangeSet={openChangeSet}
                 onUseReviewProposal={handleUseReviewProposal}

@@ -53,7 +53,24 @@ export function ChangeSetPreview({
     panelRef.current
       ?.querySelector<HTMLElement>('input[type="checkbox"], button')
       ?.focus();
-    return () => previous?.focus?.();
+    const reducedMotion =
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    // 聊天区会在同一帧开始 250ms 收起。等它让出视口后再校正滚动，
+    // 避免浏览器只按几何布局判断“已可见”，却忽略 sticky 面板此前的覆盖。
+    const scrollTimer = window.setTimeout(
+      () => {
+        panelRef.current?.scrollIntoView?.({
+          behavior: reducedMotion ? "auto" : "smooth",
+          block: "nearest",
+        });
+      },
+      reducedMotion ? 0 : 260,
+    );
+    return () => {
+      window.clearTimeout(scrollTimer);
+      previous?.focus?.();
+    };
   }, []);
 
   // 关闭：下一帧把进入动画换成退出动画（延迟卸载，约定 8/15），播完由 onClosed 卸载；
@@ -108,7 +125,7 @@ export function ChangeSetPreview({
   return (
     <div
       ref={panelRef}
-      className="animate-item-in rounded-2xl border border-brand-ring bg-brand-soft/60 p-4 text-sm shadow-sm"
+      className="animate-item-in scroll-mb-16 rounded-2xl border border-brand-ring bg-brand-soft/60 p-4 text-sm shadow-sm"
       role="dialog"
       aria-labelledby="changeset-preview-title"
       onAnimationEnd={(e) => {

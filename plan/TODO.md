@@ -16,6 +16,15 @@
 
 ## 已完成
 
+- [x] **全文上下文控制与修改集可见转场**（2026-09-18）
+  - 聊天新增「包含全文｜总是」分段控件；默认仍要求选区／建议，全文模式允许创建 document
+    节点，「总是」持久化默认值，完整选段自动附带全文且保留 range 锚点。
+  - 每次发送从同一份最新正文快照计算 blocks、revision/checksum 与完整选段；提示词明确可见／
+    可修改边界，服务端再过滤局部上下文的越界 edits。
+  - 点击「预览修改」会暂时收起聊天并滚动保证修改集可见；接受、放弃、Escape 后恢复原状态，
+    手动展开聊天等同放弃，修改集入口仍可再次打开。候选审阅意见的两步式流程保持不变。
+  - 验证：Vitest 217 条、Playwright 44 条、typecheck、lint、production build 全部通过。
+
 - [x] **左侧对话历史（ChatGPT 式）**（2026-09-15）
   - 新增 `Conversation` / `ChatTurn` schema（`src/lib/review-schema.ts`）、纯函数模块
     `src/lib/chat-history.ts`（标题派生 / 排序 / upsert / 相对时间）。

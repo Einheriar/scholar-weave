@@ -141,6 +141,128 @@ describe("POST /api/chat", () => {
     expect(data.changeSet.edits[0].id).not.toBe("c1");
   });
 
+  it("局部上下文只保留锚点段落的 edit，即使模型返回相邻段落修改", async () => {
+    const payload = {
+      type: "answer_with_changes",
+      answer: "…",
+      changeSet: {
+        summary: "s",
+        edits: [
+          {
+            blockId: "p_a",
+            original: "共同的表明",
+            replacement: "共同表明",
+            explanation: "锚点段落内修改",
+          },
+          {
+            blockId: "p_b",
+            original: "Deception is a two-person interaction.",
+            replacement: "Deception involves two people.",
+            explanation: "相邻段落越界修改",
+          },
+        ],
+      },
+    };
+    vi.spyOn(providerMod, "getProviderFromEnv").mockReturnValue(
+      mockProvider(JSON.stringify(payload)),
+    );
+    const res = await POST(
+      makeReq(
+        validBody({
+          context: { type: "range", blockId: "p_a", selectedText: "共同的表明" },
+          includeFullDocument: false,
+        }),
+      ),
+    );
+    const data = await res.json();
+    expect(data.changeSet.edits).toHaveLength(1);
+    expect(data.changeSet.edits[0].blockId).toBe("p_a");
+  });
+
+  it("开启包含全文后允许修改本轮发送的全部 blocks", async () => {
+    const payload = {
+      type: "answer_with_changes",
+      answer: "…",
+      changeSet: {
+        summary: "s",
+        edits: [
+          {
+            blockId: "p_a",
+            original: "共同的表明",
+            replacement: "共同表明",
+            explanation: "第一段",
+          },
+          {
+            blockId: "p_b",
+            original: "Deception is a two-person interaction.",
+            replacement: "Deception involves two people.",
+            explanation: "全文范围内修改",
+          },
+        ],
+      },
+    };
+    vi.spyOn(providerMod, "getProviderFromEnv").mockReturnValue(
+      mockProvider(JSON.stringify(payload)),
+    );
+    const res = await POST(
+      makeReq(
+        validBody({
+          context: { type: "range", blockId: "p_a", selectedText: "共同的表明" },
+          includeFullDocument: true,
+        }),
+      ),
+    );
+    const data = await res.json();
+    expect(data.changeSet.edits).toHaveLength(2);
+    expect(data.changeSet.edits.map((e: { blockId: string }) => e.blockId)).toEqual([
+      "p_a",
+      "p_b",
+    ]);
+  });
+
+  it("带 blockId 的审阅上下文也只允许修改建议所在段落", async () => {
+    const payload = {
+      type: "answer_with_changes",
+      answer: "…",
+      changeSet: {
+        summary: "s",
+        edits: [
+          {
+            blockId: "p_a",
+            original: "共同的表明",
+            replacement: "共同表明",
+            explanation: "建议所在段落",
+          },
+          {
+            blockId: "p_b",
+            original: "Deception is a two-person interaction.",
+            replacement: "Deception involves two people.",
+            explanation: "越界",
+          },
+        ],
+      },
+    };
+    vi.spyOn(providerMod, "getProviderFromEnv").mockReturnValue(
+      mockProvider(JSON.stringify(payload)),
+    );
+    const res = await POST(
+      makeReq(
+        validBody({
+          context: { type: "review", reviewId: "r1", blockId: "p_a" },
+          reviewItem: {
+            id: "r1",
+            title: "删除多余助词",
+            explanation: "这里不需要“的”",
+            category: "grammar",
+          },
+        }),
+      ),
+    );
+    const data = await res.json();
+    expect(data.changeSet.edits).toHaveLength(1);
+    expect(data.changeSet.edits[0].blockId).toBe("p_a");
+  });
+
   it("忽略模型 edit ID，并透传 reasoningEffort", async () => {
     const payload = {
       type: "answer_with_changes",

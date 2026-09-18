@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   ChatRequestSchema,
   LLMChatResponseSchema,
+  type ChatRequest,
 } from "@/lib/llm/chat-llm-schema";
 import { buildChatMessages } from "@/lib/llm/chat-prompts";
 import { apiError, callLLMStructured } from "@/lib/llm/server-helpers";
@@ -26,6 +27,33 @@ export const runtime = "nodejs";
 const MAX_BLOCKS = 200;
 const MAX_TOTAL_CHARS = 60_000;
 const MAX_HISTORY = 12;
+
+/**
+ * Keep executable edits inside the range the user authorized for this turn.
+ * The model may see adjacent blocks for context, but that does not grant it
+ * permission to edit them. Full-document context explicitly grants all blocks
+ * sent in this request.
+ */
+function isEditInAuthorizedScope(
+  blockId: string,
+  context: ChatRequest["context"],
+  includeFullDocument: boolean,
+): boolean {
+  if (includeFullDocument || context.type === "document") return true;
+
+  if (context.type === "range" || context.type === "block") {
+    return Boolean(context.blockId && context.blockId === blockId);
+  }
+
+  // A review without a blockId represents a document-level review. A review
+  // with a blockId is constrained to its anchor block, just like a local
+  // range/block context.
+  if (context.type === "review" && context.blockId) {
+    return context.blockId === blockId;
+  }
+
+  return true;
+}
 
 export async function POST(request: Request) {
   let raw: unknown;
@@ -92,6 +120,9 @@ export async function POST(request: Request) {
     updatedAt: "",
   };
   const edits = llm.changeSet.edits
+    .filter((e) =>
+      isEditInAuthorizedScope(e.blockId, body.context, body.includeFullDocument),
+    )
     .map((e) => ({
       ...e,
       // 不信任 LLM 生成的标识，避免重复 ID 造成前端状态串联。

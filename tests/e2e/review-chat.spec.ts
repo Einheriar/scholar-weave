@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import {
+  type ChatRequestCapture,
   MOCK_REVIEW_SUMMARY,
   gotoApp,
   loadSample,
@@ -192,6 +193,108 @@ test.describe("LLM 审阅（mock /api/review）", () => {
 });
 
 test.describe("上下文对话（mock /api/chat）", () => {
+  test("无局部锚点时包含全文会解锁发送，并发送最新版本全文", async ({ page }) => {
+    let captured: ChatRequestCapture | null = null;
+    await mockChatRoute(page, {
+      onRequest: (body) => {
+        captured = body;
+      },
+    });
+    await gotoApp(page);
+    await loadSample(page);
+
+    const input = page.getByLabel("对话输入框");
+    const send = page.getByRole("button", { name: "发送", exact: true });
+    await input.fill("请从全文角度检查这篇文章");
+    await expect(send).toBeDisabled();
+
+    const includeFull = page.getByRole("button", { name: "包含全文", exact: true });
+    await includeFull.click();
+    await expect(includeFull).toHaveAttribute("aria-pressed", "true");
+    await expect(send).toBeEnabled();
+    await expect(page.locator('[aria-label="上下文对话"]')).toContainText(
+      "当前上下文：全文",
+    );
+
+    // 在真正发送前再修改正文，验证请求不是读取旧闭包里的文档快照。
+    const firstParagraph = page.locator(".ProseMirror p").first();
+    await firstParagraph.click();
+    await page.keyboard.press("End");
+    await page.keyboard.type(" LATEST_SNAPSHOT");
+    await input.press("Enter");
+
+    await expect(
+      page.getByText("这是纯解释回复（mock），不包含任何正文修改。"),
+    ).toBeVisible();
+    expect(captured).not.toBeNull();
+    expect(captured!.includeFullDocument).toBe(true);
+    expect(captured!.context).toEqual({ type: "document" });
+    expect(captured!.blocks).toHaveLength(await page.locator(".ProseMirror p").count());
+    expect(captured!.blocks[0].text).toContain("LATEST_SNAPSHOT");
+  });
+
+  test("总是包含全文会持久化为后续页面的默认值", async ({ page }) => {
+    await gotoApp(page);
+    await loadSample(page);
+
+    const always = page.getByRole("button", { name: "总是包含全文" });
+    await always.click();
+    await expect(always).toHaveAttribute("aria-pressed", "true");
+    await expect(
+      page.getByRole("button", { name: "包含全文", exact: true }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          window.localStorage.getItem("supergrammarly-chat-include-full-always"),
+        ),
+      )
+      .toBe("true");
+
+    await page.reload();
+    await expect(page.locator(".ProseMirror")).toBeVisible();
+    await expect(page.getByRole("button", { name: "总是包含全文" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await expect(
+      page.getByRole("button", { name: "包含全文", exact: true }),
+    ).toHaveAttribute("aria-pressed", "true");
+  });
+
+  test("完整选中一个自然段时会自动附带全文，但仍以该段为讨论锚点", async ({ page }) => {
+    let captured: ChatRequestCapture | null = null;
+    await mockChatRoute(page, {
+      onRequest: (body) => {
+        captured = body;
+      },
+    });
+    await gotoApp(page);
+    await loadSample(page);
+
+    const paragraphs = await paragraphTexts(page);
+    const target = page.locator(".ProseMirror p").nth(1);
+    await target.click({ clickCount: 3 });
+    await expect
+      .poll(() => page.evaluate(() => window.getSelection()?.toString().trim() ?? ""))
+      .toBe(paragraphs[1].trim());
+    await expect(
+      page.getByRole("button", { name: "包含全文", exact: true }),
+    ).toHaveAttribute("aria-pressed", "true");
+
+    await sendChatMessage(page, "结合全文检查这一段");
+    await expect(
+      page.getByText("这是纯解释回复（mock），不包含任何正文修改。"),
+    ).toBeVisible();
+    expect(captured).not.toBeNull();
+    expect(captured!.includeFullDocument).toBe(true);
+    expect(captured!.blocks).toHaveLength(paragraphs.length);
+    expect(captured!.context).toMatchObject({
+      type: "range",
+      selectedText: paragraphs[1],
+    });
+  });
+
   test("纯解释回复不改正文", async ({ page }) => {
     await mockChatRoute(page, { withChanges: false });
     await gotoApp(page);
@@ -328,17 +431,30 @@ test.describe("上下文对话（mock /api/chat）", () => {
       headerBorderBottomWidth: "1px",
     });
 
-    await page.mouse.move(
-      handleBox!.x + handleBox!.width / 2,
-      handleBox!.y + handleBox!.height / 2,
-    );
-    await page.mouse.down();
-    await page.mouse.move(
-      handleBox!.x + handleBox!.width / 2,
-      handleBox!.y + handleBox!.height / 2 - 96,
-      { steps: 8 },
-    );
-    await page.mouse.up();
+    const startY = handleBox!.y + handleBox!.height / 2;
+    // 系统 Chrome 在无头模式下偶尔不会把 page.mouse 的 move 合成为
+    // PointerEvent；直接派发同一组 pointer 事件，验证组件实际监听的协议。
+    await handle.dispatchEvent("pointerdown", {
+      bubbles: true,
+      clientY: startY,
+      pointerId: 1,
+    });
+    await page.evaluate((clientY) => {
+      window.dispatchEvent(
+        new PointerEvent("pointermove", {
+          bubbles: true,
+          clientY,
+          pointerId: 1,
+        }),
+      );
+      window.dispatchEvent(
+        new PointerEvent("pointerup", {
+          bubbles: true,
+          clientY,
+          pointerId: 1,
+        }),
+      );
+    }, startY - 96);
 
     await expect
       .poll(async () => (await messageList.boundingBox())?.height ?? 0)
@@ -448,14 +564,50 @@ test.describe("上下文对话（mock /api/chat）", () => {
 
     const dialog = page.getByRole("dialog", { name: "修改集预览" });
     await expect(dialog).toBeVisible();
+    await expect(page.getByRole("button", { name: "展开聊天区" })).toBeVisible();
+    await expect
+      .poll(async () => (await page.locator(".chat-body").boundingBox())?.height ?? -1)
+      .toBe(0);
+    await expect
+      .poll(async () => {
+        const previewBox = await dialog.boundingBox();
+        const chatBox = await page
+          .locator('[aria-label="上下文对话"]')
+          .boundingBox();
+        return Boolean(
+          previewBox && chatBox && previewBox.y + previewBox.height <= chatBox.y + 1,
+        );
+      })
+      .toBe(true);
     await expect(dialog.getByText("overlooking the interpersonal part")).toBeVisible();
     await expect(dialog.getByText("overlooking the interpersonal dimension")).toBeVisible();
     // 打开预览时焦点进入面板（无障碍：焦点管理）
     await expect(dialog.locator(":focus")).toHaveCount(1);
 
+    // 普通放弃与 Escape 都恢复打开预览前的展开状态，且可以再次打开。
+    await dialog.getByRole("button", { name: "放弃" }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "最小化聊天区" })).toBeVisible();
+    await previewButton.click();
+    await expect(dialog).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "最小化聊天区" })).toBeVisible();
+    await previewButton.click();
+    await expect(dialog).toBeVisible();
+
+    // 预览期间主动展开聊天等价于放弃，但回复中的修改集入口仍在，可再次打开。
+    await page.getByRole("button", { name: "展开聊天区" }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "最小化聊天区" })).toBeVisible();
+    await expect(previewButton).toBeVisible();
+    await previewButton.click();
+    await expect(dialog).toBeVisible();
+
     await dialog.getByRole("button", { name: /全部接受/ }).click();
 
     await expect(dialog).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "最小化聊天区" })).toBeVisible();
     await expect
       .poll(async () => (await paragraphTexts(page))[1])
       .toContain("overlooking the interpersonal dimension");

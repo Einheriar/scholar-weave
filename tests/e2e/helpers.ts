@@ -10,6 +10,14 @@ import { expect, type Page } from "@playwright/test";
 
 export type Block = { id: string; text: string };
 
+export type ChatRequestCapture = {
+  revision: number;
+  checksum: string;
+  context: unknown;
+  includeFullDocument?: boolean;
+  blocks: Block[];
+};
+
 /** 打开应用并等待编辑器挂载（Tiptap 是 immediatelyRender:false，需等待水合后渲染） */
 export async function gotoApp(page: Page) {
   await page.goto("/");
@@ -160,6 +168,7 @@ export async function mockChatRoute(
     withChanges?: boolean;
     withReviewProposal?: boolean;
     failFirst?: boolean;
+    onRequest?: (body: ChatRequestCapture) => void;
   } = {},
 ) {
   let attempts = 0;
@@ -175,10 +184,8 @@ export async function mockChatRoute(
       });
       return;
     }
-    const body = route.request().postDataJSON() as {
-      revision: number;
-      blocks: Block[];
-    };
+    const body = route.request().postDataJSON() as ChatRequestCapture;
+    opts.onRequest?.(body);
     if (opts.withReviewProposal) {
       await route.fulfill({
         status: 200,

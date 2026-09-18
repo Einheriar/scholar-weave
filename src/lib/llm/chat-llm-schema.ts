@@ -97,6 +97,8 @@ export const ChatRequestSchema = z.object({
   history: z.array(ChatMessageSchema).default([]),
   /** 必要文档片段：按上下文打包后的段落 */
   blocks: z.array(z.object({ id: z.string().min(1), text: z.string() })),
+  /** 是否由用户明确授权把整篇最新正文作为本轮上下文与可修改范围 */
+  includeFullDocument: z.boolean().default(false),
   /** 用户 LLM 配置（优先于服务端 env） */
   llmConfig: UserLLMConfigSchema,
   /** 上下文关联的建议（context.type === "review" 时） */
