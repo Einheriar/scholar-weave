@@ -601,7 +601,8 @@ body {
 /* 正文纸张右上角的撤销入口。
    默认态只露出一个小折角；可用时悬停或键盘聚焦会向纸面内展开，
    折角使用与主操作按钮一致的纯品牌色，不加描边、渐变或阴影；
-   无历史时仍可悬停展开，但改为低饱和灰绿色表达禁用。 */
+   无历史时仍可悬停展开，并保留浅品牌色与白色图标；
+   只有可撤销状态的悬停才会加深为纯品牌色。 */
 .editor-undo-corner {
   position: absolute;
   z-index: 10;
@@ -625,15 +626,6 @@ body {
 
 .editor-undo-corner-button:disabled {
   cursor: default;
-}
-
-.editor-undo-corner-button:disabled .editor-undo-fold {
-  color: color-mix(in srgb, var(--text-faint) 55%, var(--surface));
-  background-color: color-mix(
-    in srgb,
-    var(--brand) 14%,
-    var(--surface-muted)
-  );
 }
 
 .editor-undo-fold {

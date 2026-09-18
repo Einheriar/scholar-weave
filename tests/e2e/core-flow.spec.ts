@@ -324,9 +324,13 @@ test.describe("核心流程：接受、撤销与复制", () => {
     const before = await paragraphTexts(page);
     const editor = page.locator(".ProseMirror");
     const undo = page.getByRole("button", { name: "撤销正文编辑" });
+    const undoFold = undo.locator(".editor-undo-fold");
     await expect(undo).toBeDisabled();
     await undo.hover();
     await expect(page.getByRole("tooltip")).toHaveText("撤销 / Ctrl+Z");
+    await expect
+      .poll(() => undoFold.evaluate((element) => getComputedStyle(element).color))
+      .toBe("rgb(255, 255, 255)");
 
     await editor.press("Control+Home");
     await editor.type("x");
