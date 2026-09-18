@@ -44,7 +44,9 @@ ScholarWeave 以论文正文为工作中心：
 - **本地优先存储**：草稿和聊天历史通过 IndexedDB 保存在当前浏览器中。
 - **内置演示数据**：打开应用即可看到示例论文，无需先连接模型就能体验完整审阅流程。
 
-![ScholarWeave 首页](doc/image/homepage.png)
+<p align="center">
+  <img src="doc/image/homepage.png" alt="ScholarWeave 首页" width="900">
+</p>
 
 ## 快速开始
 
@@ -79,7 +81,9 @@ ScholarWeave 使用 OpenAI 兼容的聊天协议，可以连接 OpenAI、DeepSee
 
 网页预设保存在当前浏览器的 `localStorage` 中，保存后立即生效，不会写入项目文件，也不会被 Git 提交。由于 API Key 会以明文形式保存在浏览器本地，这种方式只适合在可信的个人设备上使用。
 
-![Model Config](doc/image/modelconfig.png)
+<p align="center">
+  <img src="doc/image/modelconfig.png" alt="模型配置" width="640">
+</p>
 
 ## 功能使用
 
@@ -87,7 +91,9 @@ ScholarWeave 使用 OpenAI 兼容的聊天协议，可以连接 OpenAI、DeepSee
 
 首先选择审阅模式，分为“仅纠错”，“适度润色”和“深度审阅”。ScholarWeave 提供不同层级的审阅模式，用于控制 LLM 关注的范围与介入程度。你可以只检查明确的语言错误，也可以进一步审视表达是否清晰、结构是否连贯，以及整体文风是否符合学术写作要求。点击开始审阅后，系统会交由LLM进行审阅。
 
-![Start Review](doc/image/startreview.png)
+<p align="center">
+  <img src="doc/image/startreview.png" alt="开始审阅" width="900">
+</p>
 
 ### 审阅意见
 
@@ -98,19 +104,25 @@ ScholarWeave 使用 OpenAI 兼容的聊天协议，可以连接 OpenAI、DeepSee
 
 大多的审阅意见可以直接在窗口选择“接受”或者“忽略”来进行处理，单击意见可以迅速定位意见涉及的具体段落或者语句。
 
-![审阅意见交互演示](doc/image/selectandcheck.webp)
+<p align="center">
+  <img src="doc/image/selectandcheck.webp" alt="查看审阅意见并接受修改" width="900">
+</p>
 
 ### 与LLM的交流
 
 如果有需要交流的地方，可以手动选取与LLM进行交流，系统会将整段内容与选区内容共同发送给LLM。
 
-![与 LLM 进行上下文对话](doc/image/LLM.webp)
+<p align="center">
+  <img src="doc/image/LLM.webp" alt="与 LLM 交流" width="640">
+</p>
 
 ### 交流结果转化为审阅意见
 
 与LLM之间的交流同样可以转化为审阅意见并一键执行。
 
-![将交流结果转化为审阅意见](doc/image/interactiontoreview.webp)
+<p align="center">
+  <img src="doc/image/interactiontoreview.webp" alt="将交流结果转化为审阅意见" width="900">
+</p>
 
 ## 隐私
 

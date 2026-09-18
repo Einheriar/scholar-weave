@@ -44,7 +44,9 @@ ScholarWeave keeps the manuscript at the center of the workflow:
 - **Local-first storage**: Drafts and chat history stay in the current browser through IndexedDB.
 - **Built-in demo content**: The app opens with a sample manuscript, so the complete review workflow can be explored before connecting a model.
 
-![ScholarWeave home page](doc/image/homepage.png)
+<p align="center">
+  <img src="doc/image/homepage.png" alt="ScholarWeave home page" width="900">
+</p>
 
 ## Quick start
 
@@ -79,7 +81,9 @@ Open **Settings → Model** to create and switch between multiple model presets.
 
 Web presets are stored in the current browser's `localStorage`. They take effect immediately after being saved, are never written into project files, and cannot be committed through Git. Because API keys are stored as plaintext in the browser, this method should only be used on a trusted personal device.
 
-![Model configuration](doc/image/modelconfig.png)
+<p align="center">
+  <img src="doc/image/modelconfig.png" alt="Model configuration" width="640">
+</p>
 
 ## Using ScholarWeave
 
@@ -87,7 +91,9 @@ Web presets are stored in the current browser's `localStorage`. They take effect
 
 First choose one of the three review modes: **Corrections only**, **Moderate polishing**, or **In-depth review**. These modes control the range and degree of LLM intervention. You can limit the review to clear language errors, or ask it to examine clarity, structural coherence, and the overall suitability of the writing style for an academic paper. After you click **Start review**, ScholarWeave sends the review request to the configured LLM.
 
-![Start review](doc/image/startreview.png)
+<p align="center">
+  <img src="doc/image/startreview.png" alt="Start review" width="900">
+</p>
 
 ### Review suggestions
 
@@ -99,19 +105,25 @@ Review suggestions are grouped into three types:
 
 Most review suggestions can be handled with **Accept** or **Ignore**. Clicking a suggestion quickly locates the corresponding paragraph or phrase in the manuscript.
 
-![Review suggestion workflow](doc/image/selectandcheck.webp)
+<p align="center">
+  <img src="doc/image/selectandcheck.webp" alt="Review suggestions and apply edits" width="900">
+</p>
 
 ### Talk with the LLM
 
 When you want to discuss a specific passage, select it and ask the LLM a question. ScholarWeave sends both the selection and its containing paragraph as context.
 
-![Contextual LLM conversation](doc/image/LLM.webp)
+<p align="center">
+  <img src="doc/image/LLM.webp" alt="Talk with the LLM" width="640">
+</p>
 
 ### Turn a conversation result into a review suggestion
 
 The result of an LLM conversation can also be converted into a review suggestion and applied through the same controlled workflow.
 
-![Turn a conversation result into a review suggestion](doc/image/interactiontoreview.webp)
+<p align="center">
+  <img src="doc/image/interactiontoreview.webp" alt="Turn a conversation result into a review suggestion" width="900">
+</p>
 
 ## Privacy
 
