@@ -43,6 +43,61 @@ function mockProvider(content: string): LLMProvider {
 beforeEach(() => vi.restoreAllMocks());
 
 describe("POST /api/chat", () => {
+  it.each([
+    ["answer_with_changes", false],
+    ["answer_with_changes", true],
+    ["answer_with_review", false],
+    ["answer_with_review", true],
+  ])("失效锚过滤 %s，包含全文=%s", async (type, includeFullDocument) => {
+    const payload = type === "answer_with_changes"
+      ? {
+          type,
+          answer: "这是历史讨论。",
+          changeSet: {
+            summary: "修改当前段落",
+            edits: [{
+              blockId: "p_a",
+              original: "共同的表明",
+              replacement: "共同表明",
+              explanation: "删除助词",
+            }],
+          },
+        }
+      : {
+          type,
+          answer: "这是历史讨论。",
+          reviewProposal: {
+            title: "删除助词",
+            explanation: "当前段落可以更简练。",
+            category: "grammar",
+            severity: "suggestion",
+          },
+        };
+    vi.spyOn(providerMod, "getProviderFromEnv").mockReturnValue(
+      mockProvider(JSON.stringify(payload)),
+    );
+    const res = await POST(makeReq(validBody({
+      context: { type: "range", blockId: "p_a", selectedText: "旧选区" },
+      anchorStale: true,
+      includeFullDocument,
+    })));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ type: "answer", answer: "这是历史讨论。" });
+  });
+
+  it("原段落已删除时允许只基于历史讨论", async () => {
+    vi.spyOn(providerMod, "getProviderFromEnv").mockReturnValue(
+      mockProvider(JSON.stringify({ type: "answer", answer: "可以解释旧片段。" })),
+    );
+    const res = await POST(makeReq(validBody({
+      context: { type: "range", blockId: "deleted", selectedText: "旧片段" },
+      anchorStale: true,
+      blocks: [],
+    })));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ type: "answer", answer: "可以解释旧片段。" });
+  });
+
   it("answer 形态：纯解释，不含修改集", async () => {
     vi.spyOn(providerMod, "getProviderFromEnv").mockReturnValue(
       mockProvider(JSON.stringify({ type: "answer", answer: "这是解释。" })),

@@ -274,6 +274,72 @@ test.describe("LLM 审阅（mock /api/review）", () => {
 });
 
 test.describe("上下文对话（mock /api/chat）", () => {
+  test("历史选区失效后仍可追问，但不能执行旧的或新返回的修改", async ({ page }) => {
+    const requests: Array<{
+      revision: number;
+      anchorStale: boolean;
+      includeFullDocument: boolean;
+      context: { blockId: string; selectedText: string };
+      blocks: Array<{ id: string; text: string }>;
+      history: Array<{ role: string; content: string }>;
+    }> = [];
+    await page.route("**/api/chat", async (route) => {
+      const body = route.request().postDataJSON();
+      requests.push(body);
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          type: "answer_with_changes",
+          answer: `历史讨论回复 ${requests.length}`,
+          changeSet: {
+            id: `history-cs-${requests.length}`,
+            documentRevision: body.revision,
+            summary: "修改用词",
+            edits: [{
+              id: `history-edit-${requests.length}`,
+              blockId: body.context.blockId,
+              original: "upstanding",
+              replacement: "honorable",
+              explanation: "替换措辞",
+              status: "pending",
+            }],
+          },
+        }),
+      });
+    });
+    await gotoApp(page);
+    await loadSample(page);
+    await selectTextInEditor(page, "upstanding");
+    await sendChatMessage(page, "解释原来的表达");
+    await expect(page.getByText("历史讨论回复 1", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: /预览修改/ })).toBeEnabled();
+
+    await page.getByRole("button", { name: /定位到当前上下文正文：选区/ }).click();
+    await expect(page.locator(".ProseMirror")).toBeFocused();
+    await page.keyboard.insertText("revised");
+    await expect(page.locator(".ProseMirror")).toContainText("revised");
+    await page.getByRole("button", { name: "聊天节点历史" }).click();
+    await page.getByRole("button", { name: /跳到节点.*第 1 次提问/ }).click();
+    await expect(page.locator("[data-chat-anchor-stale]")).toContainText("可以继续讨论");
+    await expect(page.getByRole("button", { name: /预览修改/ })).toBeDisabled();
+    const before = await paragraphTexts(page);
+    await sendChatMessage(page, "联系当前段落继续解释旧表达");
+    await expect(page.getByText("历史讨论回复 2", { exact: true })).toBeVisible();
+
+    expect(requests).toHaveLength(2);
+    expect(requests[1].anchorStale).toBe(true);
+    expect(requests[1].includeFullDocument).toBe(false);
+    expect(requests[1].context.selectedText.trim()).toBe("upstanding");
+    expect(requests[1].blocks.find((block) => block.id === requests[1].context.blockId)?.text).toContain("revised");
+    expect(requests[1].history).toEqual([
+      { role: "user", content: "解释原来的表达" },
+      { role: "assistant", content: "历史讨论回复 1" },
+    ]);
+    await expect(page.getByRole("button", { name: /预览修改/ })).toHaveCount(1);
+    expect(await paragraphTexts(page)).toEqual(before);
+  });
+
   test("标题栏空白区域可直接收起和展开聊天区", async ({ page }) => {
     await gotoApp(page);
     await loadSample(page);
@@ -466,7 +532,7 @@ test.describe("上下文对话（mock /api/chat）", () => {
     await expect(page.getByText("这是纯解释回复（mock）")).toBeVisible();
 
     await expect(
-      page.getByText("原文已变更，以下为存档讨论"),
+      page.locator("[data-chat-anchor-stale]"),
     ).toHaveCount(0);
     const reveal = page.getByRole("button", {
       name: /定位到当前上下文正文：选区「receiver」/,
@@ -493,7 +559,7 @@ test.describe("上下文对话（mock /api/chat）", () => {
     await page.keyboard.press("ArrowRight");
     await page.keyboard.type(" context");
     await expect(
-      page.getByText("原文已变更，以下为存档讨论"),
+      page.locator("[data-chat-anchor-stale]"),
     ).toHaveCount(0);
     await expect(page.getByRole("status").first()).toContainText("已保存到本地");
 
@@ -501,7 +567,7 @@ test.describe("上下文对话（mock /api/chat）", () => {
     await expect(page.locator(".ProseMirror")).toBeVisible();
     await expect(page.getByText("这是纯解释回复（mock）")).toBeVisible();
     await expect(
-      page.getByText("原文已变更，以下为存档讨论"),
+      page.locator("[data-chat-anchor-stale]"),
     ).toHaveCount(0);
     await expect(
       page.getByRole("button", {

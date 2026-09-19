@@ -1,4 +1,16 @@
 import type { DocumentState } from "@/lib/review-schema";
+import type { Node as PMNode } from "@tiptap/pm/model";
+
+/** Preserve hardBreak as one newline, matching paragraph offsets in DocumentState. */
+export function pmPlainText(
+  node: PMNode,
+  from = 0,
+  to = node.content.size,
+): string {
+  return node.textBetween(from, to, " ", (leaf) =>
+    leaf.type.name === "hardBreak" ? "\n" : "",
+  );
+}
 
 /**
  * DocumentState（按段落的稳定模型）与 Tiptap/ProseMirror 文档 JSON 之间的转换。

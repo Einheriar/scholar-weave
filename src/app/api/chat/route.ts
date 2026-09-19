@@ -90,7 +90,7 @@ export async function POST(request: Request) {
   if (!result.ok) return result.response;
   const llm = result.data;
 
-  if (llm.type === "answer") {
+  if (body.anchorStale || llm.type === "answer") {
     return NextResponse.json({ type: "answer", answer: llm.answer });
   }
 

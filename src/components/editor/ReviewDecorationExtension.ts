@@ -3,6 +3,7 @@ import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { ReviewItem } from "@/lib/review-schema";
 import { locateInText } from "@/lib/anchoring";
+import { pmPlainText } from "@/lib/tiptap-convert";
 
 /**
  * 把 ReviewItem 渲染为编辑器里的视觉标记（PLAN 10.4 / 6.2）。
@@ -63,7 +64,7 @@ function buildDecorations(
       // 块内偏移 → PM 位置：paragraph 内容从 blockStart+1 开始
       const node = doc.nodeAt(blockStart);
       if (!node) continue;
-      const text = node.textContent;
+      const text = pmPlainText(node);
       const hit = locateInText(
         text,
         item.scope.original,

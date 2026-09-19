@@ -10,6 +10,7 @@ import { docToTiptap } from "@/lib/tiptap-convert";
 import { buildSampleDocument, buildSampleReview } from "@/lib/sample-data";
 import { reviewDecorationKey } from "@/components/editor/ReviewDecorationExtension";
 import type { ReviewItem } from "@/lib/review-schema";
+import { createDocument } from "@/lib/revisions";
 
 function makeEditor(
   doc: ReturnType<typeof buildSampleDocument>["doc"],
@@ -52,6 +53,58 @@ function decoAttrs(editor: Editor) {
 }
 
 describe("ReviewDecorationExtension（阶段 2）", () => {
+  it.each([
+    { text: "alpha\nbeta", original: "alpha", prefix: undefined, start: 0 },
+    { text: "lead\n\nbeta tail", original: "beta", prefix: undefined, start: 6 },
+    { text: "lead\nalpha\n\nbeta tail", original: "alpha\n\nbeta", prefix: undefined, start: 5 },
+    { text: "same\nsame", original: "same", prefix: "\n", start: 5 },
+  ])("段内换行保留审阅标记位置：$text / $original", ({ text, original, prefix, start }) => {
+    const doc = createDocument("test", [text]);
+    const item: ReviewItem = {
+      id: "newline-review",
+      documentRevision: doc.revision,
+      scope: { type: "range", blockId: doc.blocks[0].id, original, prefix },
+      kind: "opinion",
+      category: "clarity",
+      severity: "suggestion",
+      title: "Clarify this passage",
+      explanation: "Explain the connection.",
+      status: "open",
+    };
+    const editor = makeEditor(doc, () => ({ items: [item] }));
+    try {
+      const decorations = reviewDecorationKey.getState(editor.state)!.find();
+      expect(decorations).toHaveLength(1);
+      expect(decorations[0].from).toBe(start + 1);
+      expect(decorations[0].to).toBe(start + 1 + original.length);
+      expect(editor.state.doc.textBetween(decorations[0].from, decorations[0].to, " ", "\n"))
+        .toBe(original);
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("不把换行两侧的文字拼接成不存在的原文", () => {
+    const doc = createDocument("test", ["alpha\nbeta"]);
+    const item: ReviewItem = {
+      id: "invalid-newline-review",
+      documentRevision: doc.revision,
+      scope: { type: "range", blockId: doc.blocks[0].id, original: "alphabeta" },
+      kind: "opinion",
+      category: "clarity",
+      severity: "suggestion",
+      title: "Clarify this passage",
+      explanation: "Explain the connection.",
+      status: "open",
+    };
+    const editor = makeEditor(doc, () => ({ items: [item] }));
+    try {
+      expect(reviewDecorationKey.getState(editor.state)!.find()).toEqual([]);
+    } finally {
+      editor.destroy();
+    }
+  });
+
   it("为 open 的 range 建议渲染 inline 下划线，为 block 建议渲染 node 标记", () => {
     const { doc } = buildSampleDocument();
     const items = buildSampleReview(doc);

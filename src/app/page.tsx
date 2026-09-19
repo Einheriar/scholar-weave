@@ -102,6 +102,15 @@ export default function Home() {
   const [reviews, setReviews] = useState<ReviewItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
+  const saveVersionRef = useRef(0);
+  const pendingProjectSavesRef = useRef(new Map<string, Set<Promise<void>>>());
+  const deletingProjectIdRef = useRef<string | null>(null);
+  const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
+  const markProjectDirty = useCallback(() => {
+    // Invalidate pending save completions before React commits the next state.
+    saveVersionRef.current += 1;
+    setSaveState("saving");
+  }, []);
   const [mode, setMode] = useState<ReviewMode>("proofread");
   const [reviewUi, setReviewUi] = useState<ReviewUiState>({ phase: "idle" });
 
@@ -260,7 +269,8 @@ export default function Home() {
    * 让已经付费生成的结果失去归属；请求 token 与文档快照校验仍作为异常路径的兜底。
    */
   const requestLocked =
-    reviewUi.phase === "loading" || chatBusy || applyingOpinionId !== null;
+    reviewUi.phase === "loading" || chatBusy || applyingOpinionId !== null ||
+    deletingProjectId !== null;
 
   const announceRequestLock = useCallback(() => {
     setAnnounce("请求处理中，请等待完成后再修改或切换文章。");
@@ -296,7 +306,7 @@ export default function Home() {
     // 当前版本，而不是等待 effect 后才更新的旧快照。
     latestRef.current.doc = next;
     setDoc(next);
-    setSaveState("saving");
+    markProjectDirty();
     // 文本变化后双向校验锚点：open 定位失败标过期；stale 若因撤销/改回
     // 重新可定位则恢复 open。只碰 open/stale 这一对——用户手动忽略的
     // rejected 不参与，不会被误恢复（PLAN 10.3/10.4）
@@ -311,7 +321,7 @@ export default function Home() {
         return r;
       }),
     );
-  }, []);
+  }, [markProjectDirty]);
 
   // 立即把当前项目整体落库（正文 + 建议 + 节点）。默认从 latestRef 读最新状态，
   // 避免 setTimeout 闭包读到批处理前的旧值。首次保存才建档分配 id（规则 1）。
@@ -322,6 +332,8 @@ export default function Home() {
       latestRef.current;
     const nodesToSave = nodesOverride ?? curNodes;
     if (!curDoc) return;
+    if (curId !== null && deletingProjectIdRef.current === curId) return;
+    const saveVersion = ++saveVersionRef.current;
     const now = new Date().toISOString();
     const id = curId ?? newProjectId();
     // Single title source: when doc.title is empty, derive a local title from
@@ -344,6 +356,7 @@ export default function Home() {
       lastActivityAt: now,
     };
     if (curId === null) {
+      latestRef.current.activeProjId = id;
       setActiveProjId(id);
     }
     // 走到这里就是一次「活动」（编辑正文 / 审阅出结果 / 聊天回复），把该项目置顶。
@@ -356,8 +369,24 @@ export default function Home() {
     projectsRef.current = nextList;
     activeProjRef.current = toSave;
     setProjects(nextList);
-    await saveProject(toSave);
-    setSaveState("saved");
+    const write = saveProject(toSave);
+    const pending = pendingProjectSavesRef.current.get(id) ?? new Set<Promise<void>>();
+    pending.add(write);
+    pendingProjectSavesRef.current.set(id, pending);
+    try {
+      await write;
+    } finally {
+      pending.delete(write);
+      if (pending.size === 0) pendingProjectSavesRef.current.delete(id);
+    }
+    // An older write must not cancel a newer edit's debounce or another
+    // project's pending save, even when writes complete out of order.
+    if (
+      saveVersionRef.current === saveVersion &&
+      latestRef.current.activeProjId === id
+    ) {
+      setSaveState("saved");
+    }
   }, []);
 
   // 防抖保存项目：编辑触发 saving 后延迟落库；聊天回复到达会立即落库（见 sendChat）。
@@ -377,8 +406,13 @@ export default function Home() {
         announceRequestLock();
         return;
       }
+      if (id === latestRef.current.activeProjId) {
+        setHistoryOpen(false);
+        return;
+      }
       const proj = projects.find((p) => p.id === id);
       if (!proj) return;
+      saveVersionRef.current += 1;
       // 切换前把当前项目立即落库（防抖保存可能还没跑，避免旧文章丢失）。
       // 同样读 latestRef 拿最新现场、且**不刷新 lastActivityAt**——离开一篇不是编辑它，
       // 刷成 now 会让被离开的那篇在列表里跳到顶部（点开 B 结果 A 上去了）。
@@ -404,6 +438,12 @@ export default function Home() {
         void saveProject(persisted);
       }
       activeProjRef.current = proj;
+      latestRef.current = {
+        doc: proj.doc,
+        reviews: proj.reviews,
+        nodes: proj.nodes,
+        activeProjId: id,
+      };
       setActiveProjId(id);
       setDoc(proj.doc);
       setReviews(proj.reviews);
@@ -495,9 +535,9 @@ export default function Home() {
     setChatError(null);
     setChangeSetOpen(false);
     if (!opts?.keepHistoryOpen) setHistoryOpen(false);
-    setSaveState("saving");
+    markProjectDirty();
     setAnnounce("已开始新文章。");
-  }, [requestLocked, announceRequestLock]);
+  }, [requestLocked, announceRequestLock, markProjectDirty]);
 
   /** 手动拖动 / 键盘移动后的新顺序：密集重编号、立即落库（显式操作，允许全表写回） */
   const handleReorderProjects = useCallback((orderedIds: string[], message?: string) => {
@@ -514,7 +554,7 @@ export default function Home() {
 
   const handleDeleteProject = useCallback(
     async (id: string) => {
-      if (requestLocked) {
+      if (requestLocked || deletingProjectIdRef.current !== null) {
         announceRequestLock();
         return;
       }
@@ -525,23 +565,56 @@ export default function Home() {
       ) {
         return;
       }
-      await deleteStoredProject(id);
-      // 删除后其余项目**相对顺序不变**，只把 order 压回 0..n-1（避免遗留空洞）
-      const rest = projectsRef.current.filter((p) => p.id !== id);
-      const densified = reorderProjects(rest, rest.map((p) => p.id));
-      projectsRef.current = densified;
-      setProjects(densified);
-      if (activeProjId === id) {
-        activeProjRef.current = null;
-        setActiveProjId(null);
-        setReviews([]);
-        setNodes([]);
-        setActiveNodeId(null);
-        setChatTurns([]);
+      const deletingCurrent = latestRef.current.activeProjId === id;
+      const wasSaving = saveState === "saving";
+      deletingProjectIdRef.current = id;
+      setDeletingProjectId(id);
+      if (deletingCurrent) {
+        // Cancel the debounce and invalidate saves that are already running.
+        saveVersionRef.current += 1;
+        setSaveState("idle");
       }
-      setAnnounce("已删除文章。");
+      try {
+        // Delete only after existing writes have settled, so none can recreate
+        // the record. The synchronous deletion guard prevents new autosaves.
+        await Promise.allSettled([...(pendingProjectSavesRef.current.get(id) ?? [])]);
+        await deleteStoredProject(id);
+        const rest = projectsRef.current.filter((p) => p.id !== id);
+        const densified = reorderProjects(rest, rest.map((p) => p.id));
+        projectsRef.current = densified;
+        setProjects(densified);
+        if (latestRef.current.activeProjId === id) {
+          const blankDoc = createDocument("", [""]);
+          latestRef.current = { doc: blankDoc, reviews: [], nodes: [], activeProjId: null };
+          activeProjRef.current = null;
+          activeNodeIdRef.current = null;
+          setActiveProjId(null);
+          setDoc(blankDoc);
+          setReviews([]);
+          setNodes([]);
+          setActiveNodeId(null);
+          setChatTurns([]);
+          setSelection(null);
+          setSelectedId(null);
+          setLlmRetry(null);
+          setChatError(null);
+          setChangeSetOpen(false);
+          setReviewUi({ phase: "idle" });
+          setSaveState("idle");
+        }
+        setAnnounce("已删除文章。");
+      } catch {
+        // Preserve the live draft and resume any interrupted save on failure.
+        if (deletingCurrent && wasSaving) markProjectDirty();
+        setLlmRetry(null);
+        setChatError("删除文章失败，内容已保留，请重试。");
+        setAnnounce("删除文章失败，内容已保留。");
+      } finally {
+        deletingProjectIdRef.current = null;
+        setDeletingProjectId(null);
+      }
     },
-    [projects, activeProjId, requestLocked, announceRequestLock],
+    [projects, saveState, requestLocked, announceRequestLock, markProjectDirty],
   );
 
   // ── 审阅 ──
@@ -601,7 +674,7 @@ export default function Home() {
       latestRef.current.reviews = nextReviews;
       setReviews(nextReviews);
       setReviewUi({ phase: "done", summary: data.documentSummary ?? "" });
-      setSaveState("saving");
+      markProjectDirty();
       setAnnounce(`审阅完成，共 ${nextReviews.length} 条建议。`);
     } catch (e) {
       if (reviewRequestSeq.current !== requestId) return;
@@ -616,7 +689,7 @@ export default function Home() {
     } finally {
       if (reviewRequestSeq.current === requestId) abortRef.current = null;
     }
-  }, [doc, mode, settings, requestLocked, announceRequestLock]);
+  }, [doc, mode, settings, requestLocked, announceRequestLock, markProjectDirty]);
 
   const cancelReview = useCallback(() => {
     reviewRequestSeq.current += 1;
@@ -729,7 +802,7 @@ export default function Home() {
               r.id === id ? { ...r, status: "accepted" as const } : r,
             ),
           );
-          setSaveState("saving");
+          markProjectDirty();
           return true;
         }
         return false;
@@ -754,10 +827,10 @@ export default function Home() {
             : r,
         ),
       );
-      setSaveState("saving");
+      markProjectDirty();
       return true;
     },
-    [doc, reviews, requestLocked, announceRequestLock],
+    [doc, reviews, requestLocked, announceRequestLock, markProjectDirty],
   );
 
   const handleReject = useCallback((id: string) => {
@@ -772,8 +845,8 @@ export default function Home() {
           : r,
       ),
     );
-    setSaveState("saving");
-  }, [requestLocked, announceRequestLock]);
+    markProjectDirty();
+  }, [requestLocked, announceRequestLock, markProjectDirty]);
 
   const handleRevert = useCallback((id: string) => {
     if (requestLocked) {
@@ -831,8 +904,8 @@ export default function Home() {
           : r,
       ),
     );
-    setSaveState("saving");
-  }, [reviews, requestLocked, announceRequestLock]);
+    markProjectDirty();
+  }, [reviews, requestLocked, announceRequestLock, markProjectDirty]);
 
   const handleEditorReviewUndo = useCallback((id: string) => {
     setReviews((rs) =>
@@ -842,9 +915,9 @@ export default function Home() {
           : r,
       ),
     );
-    setSaveState("saving");
+    markProjectDirty();
     setAnnounce("已撤销接受的审阅修改。");
-  }, []);
+  }, [markProjectDirty]);
 
   const handleEditorReviewUndoUnavailable = useCallback(() => {
     setLlmRetry(null);
@@ -936,6 +1009,7 @@ export default function Home() {
   const chatForbidden =
     !selection &&
     !selectedId &&
+    !activeNode &&
     !includeFullDocument &&
     !documentContextActive;
 
@@ -957,9 +1031,9 @@ export default function Home() {
       const all = sourceDoc.blocks.map((b) => ({ id: b.id, text: b.text }));
       if (includeFull || ctx.type === "document") return all;
       const bid = ctx.blockId;
-      if (!bid) return all;
+      if (!bid) return [];
       const idx = sourceDoc.blocks.findIndex((b) => b.id === bid);
-      if (idx < 0) return all;
+      if (idx < 0) return [];
       // 段落/选区/建议：发送该段 + 相邻段作为上下文
       const from = Math.max(0, idx - 1);
       const to = Math.min(sourceDoc.blocks.length, idx + 2);
@@ -995,18 +1069,21 @@ export default function Home() {
         setAnnounce("提问前请先选择上下文或开启附带全文背景。");
         return;
       }
-      const ctx = retryNode?.anchor ?? chatContext;
+      const nodeContext = retryNode?.anchor ?? chatContext;
+      const currentReviews = latestRef.current.reviews;
+      const anchorReview =
+        nodeContext.type === "review"
+          ? currentReviews.find((r) => r.id === nodeContext.reviewId)
+          : undefined;
+      const ctx: ChatContext = anchorReview && anchorReview.scope.type !== "document"
+        ? { ...nodeContext, blockId: anchorReview.scope.blockId }
+        : nodeContext;
       // 规则 8/10：当前上下文 = 有新选区跟新选区，没选区跟正在查看的节点。
       // 发送那一刻才按身份找/建节点（规则 7）。从 latestRef 读最新节点，
       // 避免闭包里的 nodes 是旧快照导致新建节点冲掉已有节点。
       const existing = retryNode ?? findNodeByAnchor(latestRef.current.nodes, ctx);
       const nodeId = existing?.id ?? `node_${crypto.randomUUID()}`;
       // 节点锚点原文快照：range 取选区原文；review 锚取建议定位到的原文（range/block 级）
-      const currentReviews = latestRef.current.reviews;
-      const anchorReview =
-        ctx.type === "review"
-          ? currentReviews.find((r) => r.id === ctx.reviewId)
-          : undefined;
       const originalText =
         ctx.type === "range"
           ? (ctx.selectedText ?? "")
@@ -1033,6 +1110,12 @@ export default function Home() {
             createdAt: new Date().toISOString(),
             turns: [],
           };
+      const requestAnchorStale =
+        getChatNodeAnchorIssue(targetNode, requestSnapshot, currentReviews) !== null;
+      // Retain the historical quote even if its source review was replaced.
+      const requestContext = requestAnchorStale && !ctx.selectedText && targetNode.originalText
+        ? { ...ctx, selectedText: targetNode.originalText }
+        : ctx;
       // 手动重试复用失败请求已经写入的最后一条 user turn；重新生成则保留整条
       // 现有对话，等新结果成功后原位替换目标 assistant turn。两者都不能重复提问。
       const nodeWithUser: ChatNode = retryNode
@@ -1055,7 +1138,7 @@ export default function Home() {
       setLlmRetry(null);
       setChatError(null);
       // 触发项目落库（建档时机：发消息即保存，id 在防抖保存里分配）
-      setSaveState("saving");
+      markProjectDirty();
 
       // 规则 24：节点边界即上下文边界。history 取本节点全部轮次（不含跨节点），
       // blocks 默认取锚点段 ±1 段；显式附带全文、完整选段或 document 节点取
@@ -1080,7 +1163,11 @@ export default function Home() {
         includeFullDocument ||
         requestSelectsFullParagraph ||
         ctx.type === "document";
-      const blocks = packBlocks(requestSnapshot, ctx, includeFullForRequest);
+      const blocks = packBlocks(
+        requestSnapshot,
+        ctx,
+        includeFullForRequest || anchorReview?.scope.type === "document",
+      );
       const anchorBlockId =
         ctx.type === "range" || ctx.type === "block"
           ? ctx.blockId
@@ -1118,7 +1205,8 @@ export default function Home() {
             documentId: requestSnapshot.id,
             revision: requestSnapshot.revision,
             checksum: requestSnapshot.checksum,
-            context: ctx,
+            context: requestContext,
+            anchorStale: requestAnchorStale,
             includeFullDocument: includeFullForRequest,
             message,
             history,
@@ -1156,7 +1244,9 @@ export default function Home() {
           throw new Error("正文状态已变化，本次回复未写入。请重新提问。");
         }
         const reply: ChatTurn =
-          data.type === "answer_with_changes" && data.changeSet
+          requestAnchorStale
+            ? { role: "assistant", content: data.answer ?? "" }
+            : data.type === "answer_with_changes" && data.changeSet
             ? {
                 role: "assistant",
                 content: data.answer,
@@ -1224,6 +1314,7 @@ export default function Home() {
       requestLocked,
       announceRequestLock,
       selection,
+      markProjectDirty,
     ],
   );
 
@@ -1323,7 +1414,7 @@ export default function Home() {
       }
       setLlmRetry(null);
       setChatError(null);
-      setSaveState("saving");
+      markProjectDirty();
       setAnnounce(`已创建审阅意见：${review.title}。`);
       void persistProjectNow(nextNodes);
     },
@@ -1332,6 +1423,7 @@ export default function Home() {
       announceRequestLock,
       handleSelect,
       persistProjectNow,
+      markProjectDirty,
     ],
   );
 
@@ -1459,14 +1551,14 @@ export default function Home() {
       }
       setLlmRetry(null);
       setChatError(null);
-      setSaveState("saving");
+      markProjectDirty();
       setAnnounce(
         target.anchor.type === "document"
           ? "已清空全文节点讨论。"
           : "已删除该节点讨论。",
       );
     },
-    [activeNodeId, requestLocked, announceRequestLock],
+    [activeNodeId, requestLocked, announceRequestLock, markProjectDirty],
   );
 
   /** 阶段 6：点击正文聊天锚点标记 → 切到对应节点对话 */
@@ -1763,7 +1855,7 @@ export default function Home() {
     setReviewUi({ phase: "idle" });
 
     if (curId) {
-      setSaveState("saving");
+      markProjectDirty();
       await persistProjectNow();
     } else {
       // 尚未建档的现场只需重置，不为一个空白项目额外创建历史条目。
@@ -1771,7 +1863,7 @@ export default function Home() {
       setSaveState("idle");
     }
     setAnnounce("已清空当前项目，其他历史项目未受影响。");
-  }, [requestLocked, announceRequestLock, persistProjectNow]);
+  }, [requestLocked, announceRequestLock, persistProjectNow, markProjectDirty]);
 
   const clearAll = useCallback(async () => {
     if (requestLocked) {
@@ -1798,8 +1890,8 @@ export default function Home() {
     setLlmRetry(null);
     setChatError(null);
     setReviewUi({ phase: "idle" });
-    setSaveState("saving");
-  }, [requestLocked, announceRequestLock]);
+    markProjectDirty();
+  }, [requestLocked, announceRequestLock, markProjectDirty]);
 
   const loadSample = useCallback(() => {
     if (requestLocked) {
@@ -1818,8 +1910,8 @@ export default function Home() {
     setChatError(null);
     setChangeSetOpen(false);
     setReviewUi({ phase: "idle" });
-    setSaveState("saving");
-  }, [requestLocked, announceRequestLock]);
+    markProjectDirty();
+  }, [requestLocked, announceRequestLock, markProjectDirty]);
 
   const openCount = useMemo(
     () => reviews.filter((r) => r.status === "open").length,
@@ -1897,7 +1989,7 @@ export default function Home() {
               // 不走 handleDocChange 是为了跳过多余的锚点校验：标题不参与 block 定位。
               onChange={(e) => {
                 setDoc({ ...doc, title: e.target.value });
-                setSaveState("saving");
+                markProjectDirty();
               }}
               className="w-full min-w-0 rounded-lg border border-transparent bg-transparent px-2 py-1 text-lg font-semibold tracking-tight transition-colors hover:border-border focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand-ring"
               aria-label="文档标题"

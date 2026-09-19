@@ -335,6 +335,6 @@ describe("POST /api/review", () => {
     const messages = gen.mock.calls[0][0];
     const sys = messages[0].content;
     expect(sys).toContain("in-group favoritism");
-    expect(sys).toContain("never modify them");
+    expect(sys).toContain("Keep these terms unchanged in replacement, including spelling and capitalization");
   });
 });

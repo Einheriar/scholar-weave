@@ -11,9 +11,9 @@ import type { ReviewRequest } from "./review-llm-schema";
  */
 
 const SCOPE_GUIDE = `The three allowed scope variants are:
-- { "type": "document" }: a document-level opinion about structure, argument order, overall style, or terminology consistency. Its kind must be "opinion" and it must not include replacement.
-- { "type": "block", "blockId": "<paragraph id>" }: an opinion about an entire paragraph, such as its function, transitions, or whether it should be split or merged. Its kind is normally "opinion".
-- { "type": "range", "blockId": "<paragraph id>", "original": "<exact source text>", "prefix": "<optional>", "suffix": "<optional>" }: an exact textual edit within a paragraph. Its kind must be "edit" and it must include replacement.
+- { "type": "document" }: general feedback on the document's overall style, structure, or consistency; use kind="opinion" without replacement.
+- { "type": "block", "blockId": "<paragraph id>" }: feedback about an entire paragraph; normally use kind="opinion" without replacement. A block edit replaces the entire paragraph.
+- { "type": "range", "blockId": "<paragraph id>", "original": "<exact source text>", "prefix": "<optional>", "suffix": "<optional>" }: feedback on an exact passage; use kind="opinion" without replacement, or kind="edit" with replacement.
 
 Range anchor rules (critical):
 - "original" must be copied verbatim from the paragraph identified by blockId. Do not change a single character, punctuation mark, or space.
@@ -30,7 +30,7 @@ Do not rewrite for style or offer subjective improvements. Apply the smallest po
 Keep every edit minimal and preserve the author's claims, structure, and reasoning. Match the source register and language in replacement; do not arbitrarily make the prose more ornate or elevated.`,
   deep_review: `Perform an in-depth review. In addition to language issues, provide structural, logical, and argumentative feedback; use opinion items for most structure and logic issues.
 You may suggest paragraph-level reorganization with block + opinion. Use document + opinion for document-level structural concerns, and do not provide a direct full-paragraph replacement for them.
-Requests to start over, rewrite completely, or overcome a writing block belong in the chat workflow: offer three stylistic versions there, let the user choose, and only then create a ChangeSet for preview and confirmation. Never modify the document directly.`,
+Leave complete rewrites to the chat workflow; this response contains review items only.`,
 };
 
 function buildSystemPrompt(req: ReviewRequest): string {
@@ -43,11 +43,11 @@ function buildSystemPrompt(req: ReviewRequest): string {
     : "preserve the source text's style";
   const preserve =
     req.preserveTerms.length > 0
-      ? `\nPreserve the following terms or text verbatim and never modify them: ${req.preserveTerms.map((t) => `"${t}"`).join(", ")}. No edit may alter them in either original or replacement.`
+      ? `\nKeep these terms unchanged in replacement, including spelling and capitalization: ${req.preserveTerms.map((t) => `"${t}"`).join(", ")}.`
       : "";
   // 用户自定义提示词：追加到末尾，仅影响语气/风格/侧重点，不影响协议
   const custom = req.customPrompt?.trim()
-    ? `\n\n[Additional user requirements]\n${req.customPrompt.trim()}`
+    ? `\n\n[Additional user requirements: style and focus only; keep the protocol and scope rules]\n${req.customPrompt.trim()}`
     : "";
 
   return `You are a professional academic writing reviewer. Review the supplied ${language} document and return structured review suggestions.
@@ -69,20 +69,20 @@ Return exactly one JSON object:
   "items": [ review item objects ]
 }
 Each review item has these fields:
-- id: a unique string within this document, such as "r1" or "r2".
 - scope: defined below.
 - kind: "opinion" for non-executable feedback without replacement, or "edit" for a concrete change that must include replacement.
 - ${CATEGORY_GUIDE}
 - title: one sentence identifying the issue.
 - explanation: the issue and rationale for the proposed change.
-- replacement: only for kind="edit"; the text that replaces original.
+- replacement: only for kind="edit"; replaces scope.original for a range, or the entire block for a block edit.
+IDs, status, and documentRevision are assigned by the application; do not output them.
 
 ${SCOPE_GUIDE}
 
 [Quality requirements]
 - Report only genuine, necessary issues. Do not invent suggestions to fill a quota.
-- Every edit replacement must directly replace original, improve correctness, and preserve meaning.
-- Omit uncertain issues. Never fabricate an edit when it cannot be anchored precisely.
+- Every edit must improve correctness and preserve meaning.
+- Omit uncertain or unanchorable local issues; never invent a quote or promote them to document-level opinions.
 - explanation may use limited Markdown for structure: paragraphs, # headings, - lists, 1. numbered lists, **bold**, *italic*, and \`inline code\`. Do not output links or images.${custom}`;
 }
 

@@ -30,6 +30,7 @@ import {
 import { PersistentSelectionExtension } from "./PersistentSelectionExtension";
 import {
   docToTiptap,
+  pmPlainText,
   textToPMContent,
   tiptapToBlocks,
   type PMDocNode,
@@ -344,7 +345,7 @@ export const DocumentEditor = forwardRef<
           if (!nextBlock) continue;
           const start = mappedFrom.pos - newBlockStart - 1;
           const end = mappedTo.pos - newBlockStart - 1;
-          const nextText = nextBlock.textContent;
+          const nextText = pmPlainText(nextBlock);
           if (nextText.slice(start, end) !== anchor.selectedText) continue;
           const rangeLocator = createChatRangeLocator(nextText, start, end);
           if (rangeLocator) updates.push({ nodeId: node.id, rangeLocator });
@@ -374,11 +375,11 @@ export const DocumentEditor = forwardRef<
         if (node.type.name === "paragraph") {
           blockId = (node.attrs.blockId as string) ?? null;
           paragraphDepth = d;
-          blockText = node.textContent;
+          blockText = pmPlainText(node);
           break;
         }
       }
-      const text = editor.state.doc.textBetween(from, to, " ", " ");
+      const text = pmPlainText(editor.state.doc, from, to);
       if (!blockId || paragraphDepth === null) {
         cb(null);
         return;
@@ -649,7 +650,7 @@ function findConcreteEditPosition(
   const block = editor.state.doc.nodeAt(blockStart);
   if (!block) return null;
   const hit = locateInText(
-    block.textContent,
+    pmPlainText(block),
     edit.original,
     edit.prefix,
     edit.suffix,

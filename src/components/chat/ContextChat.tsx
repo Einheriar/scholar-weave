@@ -394,10 +394,10 @@ export function ContextChat({
           </Tooltip>
 
           {anchorStale && (
-            <p className="mx-3.5 mt-3 rounded-lg bg-surface-muted px-3 py-2 text-xs text-text-muted">
+            <p data-chat-anchor-stale className="mx-3.5 mt-3 rounded-lg bg-surface-muted px-3 py-2 text-xs text-text-muted">
               {anchorAmbiguous
-                ? "存在多处相同文字，无法唯一确定原选区；以下为存档讨论"
-                : "原文已变更，以下为存档讨论"}
+                ? "存在多处相同文字，无法唯一确定原选区；可以继续讨论，暂不提供可执行修改"
+                : "原文已变更，可以继续讨论旧片段和仍存在的当前段落；暂不提供可执行修改"}
             </p>
           )}
 
@@ -438,13 +438,20 @@ export function ContextChat({
                   {(t.changeSet || t.reviewProposal) && (
                     <div className="mt-2 flex flex-wrap justify-end gap-2">
                       {t.changeSet && (
-                        <button
-                          type="button"
-                          onClick={() => onPreviewChangeSet(t.changeSet!)}
-                          className="rounded-lg border border-brand-ring bg-surface px-2.5 py-1 text-xs font-medium text-brand transition-colors hover:bg-brand-soft"
+                        <Tooltip
+                          label={anchorStale ? "原文锚点已失效，请重新选择正文后生成修改" : undefined}
+                          side="top"
+                          align="end"
                         >
-                          预览修改（{t.changeSet.edits.length} 处）
-                        </button>
+                          <button
+                            type="button"
+                            onClick={() => onPreviewChangeSet(t.changeSet!)}
+                            disabled={anchorStale}
+                            className="rounded-lg border border-brand-ring bg-surface px-2.5 py-1 text-xs font-medium text-brand transition-colors hover:bg-brand-soft disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            预览修改（{t.changeSet.edits.length} 处）
+                          </button>
+                        </Tooltip>
                       )}
                       {t.reviewProposal && (
                         <Tooltip

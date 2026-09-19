@@ -11,8 +11,11 @@ import { docToTiptap } from "@/lib/tiptap-convert";
 import { createDocument } from "@/lib/revisions";
 import type { ConcreteEdit } from "@/lib/review-schema";
 
-function makeEditor(getConfig: () => ChangeSetPreviewDecorationConfig) {
-  const doc = createDocument("test", ["same first, then same second"]);
+function makeEditor(
+  getConfig: () => ChangeSetPreviewDecorationConfig,
+  text = "same first, then same second",
+) {
+  const doc = createDocument("test", [text]);
   const editor = new Editor({
     element: document.createElement("div"),
     extensions: [
@@ -34,6 +37,43 @@ function makeEditor(getConfig: () => ChangeSetPreviewDecorationConfig) {
 }
 
 describe("ChangeSetPreviewDecorationExtension", () => {
+  it.each([
+    { text: "alpha\nbeta", original: "alpha", prefix: undefined, start: 0 },
+    { text: "lead\n\nbeta tail", original: "beta", prefix: undefined, start: 6 },
+    { text: "lead\nalpha\n\nbeta tail", original: "alpha\n\nbeta", prefix: undefined, start: 5 },
+    { text: "same\nsame", original: "same", prefix: "\n", start: 5 },
+    { text: "alpha\nbeta", original: "alphabeta", prefix: undefined, start: null },
+  ])("段内换行保留修改预览位置：$text / $original", ({ text, original, prefix, start }) => {
+    let cfg: ChangeSetPreviewDecorationConfig = { edit: null };
+    const { doc, editor } = makeEditor(() => cfg, text);
+    cfg = {
+      edit: {
+        id: "newline-edit",
+        blockId: doc.blocks[0].id,
+        original,
+        prefix,
+        replacement: "revised",
+        explanation: "Clarify wording.",
+        status: "pending",
+      },
+    };
+    try {
+      editor.view.dispatch(editor.state.tr.setMeta(changeSetPreviewDecorationKey, true));
+      const decorations = changeSetPreviewDecorationKey.getState(editor.state)!.find();
+      if (start === null) {
+        expect(decorations).toEqual([]);
+      } else {
+        expect(decorations).toHaveLength(1);
+        expect(decorations[0].from).toBe(start + 1);
+        expect(decorations[0].to).toBe(start + 1 + original.length);
+        expect(editor.state.doc.textBetween(decorations[0].from, decorations[0].to, " ", "\n"))
+          .toBe(original);
+      }
+    } finally {
+      editor.destroy();
+    }
+  });
+
   it("使用上下文消歧并只高亮对应的一次出现", () => {
     let cfg: ChangeSetPreviewDecorationConfig = { edit: null };
     const { doc, editor } = makeEditor(() => cfg);

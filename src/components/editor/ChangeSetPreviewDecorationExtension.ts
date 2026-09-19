@@ -3,6 +3,7 @@ import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { ConcreteEdit } from "@/lib/review-schema";
 import { locateInText } from "@/lib/anchoring";
+import { pmPlainText } from "@/lib/tiptap-convert";
 
 export type ChangeSetPreviewDecorationConfig = {
   edit: ConcreteEdit | null;
@@ -37,7 +38,7 @@ function buildDecorations(
   const block = doc.nodeAt(blockStart);
   if (!block) return DecorationSet.empty;
   const hit = locateInText(
-    block.textContent,
+    pmPlainText(block),
     edit.original,
     edit.prefix,
     edit.suffix,
