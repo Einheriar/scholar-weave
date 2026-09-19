@@ -768,6 +768,14 @@ export default function Home() {
     [reviews],
   );
 
+  const handleChatAboutReview = useCallback(
+    (id: string) => {
+      handleSelect(id);
+      setChatMinimized(false);
+    },
+    [handleSelect],
+  );
+
   /** 点击正文标记（正文→侧栏）：只做选中与播报，不反向移动光标 */
   const handleBodySelect = useCallback(
     (id: string) => {
@@ -1624,12 +1632,23 @@ export default function Home() {
       }
       changeSetChatRestoreRef.current = null;
       setChatMinimized(true);
-      setActiveChangeSet(cs);
+      // Chat ChangeSets do not carry a source review ID. Capture the trusted
+      // node anchor now so later sidebar navigation cannot change attribution.
+      const reviewId =
+        !cs.sourceReviewId && activeNode?.anchor.type === "review"
+          ? activeNode.anchor.reviewId
+          : undefined;
+      const sourceReview = reviews.find(
+        (item) => item.id === reviewId && item.kind === "opinion" && item.status === "open",
+      );
+      setActiveChangeSet(
+        sourceReview ? { ...cs, sourceReviewId: sourceReview.id } : cs,
+      );
       setChangeSetMounted(true);
       setChangeSetOpen(true);
       setAnnounce("已打开修改集预览，聊天区已临时收起。");
     },
-    [changeSetOpen, chatMinimized],
+    [changeSetOpen, chatMinimized, activeNode, reviews],
   );
   const closeChangeSet = useCallback((restoreMinimized?: boolean) => {
     changeSetChatRestoreRef.current =
@@ -1769,6 +1788,16 @@ export default function Home() {
         ...activeChangeSet,
         edits: activeChangeSet.edits.filter((e) => editIds.includes(e.id)),
       };
+      const sourceReview = reviews.find((item) => {
+        const scope = item.scope;
+        return (
+          item.id === activeChangeSet.sourceReviewId &&
+          item.kind === "opinion" &&
+          item.status === "open" &&
+          (scope.type === "document" ||
+            subset.edits.some((edit) => edit.blockId === scope.blockId))
+        );
+      });
       const result = computeChangeSetApplication(doc, subset);
       const { newTextByBlock } = result;
       if (newTextByBlock.size === 0) return false;
@@ -1777,11 +1806,10 @@ export default function Home() {
       const applied = editorRef.current?.applyBlockTexts(newTextByBlock) ?? false;
       if (!applied) return false;
       // 与源意见关联：接受后把该意见标记为 accepted
-      if (activeChangeSet.sourceReviewId) {
-        const sid = activeChangeSet.sourceReviewId;
+      if (sourceReview) {
         setReviews((rs) =>
           rs.map((r) =>
-            r.id === sid
+            r.id === sourceReview.id
               ? {
                   ...r,
                   status: "accepted" as const,
@@ -1797,6 +1825,7 @@ export default function Home() {
     [
       doc,
       activeChangeSet,
+      reviews,
       closeChangeSet,
       requestLocked,
       announceRequestLock,
@@ -2240,7 +2269,7 @@ export default function Home() {
               onAccept={handleAccept}
               onReject={handleReject}
               onRevert={handleRevert}
-              onChat={handleSelect}
+              onChat={handleChatAboutReview}
               onApplyOpinion={applyOpinion}
               applyingOpinionId={applyingOpinionId}
               interactionLocked={requestLocked}

@@ -102,6 +102,23 @@ test.describe("LLM 审阅（mock /api/review）", () => {
     await expect(card(page, "m_edit")).toBeVisible();
   });
 
+  test("从收起的聊天区继续询问段落意见时展开聊天", async ({ page }) => {
+    await mockReviewRoute(page);
+    await gotoApp(page);
+    await page.getByRole("button", { name: "开始审阅" }).click();
+
+    await page.getByRole("button", { name: "最小化聊天区" }).click();
+    await expect(page.getByRole("button", { name: "展开聊天区" })).toBeVisible();
+
+    await card(page, "m_block")
+      .getByRole("button", { name: "继续询问" })
+      .click();
+
+    await expect(page.getByRole("button", { name: "最小化聊天区" })).toBeVisible();
+    await expect(page.locator(".chat-body")).toBeVisible();
+    await expect(page.getByLabel("上下文对话")).toContainText("段落意见（mock）");
+  });
+
   test("快捷键 Ctrl+Enter 也能触发审阅", async ({ page }) => {
     await mockReviewRoute(page);
     await gotoApp(page);
@@ -143,6 +160,67 @@ test.describe("LLM 审阅（mock /api/review）", () => {
 
     await expect(page.getByRole("dialog", { name: "修改集预览" })).toBeVisible();
     await expect(page.getByText("按意见生成的修改（mock）。")).toBeVisible();
+  });
+
+  test("继续询问意见后接受聊天修改集会处理来源意见", async ({ page }) => {
+    await mockReviewRoute(page);
+    await page.route("**/api/chat", async (route) => {
+      const body = route.request().postDataJSON() as ChatRequestCapture;
+      const target = body.blocks.find((block) =>
+        block.text.includes("can form deceptive behavior"),
+      );
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          type: "answer_with_changes",
+          answer: "建议调整这处表达。",
+          changeSet: {
+            id: "cs_review_chat_mock",
+            documentRevision: body.revision,
+            summary: "按段落意见调整表达。",
+            edits: target
+              ? [{
+                  id: "edit_review_chat_mock",
+                  blockId: target.id,
+                  original: "can form deceptive behavior",
+                  replacement: "can influence deceptive behavior",
+                  explanation: "表达更准确。",
+                  status: "pending",
+                }]
+              : [],
+          },
+        }),
+      });
+    });
+    await gotoApp(page);
+    await page.getByRole("button", { name: "开始审阅" }).click();
+
+    const opinion = card(page, "m_block");
+    await opinion.getByRole("button", { name: "继续询问" }).click();
+    await sendChatMessage(page, "请按这条意见修改");
+    await expect(page.getByRole("status").first()).toContainText("已保存到本地");
+    await page.reload();
+    await page.getByRole("button", { name: /预览修改/ }).click();
+    await page
+      .getByRole("dialog", { name: "修改集预览" })
+      .getByRole("button", { name: /全部接受/ })
+      .click();
+
+    await expect(page.locator(".ProseMirror")).toContainText("can influence deceptive behavior");
+    await expect(opinion.getByLabel("状态：已接受")).toBeVisible();
+    await expect(card(page, "m_doc").getByLabel("状态：待处理")).toBeVisible();
+    await expect(page.getByRole("status").first()).toContainText("已保存到本地");
+
+    await page.reload();
+    await expect(card(page, "m_block").getByLabel("状态：已接受")).toBeVisible();
+    await expect(page.locator(".ProseMirror")).toContainText("can influence deceptive behavior");
+
+    await card(page, "m_block")
+      .getByRole("button", { name: "撤销", exact: true })
+      .click();
+    await expect(page.locator(".ProseMirror")).toContainText("can form deceptive behavior");
+    await expect(card(page, "m_block").getByLabel("状态：待处理")).toBeVisible();
   });
 
   test("按意见接受的修改集可从意见卡撤销，刷新后仍然有效", async ({

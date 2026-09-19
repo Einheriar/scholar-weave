@@ -56,7 +56,7 @@ function buildDecorations(
   });
 
   for (const item of config.items) {
-    if (item.status === "stale") continue; // 过期建议不画标记
+    if (item.status !== "open") continue; // Only actionable reviews keep body markers.
 
     if (item.scope.type === "range") {
       const blockStart = blockStarts.get(item.scope.blockId);

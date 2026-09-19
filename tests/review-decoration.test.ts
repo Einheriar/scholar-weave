@@ -171,4 +171,42 @@ describe("ReviewDecorationExtension（阶段 2）", () => {
     expect(decoAttrs(editor).length).toBe(0);
     editor.destroy();
   });
+
+  it("处理段落意见后仅保留同段待处理意见的标记", () => {
+    const doc = createDocument("test", ["A paragraph with two review opinions."]);
+    const blockId = doc.blocks[0].id;
+    const makeItem = (id: string, status: ReviewItem["status"]): ReviewItem => ({
+      id,
+      documentRevision: doc.revision,
+      scope: { type: "block", blockId },
+      kind: "opinion",
+      category: "clarity",
+      severity: "suggestion",
+      title: id,
+      explanation: "Review this paragraph.",
+      status,
+    });
+    let cfg: ReviewDecorationConfig = {
+      items: [makeItem("accepted", "open"), makeItem("remaining", "open")],
+      selectedId: "accepted",
+    };
+    const editor = makeEditor(doc, () => cfg);
+    try {
+      expect(decoAttrs(editor).map((d) => d.id)).toEqual(["accepted", "remaining"]);
+
+      cfg = {
+        ...cfg,
+        items: [makeItem("accepted", "accepted"), makeItem("remaining", "open")],
+      };
+      editor.view.dispatch(editor.state.tr.setMeta(reviewDecorationKey, true));
+      expect(decoAttrs(editor).map((d) => d.id)).toEqual(["remaining"]);
+      expect(decoAttrs(editor)[0].cls).not.toContain("rev-selected");
+
+      cfg = { ...cfg, items: [makeItem("accepted", "accepted"), makeItem("remaining", "rejected")] };
+      editor.view.dispatch(editor.state.tr.setMeta(reviewDecorationKey, true));
+      expect(decoAttrs(editor)).toEqual([]);
+    } finally {
+      editor.destroy();
+    }
+  });
 });
