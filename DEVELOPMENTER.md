@@ -52,10 +52,10 @@ npm run dev                  # http://localhost:3000
 
 ## 版本号
 
-应用版本号只维护一个地方：`package.json` 的 `version`（当前 `0.1.0`）。构建时由 `next.config.ts`
-读取并以 `NEXT_PUBLIC_APP_VERSION` 内联给前端，页脚左下角以 `v0.1.0` 形式展示。
+应用版本号的唯一来源是 `package.json` 的 `version`。构建时由 `next.config.ts`
+读取并以 `NEXT_PUBLIC_APP_VERSION` 内联给前端，页脚以 `v<major>.<minor>.<patch>` 形式展示。
 
-发版只需改 `package.json` 的 `version`（必要时重跑 `npm run build`），不要在页面里硬编码版本号。
+发版时更新 `package.json` 的 `version` 并同步 `package-lock.json` 的项目版本，再运行 `npm run build`；不要在页面里硬编码版本号。
 `tests/version.test.ts` 会检查注入值确实来自 `package.json` 且符合 `v<major>.<minor>.<patch>` 格式。
 
 ## 常用命令
