@@ -1,17 +1,22 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type {
   ChangeSet,
   ChatContext,
+  ChatImage,
   ChatNode,
   ChatTurn,
   ReviewItem,
 } from "@/lib/review-schema";
+import { MAX_CHAT_IMAGES } from "@/lib/review-schema";
 import { buttonClass } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
 import { renderMiniMarkdown } from "@/lib/mini-markdown";
+import { processChatImageFile } from "@/lib/chat-images";
 import { NodeTimeline } from "./NodeTimeline";
+import { ChatImageAttachments } from "./ChatImageAttachments";
 
 export type ContextChatProps = {
   context: ChatContext;
@@ -31,6 +36,8 @@ export type ContextChatProps = {
   interactionLocked?: boolean;
   /** 默认无选区且无建议时禁发；显式包含全文后由 page 解锁。 */
   sendDisabled: boolean;
+  imageInputEnabled?: boolean;
+  historyHasImages?: boolean;
   /** 当前消息是否附带最新的完整文档上下文。 */
   includeFullDocument: boolean;
   /** 当前正在查看全文节点；该节点天然附带全文背景，主体开关不可关闭。 */
@@ -44,7 +51,9 @@ export type ContextChatProps = {
   /** 最小化（规则 22）：收起为只有头部的窄条，方便阅读正文腾空间 */
   minimized: boolean;
   onToggleMinimize: () => void;
-  onSend: (message: string) => void;
+  onSend: (message: string, images?: ChatImage[]) => void;
+  /** Scope key changes when the project or active node changes. */
+  draftScopeKey?: string;
   /** 重新生成当前节点最后一条 assistant 回复，并原位替换旧回复。 */
   onRegenerate: (nodeId: string, assistantTurnIndex: number) => void;
   /** 打开某条回复附带的修改集预览 */
@@ -88,6 +97,8 @@ export function ContextChat({
   busy,
   interactionLocked = false,
   sendDisabled,
+  imageInputEnabled = true,
+  historyHasImages = false,
   includeFullDocument,
   documentContextActive,
   alwaysIncludeFullDocument,
@@ -96,6 +107,7 @@ export function ContextChat({
   minimized,
   onToggleMinimize,
   onSend,
+  draftScopeKey,
   onRegenerate,
   onPreviewChangeSet,
   onUseReviewProposal,
@@ -109,6 +121,18 @@ export function ContextChat({
   onDeleteNode,
 }: ContextChatProps) {
   const [draft, setDraft] = useState("");
+  const [draftImages, setDraftImages] = useState<ChatImage[]>([]);
+  const [imagePendingCount, setImagePendingCount] = useState(0);
+  const [imageError, setImageError] = useState<{
+    kind: "input-disabled" | "attachment";
+    message: string;
+  } | null>(null);
+  // Capability validation expires as soon as the saved configuration enables it.
+  if (imageInputEnabled && imageError?.kind === "input-disabled") {
+    setImageError(null);
+  }
+  const [lightboxImage, setLightboxImage] = useState<ChatImage | null>(null);
+  const [seenDraftScopeKey, setSeenDraftScopeKey] = useState(draftScopeKey);
   const [timelineOpen, setTimelineOpen] = useState(false);
   const [contextSwitchPhase, setContextSwitchPhase] = useState<
     "idle" | "out" | "in"
@@ -144,6 +168,25 @@ export function ContextChat({
   const fullContextControlRef = useRef<HTMLDivElement>(null);
   // 拖拽把手：记录起始高度与指针位置，pointermove 时差值调整
   const dragRef = useRef<{ startY: number; startHeight: number } | null>(null);
+  const imageScopeRef = useRef(draftScopeKey);
+  const imageGenerationRef = useRef(0);
+  const lightboxCloseRef = useRef<HTMLButtonElement>(null);
+  const lightboxPreviousFocusRef = useRef<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    imageScopeRef.current = draftScopeKey;
+    imageGenerationRef.current += 1;
+  }, [draftScopeKey]);
+
+  // Clear unsent attachments synchronously when switching projects/nodes so an
+  // in-flight decode cannot leak an image into the next conversation.
+  if (seenDraftScopeKey !== draftScopeKey) {
+    setSeenDraftScopeKey(draftScopeKey);
+    setDraft("");
+    setDraftImages([]);
+    setImagePendingCount(0);
+    setImageError(null);
+    setLightboxImage(null);
+  }
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
@@ -160,6 +203,26 @@ export function ContextChat({
     },
     [],
   );
+
+  useEffect(() => {
+    if (!lightboxImage) return;
+    lightboxCloseRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setLightboxImage(null);
+      } else if (event.key === "Tab") {
+        event.preventDefault();
+        lightboxCloseRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      lightboxPreviousFocusRef.current?.focus();
+      lightboxPreviousFocusRef.current = null;
+    };
+  }, [lightboxImage]);
 
   // 拖拽调高：在 window 上监听 pointermove/up，松手或取消时结束
   useEffect(() => {
@@ -183,11 +246,88 @@ export function ContextChat({
     };
   }, [onResize]);
 
+  const handleImageFiles = (files: File[]) => {
+    if (!imageInputEnabled) {
+      setImageError({ kind: "input-disabled", message: "当前模型配置已关闭图片输入，请在设置中开启。" });
+      return;
+    }
+    if (imagePendingCount > 0) {
+      setImageError({ kind: "attachment", message: "图片处理中，请稍候再添加。" });
+      return;
+    }
+    const available = Math.max(
+      0,
+      MAX_CHAT_IMAGES - draftImages.length - imagePendingCount,
+    );
+    if (!available) {
+      setImageError({ kind: "attachment", message: `最多支持 ${MAX_CHAT_IMAGES} 张图片。` });
+      return;
+    }
+    const selected = files.slice(0, available);
+    if (files.length > available) {
+      setImageError({ kind: "attachment", message: `最多支持 ${MAX_CHAT_IMAGES} 张图片。` });
+    } else {
+      setImageError(null);
+    }
+    const scopeAtStart = draftScopeKey;
+    const generationAtStart = imageGenerationRef.current;
+    setImagePendingCount((count) => count + selected.length);
+    void Promise.allSettled(selected.map((file) => processChatImageFile(file))).then(
+      (results) => {
+        const currentScope =
+          imageScopeRef.current === scopeAtStart &&
+          imageGenerationRef.current === generationAtStart;
+        if (!currentScope) return;
+        const successful = results
+          .filter(
+            (result): result is PromiseFulfilledResult<ChatImage> =>
+              result.status === "fulfilled",
+          )
+          .map((result) => result.value);
+        const firstError = results.find(
+          (result): result is PromiseRejectedResult => result.status === "rejected",
+        );
+        setDraftImages((current) =>
+          [...current, ...successful].slice(0, MAX_CHAT_IMAGES),
+        );
+        if (firstError) {
+          setImageError({
+            kind: "attachment",
+            message: firstError.reason instanceof Error
+              ? firstError.reason.message
+              : "图片处理失败。",
+          });
+        }
+      },
+    ).finally(() => {
+      if (
+        imageScopeRef.current === scopeAtStart &&
+        imageGenerationRef.current === generationAtStart
+      ) {
+        setImagePendingCount((count) =>
+          Math.max(0, count - selected.length),
+        );
+      }
+    });
+  };
+
   const submit = () => {
     const text = draft.trim();
-    if (!text || busy || sendDisabled) return;
+    if (
+      (!text && draftImages.length === 0) ||
+      busy ||
+      sendDisabled ||
+      imagePendingCount > 0
+    ) return;
+    if (!imageInputEnabled && (draftImages.length > 0 || historyHasImages)) {
+      setImageError({ kind: "input-disabled", message: "本次讨论包含图片，请先在模型设置中开启“图片输入”。草稿已保留。" });
+      return;
+    }
+    const images = draftImages;
     setDraft("");
-    onSend(text);
+    setDraftImages([]);
+    setImageError(null);
+    onSend(text, images);
   };
 
   const toggleFullContextDefault = () => {
@@ -438,6 +578,37 @@ export function ContextChat({
                   <div className="break-words leading-relaxed">
                     {renderMiniMarkdown(t.content)}
                   </div>
+                  {t.images && t.images.length > 0 && (
+                    <div
+                      data-chat-image-gallery
+                      className="mt-2 flex flex-wrap gap-2"
+                      aria-label="消息中的图片"
+                    >
+                      {t.images.map((image) => (
+                        <button
+                          key={image.id}
+                          type="button"
+                          aria-label={`查看图片：${image.name}`}
+                          onClick={() => {
+                            lightboxPreviousFocusRef.current =
+                              document.activeElement instanceof HTMLElement
+                                ? document.activeElement
+                                : null;
+                            setLightboxImage(image);
+                          }}
+                          className="overflow-hidden rounded-lg border border-white/30 bg-black/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring"
+                        >
+                          {/* Local data URL; next/image is not appropriate here. */}
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={image.dataUrl}
+                            alt={image.name}
+                            className="h-20 w-20 object-cover transition-transform hover:scale-105"
+                          />
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   {(t.changeSet || t.reviewProposal) && (
                     <div className="mt-2 flex flex-wrap justify-end gap-2">
                       {t.changeSet && (
@@ -526,12 +697,12 @@ export function ContextChat({
                   )}
                   {t.role === "assistant" && i === turns.length - 1 && (
                     <span className="absolute -right-12 top-1/2 -translate-y-1/2">
-                      <Tooltip label="重新生成回复" side="right">
+                      <Tooltip label={anchorStale ? "原文已变更，请重新选择正文后提问。" : "重新生成回复"} side="right">
                         <button
                           type="button"
                           aria-label="重新生成回复"
                           aria-busy={busy}
-                          disabled={busy || !activeNode}
+                          disabled={busy || !activeNode || anchorStale}
                           onClick={() => {
                             if (activeNode) onRegenerate(activeNode.id, i);
                           }}
@@ -576,6 +747,30 @@ export function ContextChat({
           <div className="border-t border-border p-2.5">
             <div
               data-chat-composer
+              onDragOver={(event) => {
+                if (event.dataTransfer.types.includes("Files")) {
+                  event.preventDefault();
+                }
+              }}
+              onDrop={(event) => {
+                const files = Array.from(event.dataTransfer.files);
+                if (!files.length) return;
+                event.preventDefault();
+                event.stopPropagation();
+                handleImageFiles(files);
+              }}
+              onPaste={(event) => {
+                const files = Array.from(event.clipboardData.files);
+                const itemFiles = Array.from(event.clipboardData.items)
+                  .filter((item) => item.kind === "file")
+                  .map((item) => item.getAsFile())
+                  .filter((file): file is File => Boolean(file));
+                const pastedFiles = files.length ? files : itemFiles;
+                if (pastedFiles.length) {
+                  event.preventDefault();
+                  handleImageFiles(pastedFiles);
+                }
+              }}
               className="rounded-2xl border border-border bg-surface transition-[border-color,box-shadow] has-[textarea:focus]:border-brand has-[textarea:focus]:ring-2 has-[textarea:focus]:ring-brand-ring"
             >
               <textarea
@@ -595,6 +790,15 @@ export function ContextChat({
                 rows={2}
                 className="block w-full resize-none bg-transparent px-3.5 pt-3 pb-1 text-sm focus:outline-none"
                 aria-label="对话输入框"
+              />
+              <ChatImageAttachments
+                images={draftImages}
+                pending={imagePendingCount > 0}
+                error={imageError?.message ?? null}
+                onRemove={(id) => {
+                  setDraftImages((current) => current.filter((image) => image.id !== id));
+                  setImageError(null);
+                }}
               />
               <div className="flex items-center justify-between gap-3 px-2.5 pb-2.5 pt-1">
                 <div
@@ -688,11 +892,26 @@ export function ContextChat({
                     </button>
                   </Tooltip>
                 </div>
-                <Tooltip label={sendDisabled ? "请先选中正文或一条建议，或开启“附带全文背景”" : undefined} side="top" align="end">
+                <Tooltip
+                  label={
+                    imagePendingCount > 0
+                      ? "图片处理中，请稍候"
+                      : sendDisabled
+                        ? "请先选中正文或一条建议，或开启“附带全文背景”"
+                        : undefined
+                  }
+                  side="top"
+                  align="end"
+                >
                   <button
                     type="button"
                     onClick={submit}
-                    disabled={busy || !draft.trim() || sendDisabled}
+                    disabled={
+                      busy ||
+                      sendDisabled ||
+                      imagePendingCount > 0 ||
+                      (!draft.trim() && draftImages.length === 0)
+                    }
                     className={`${buttonClass("primary", "md")} min-w-20`}
                   >
                     发送
@@ -703,6 +922,38 @@ export function ContextChat({
           </div>
         </div>
       </div>
+
+      {lightboxImage && typeof document !== "undefined" && createPortal(
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={`图片预览：${lightboxImage.name}`}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setLightboxImage(null);
+          }}
+        >
+          <div className="relative max-h-full max-w-full rounded-xl bg-surface p-2 shadow-xl">
+            <button
+              type="button"
+              aria-label="关闭图片预览"
+              onClick={() => setLightboxImage(null)}
+              ref={lightboxCloseRef}
+              className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-surface/90 text-lg text-text-muted shadow-sm transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring"
+            >
+              ×
+            </button>
+            {/* Local data URL; next/image is not appropriate here. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={lightboxImage.dataUrl}
+              alt={lightboxImage.name}
+              className="max-h-[80vh] max-w-[min(90vw,1000px)] object-contain"
+            />
+          </div>
+        </div>,
+        document.body,
+      )}
 
       {/* 常驻渲染：抽屉换 closing 关键帧播退出动画，播完由 onClosingEnd 卸载 */}
       {timelineMounted && (

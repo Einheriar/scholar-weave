@@ -599,6 +599,41 @@ describe("project autosave integration", () => {
     expect(screen.getByText("已保存到本地")).toBeInTheDocument();
   });
 
+  it("persists chat images and includes them in follow-ups and regeneration", async () => {
+    configureProjects([projectWithRangeHistory()]);
+    const { requests } = captureChatRequests();
+    render(<Home />);
+    await settleInitialLoad();
+    const images = [{ id: "image-1", name: "figure.png", dataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aB1cAAAAASUVORK5CYII=" }];
+    await act(async () => { captured.chat!.onJumpToTurn("range-discussion", 0); });
+    await act(async () => { captured.chat!.onSend("", images); });
+    expect(requests[0].images).toEqual(images);
+    expect(requests[0].message).toBe("请分析这些图片。");
+    expect(storage.saveProject.mock.calls.at(-1)![0].nodes[0].turns.at(-2)?.images).toEqual(images);
+    const node = captured.chat!.activeNode!;
+    await act(async () => { captured.chat!.onRegenerate(node.id, node.turns.length - 1); });
+    expect(requests[1].images).toEqual(images);
+    expect(captured.chat!.activeNode!.turns).toHaveLength(node.turns.length);
+    await act(async () => { captured.chat!.onSend("Explain the figure further"); });
+    expect(requests[2].history.find((turn) => turn.images?.length)?.images).toEqual(images);
+    expect(requests[2].images).toBeUndefined();
+  });
+
+  it("retries a failed image discussion with its original attachment", async () => {
+    configureProjects([projectWithRangeHistory()]);
+    const { requests, fetchMock } = captureChatRequests();
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "Try again" } }), { status: 502 }));
+    render(<Home />);
+    await settleInitialLoad();
+    const images = [{ id: "retry-image", name: "figure.png", dataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aB1cAAAAASUVORK5CYII=" }];
+    await act(async () => { captured.chat!.onJumpToTurn("range-discussion", 0); });
+    await act(async () => { captured.chat!.onSend("Discuss the figure", images); });
+    const count = captured.chat!.activeNode!.turns.length;
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "重试对话" })); });
+    expect(requests[0].images).toEqual(images);
+    expect(captured.chat!.activeNode!.turns).toHaveLength(count + 1);
+  });
+
   it("resumes a historical range discussion using its own history and the latest paragraph", async () => {
     const project = projectWithRangeHistory();
     configureProjects([project]);
@@ -702,7 +737,7 @@ describe("project autosave integration", () => {
     expect(JSON.stringify(requests[0])).not.toContain("Historic prefix");
   });
 
-  it("regenerates a stale historical answer with the same restricted current context", async () => {
+  it("blocks regeneration of a stale historical answer without replacing the reply", async () => {
     const project = projectWithRangeHistory();
     project.doc.blocks = [{ id: "unrelated-block", type: "paragraph", text: "Private unrelated text." }];
     configureProjects([project]);
@@ -711,15 +746,10 @@ describe("project autosave integration", () => {
     await settleInitialLoad();
     await act(async () => { captured.chat!.onJumpToTurn("range-discussion", 0); });
     await act(async () => { captured.chat!.onRegenerate("range-discussion", 1); });
-    expect(requests).toHaveLength(1);
-    expect(requests[0].message).toBe("Earlier question");
-    expect(requests[0].anchorStale).toBe(true);
-    expect(requests[0].includeFullDocument).toBe(false);
-    expect(requests[0].blocks).toEqual([]);
-    expect(requests[0].history).toEqual([]);
+    expect(requests).toHaveLength(0);
     expect(captured.chat!.turns).toEqual([
       { role: "user", content: "Earlier question" },
-      { role: "assistant", content: "Follow-up answer" },
+      { role: "assistant", content: "Earlier answer" },
     ]);
   });
 });

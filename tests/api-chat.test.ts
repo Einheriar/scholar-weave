@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "@/app/api/chat/route";
 import * as providerMod from "@/lib/llm/provider";
-import type { LLMProvider } from "@/lib/llm/provider";
+import type { ChatMessage, LLMProvider } from "@/lib/llm/provider";
 
 /**
  * /api/chat 的服务端测试（PLAN 7 / 12）。
@@ -13,6 +13,14 @@ const BLOCKS = [
   { id: "p_a", text: "这些结果共同的表明该效应存在。" },
   { id: "p_b", text: "Deception is a two-person interaction." },
 ];
+
+function testImage(id = "img-1", bytes = 3) {
+  return {
+    id,
+    name: `${id}.png`,
+    dataUrl: `data:image/png;base64,${Buffer.alloc(bytes).toString("base64")}`,
+  };
+}
 
 function makeReq(body: unknown): Request {
   return new Request("http://localhost/api/chat", {
@@ -43,6 +51,27 @@ function mockProvider(content: string): LLMProvider {
 beforeEach(() => vi.restoreAllMocks());
 
 describe("POST /api/chat", () => {
+  it.each(["current", "history"])("blocks disabled image input in %s before calling the model", async (source) => {
+    const provider = mockProvider(JSON.stringify({ type: "answer", answer: "ok" }));
+    vi.spyOn(providerMod, "getProviderFromEnv").mockReturnValue(provider);
+    const response = await POST(makeReq(validBody({
+      imageInputEnabled: false,
+      ...(source === "current" ? { images: [testImage()] } : {
+        history: [{ role: "user", content: "image", images: [testImage()] }],
+      }),
+    })));
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain("image_input_disabled");
+    expect(provider.generate).not.toHaveBeenCalled();
+  });
+
+  it("allows text-only requests with image input disabled", async () => {
+    const provider = mockProvider(JSON.stringify({ type: "answer", answer: "ok" }));
+    vi.spyOn(providerMod, "getProviderFromEnv").mockReturnValue(provider);
+    const response = await POST(makeReq(validBody({ imageInputEnabled: false })));
+    expect(response.status).toBe(200);
+    expect(provider.generate).toHaveBeenCalledOnce();
+  });
   it.each([
     ["answer_with_changes", false],
     ["answer_with_changes", true],
@@ -108,6 +137,44 @@ describe("POST /api/chat", () => {
     expect(data.type).toBe("answer");
     expect(data.answer).toBe("这是解释。");
     expect(data.changeSet).toBeUndefined();
+  });
+
+  it("把当前用户图片实际透传给 provider 的 image_url parts", async () => {
+    let captured: ChatMessage[] | undefined;
+    const gen = vi.fn<LLMProvider["generate"]>(async (messages) => {
+      captured = messages;
+      return JSON.stringify({ type: "answer", answer: "看到了。" });
+    });
+    vi.spyOn(providerMod, "getProviderFromEnv").mockReturnValue({
+      name: "mock",
+      generate: gen,
+    });
+    const res = await POST(makeReq(validBody({
+      message: "请分析图片",
+      images: [testImage("current")],
+    })));
+    expect(res.status).toBe(200);
+    expect(captured?.at(-1)?.content).toEqual([
+      { type: "text", text: expect.stringContaining("请分析图片") },
+      { type: "image_url", image_url: { url: "data:image/png;base64,AAAA" } },
+    ]);
+  });
+
+  it("图片总负载超过 12MiB 时返回 413 且不调用 provider", async () => {
+    const large = testImage("large", 2 * 1024 * 1024);
+    const getProvider = vi.spyOn(providerMod, "getProviderFromEnv");
+    const body = validBody({
+      images: [large, { ...large, id: "large-2" }, { ...large, id: "large-3" }, { ...large, id: "large-4" }],
+      history: [{
+        role: "user",
+        content: "再看这些",
+        images: [large, { ...large, id: "large-6" }, { ...large, id: "large-7" }, { ...large, id: "large-8" }],
+      }],
+    });
+    const res = await POST(makeReq(body));
+    expect(res.status).toBe(413);
+    expect((await res.json()).error.code).toBe("too_many_images");
+    expect(getProvider).not.toHaveBeenCalled();
   });
 
   it("answer_with_review：返回服务端编号的候选审阅意见", async () => {
@@ -377,7 +444,7 @@ describe("POST /api/chat", () => {
   });
 
   it("review 上下文会把关联建议写入 prompt", async () => {
-    const gen = vi.fn(async (messages: Array<{ content: string }>) => {
+    const gen = vi.fn(async (messages: ChatMessage[]) => {
       void messages;
       return JSON.stringify({ type: "answer", answer: "ok" });
     });

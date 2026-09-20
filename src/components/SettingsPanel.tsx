@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { buttonClass } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { Tooltip } from "@/components/ui/tooltip";
+import { ModelInput } from "@/components/ModelInput";
 import { renderMiniMarkdown } from "@/lib/mini-markdown";
 import {
   saveSettings,
@@ -80,7 +81,7 @@ export function SettingsPanel({
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape" && !e.defaultPrevented) onClose();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -451,34 +452,72 @@ export function SettingsPanel({
               </div>
               <div>
                 <label className={labelCls}>模型</label>
-                <input
-                  type="text"
-                  value={activePreset.model}
-                  onChange={(e) =>
-                    updateActivePreset({ model: e.target.value })
-                  }
-                  placeholder="deepseek-chat"
+                <ModelInput
+                  key={activePreset.id}
+                  preset={activePreset}
+                  onChange={(model) => updateActivePreset({ model })}
                   className={inputCls}
                 />
               </div>
-              <div>
-                <label className={labelCls}>思考档位</label>
-                <Select
-                  value={activePreset.reasoningEffort}
-                  onChange={(v) =>
-                    updateActivePreset({
-                      reasoningEffort: v as ReasoningEffort,
-                    })
-                  }
-                  options={REASONING_EFFORT_OPTIONS.map((opt) => ({
-                    value: opt.value,
-                    label: `${opt.label} — ${opt.description}`,
-                  }))}
-                  ariaLabel="思考档位"
-                />
-                <p className="mt-1.5 text-xs text-text-faint">
-                  控制模型在回复前的思考深度。「默认」不传参交给模型；「不思考」会请求关闭思考（不支持的提供商会报错）。
-                </p>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label className={labelCls}>思考档位</label>
+                  <Select
+                    value={activePreset.reasoningEffort}
+                    onChange={(v) =>
+                      updateActivePreset({
+                        reasoningEffort: v as ReasoningEffort,
+                      })
+                    }
+                    options={REASONING_EFFORT_OPTIONS.map((opt) => ({
+                      value: opt.value,
+                      label: `${opt.label} — ${opt.description}`,
+                    }))}
+                    ariaLabel="思考档位"
+                  />
+                  <p className="mt-1.5 text-xs text-text-faint">
+                    控制模型在回复前的思考深度。「默认」不传参交给模型；「不思考」会请求关闭思考（不支持的提供商会报错）。
+                  </p>
+                </div>
+                <div>
+                  <label className={labelCls} htmlFor="settings-image-input-enabled">
+                    图片输入
+                  </label>
+                  <div className="flex h-[42px] items-center justify-between rounded-lg border border-border bg-surface px-3 shadow-sm">
+                    <span className="text-sm text-foreground">
+                      {activePreset.imageInputEnabled ? "开启" : "关闭"}
+                    </span>
+                    <button
+                      id="settings-image-input-enabled"
+                      type="button"
+                      role="switch"
+                      aria-checked={activePreset.imageInputEnabled}
+                      aria-label="图片输入"
+                      onClick={() =>
+                        updateActivePreset({
+                          imageInputEnabled: !activePreset.imageInputEnabled,
+                        })
+                      }
+                      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition-colors motion-reduce:transition-none focus:outline-none focus:ring-2 focus:ring-brand-ring focus:ring-offset-2 focus:ring-offset-surface ${
+                        activePreset.imageInputEnabled
+                          ? "border-brand bg-brand"
+                          : "border-border bg-surface-muted"
+                      }`}
+                    >
+                      <span
+                        aria-hidden
+                        className={`inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform motion-reduce:transition-none ${
+                          activePreset.imageInputEnabled
+                            ? "translate-x-6"
+                            : "translate-x-1"
+                        }`}
+                      />
+                    </button>
+                  </div>
+                  <p className="mt-1.5 text-xs text-text-faint">
+                    按实际接口能力设置；开启后允许发送图片。
+                  </p>
+                </div>
               </div>
 
               {/* 代理：只影响服务端 → LLM 供应商的请求，不影响浏览器本身的网络 */}

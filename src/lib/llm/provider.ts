@@ -8,8 +8,12 @@ import { OpenAIProvider } from "./openai-provider";
 
 export type ChatMessage = {
   role: "system" | "user" | "assistant";
-  content: string;
+  content: string | ChatContentPart[];
 };
+
+export type ChatContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
 
 export type GenerateOptions = {
   /** 期望模型返回严格 JSON（对应 OpenAI 的 response_format: json_object） */

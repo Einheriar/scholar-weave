@@ -400,6 +400,10 @@ test.describe("上下文对话（mock /api/chat）", () => {
     await page.getByRole("button", { name: "聊天节点历史" }).click();
     await page.getByRole("button", { name: /跳到节点.*第 1 次提问/ }).click();
     await expect(page.locator("[data-chat-anchor-stale]")).toContainText("可以继续讨论");
+    const staleRegenerate = page.getByRole("button", { name: "重新生成回复" });
+    await expect(staleRegenerate).toBeDisabled();
+    await staleRegenerate.hover();
+    await expect(page.getByRole("tooltip")).toHaveText("原文已变更，请重新选择正文后提问。");
     await expect(page.getByRole("button", { name: /预览修改/ })).toBeDisabled();
     const before = await paragraphTexts(page);
     await sendChatMessage(page, "联系当前段落继续解释旧表达");
@@ -736,6 +740,10 @@ test.describe("上下文对话（mock /api/chat）", () => {
     await expect(documentIdentity).toBeVisible();
     await expect(localIdentity).toBeVisible();
     await expect(documentIdentity.locator("svg")).toHaveCount(0);
+    // Compare final geometry, not coordinates sampled on different scale frames.
+    await timeline.evaluate((element) =>
+      Promise.all(element.getAnimations().map((animation) => animation.finished)),
+    );
 
     const identityWidths = await Promise.all([
       documentIdentity.evaluate((element) => element.getBoundingClientRect().width),

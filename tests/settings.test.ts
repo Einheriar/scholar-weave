@@ -43,6 +43,8 @@ describe("loadSettings 迁移", () => {
     expect(preset.model).toBe("some-model");
     // 旧档位非法 → 落到 auto
     expect(preset.reasoningEffort).toBe("auto");
+    // Older presets default to image input so the new capability setting is non-breaking.
+    expect(preset.imageInputEnabled).toBe(true);
     expect(s.review.style).toBe("学术");
   });
 
@@ -77,6 +79,25 @@ describe("loadSettings 迁移", () => {
     expect(s.llm.presets).toHaveLength(2);
     expect(s.llm.activeId).toBe("a");
     expect(getActivePreset(s).apiKey).toBe("k1");
+    expect(getActivePreset(s).imageInputEnabled).toBe(true);
+  });
+
+  it("显式关闭图片输入时保留该预设的关闭状态", () => {
+    localStorage.setItem(
+      STORAGE_KEY_FOR_TEST,
+      JSON.stringify({
+        llm: {
+          presets: [
+            {
+              id: "no-images",
+              name: "文字模型",
+              imageInputEnabled: false,
+            },
+          ],
+        },
+      }),
+    );
+    expect(getActivePreset(loadSettings()).imageInputEnabled).toBe(false);
   });
 
   it("损坏的 JSON 返回默认设置", () => {
@@ -129,6 +150,7 @@ describe("settingsToRequestBody", () => {
       baseURL: "https://other.com",
       model: "other-model",
       reasoningEffort: "low",
+      imageInputEnabled: true,
       proxy: { enabled: false, type: "http", host: "127.0.0.1", port: 7890 },
     });
     s.llm.presets[0].apiKey = "sk-main";
@@ -147,6 +169,7 @@ describe("saveSettings 往返", () => {
       baseURL: "https://openrouter.ai/api",
       model: "anthropic/claude",
       reasoningEffort: "off",
+      imageInputEnabled: false,
       proxy: { enabled: true, type: "socks5", host: "10.0.0.1", port: 1080 },
     });
     s.llm.activeId = "p2";

@@ -9,6 +9,7 @@ import { apiError, callLLMStructured } from "@/lib/llm/server-helpers";
 import {
   ChatReviewProposalSchema,
   ChangeSetSchema,
+  getChatImageDecodedBytes,
   type ChangeSet,
 } from "@/lib/review-schema";
 import { resolveEdit } from "@/lib/changeset";
@@ -27,6 +28,7 @@ export const runtime = "nodejs";
 const MAX_BLOCKS = 200;
 const MAX_TOTAL_CHARS = 60_000;
 const MAX_HISTORY = 12;
+const MAX_TOTAL_IMAGE_BYTES = 12 * 1024 * 1024;
 
 /**
  * Keep executable edits inside the range the user authorized for this turn.
@@ -71,6 +73,10 @@ export async function POST(request: Request) {
     );
   }
   const body = parsed.data;
+  if (body.imageInputEnabled === false &&
+      (body.images?.length || body.history.some((turn) => turn.images?.length))) {
+    return apiError(400, "image_input_disabled", "当前模型配置已关闭图片输入，请在设置中开启后再发送含图片的讨论。");
+  }
 
   if (body.blocks.length > MAX_BLOCKS) {
     return apiError(413, "too_many_blocks", `段落数超过上限（${MAX_BLOCKS}）。`);
@@ -81,6 +87,17 @@ export async function POST(request: Request) {
   }
   if (body.history.length > MAX_HISTORY) {
     body.history = body.history.slice(-MAX_HISTORY);
+  }
+  const totalImageBytes = [
+    ...(body.images ?? []),
+    ...body.history.flatMap((turn) => turn.images ?? []),
+  ].reduce((total, image) => total + getChatImageDecodedBytes(image.dataUrl), 0);
+  if (totalImageBytes > MAX_TOTAL_IMAGE_BYTES) {
+    return apiError(
+      413,
+      "too_many_images",
+      `图片总大小超过上限（${MAX_TOTAL_IMAGE_BYTES}B）。`,
+    );
   }
 
   const messages = buildChatMessages(body);

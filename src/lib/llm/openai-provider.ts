@@ -2,11 +2,16 @@ import type { ChatMessage, GenerateOptions, LLMProvider, ProviderConfig } from "
 import { resolveThinkingParam } from "./thinking";
 import { ProxyAgent } from "undici";
 
+/** Normalize the base URL shared by provider requests and model discovery. */
+export function normalizeProviderBaseURL(baseURL?: string): string {
+  return (baseURL ?? "https://api.openai.com").replace(/\/+$/, "");
+}
+
 /**
  * 构造代理 dispatcher；proxy 为 undefined 时返回 null（直连）。
  * http:// 与 socks5:// 都通过 undici 的 ProxyAgent 支持（Node 内置模块）。
  */
-function buildProxyDispatcher(
+export function buildProxyDispatcher(
   proxy: { type: "http" | "socks5"; host: string; port: number } | undefined,
 ): ProxyAgent | null {
   if (!proxy) return null;
@@ -28,7 +33,7 @@ export class OpenAIProvider implements LLMProvider {
 
   constructor(config: ProviderConfig) {
     this.apiKey = config.apiKey;
-    this.baseURL = (config.baseURL ?? "https://api.openai.com").replace(/\/$/, "");
+    this.baseURL = normalizeProviderBaseURL(config.baseURL);
     this.model = config.model;
     this.dispatcher = buildProxyDispatcher(config.proxy);
   }

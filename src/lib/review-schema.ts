@@ -205,6 +205,57 @@ export const ChatReviewProposalSchema = z.object({
 export type ChatReviewProposal = z.infer<typeof ChatReviewProposalSchema>;
 
 /**
+ * An image attached to a chat turn. Images are kept as data URLs so the
+ * browser can persist the exact user attachment with the project and the
+ * server can forward it to OpenAI-compatible vision endpoints.
+ */
+export const MAX_CHAT_IMAGES = 4;
+export const MAX_CHAT_IMAGE_BYTES = 2 * 1024 * 1024;
+
+const CHAT_IMAGE_DATA_URL_PATTERN =
+  /^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/;
+
+/** Return the decoded byte count represented by a validated base64 payload. */
+export function getChatImageDecodedBytes(dataUrl: string): number {
+  const match = CHAT_IMAGE_DATA_URL_PATTERN.exec(dataUrl);
+  if (!match) return 0;
+  const payload = match[2];
+  const padding = payload.endsWith("==") ? 2 : payload.endsWith("=") ? 1 : 0;
+  return Math.floor(payload.length * 3 / 4) - padding;
+}
+
+export const ChatImageSchema = z.object({
+  id: z.string().trim().min(1).max(200),
+  name: z.string().trim().min(1).max(200),
+  dataUrl: z.string().superRefine((value, ctx) => {
+    const match = CHAT_IMAGE_DATA_URL_PATTERN.exec(value);
+    if (!match) {
+      ctx.addIssue({
+        code: "custom",
+        message: "图片必须是 PNG、JPEG 或 WebP 的 base64 data URL。",
+      });
+      return;
+    }
+    const payload = match[2];
+    // Base64 must be complete quanta, with padding only at the end.
+    if (payload.length % 4 !== 0) {
+      ctx.addIssue({ code: "custom", message: "图片 base64 编码不完整。" });
+      return;
+    }
+    const bytes = getChatImageDecodedBytes(value);
+    if (bytes <= 0 || bytes > MAX_CHAT_IMAGE_BYTES) {
+      ctx.addIssue({
+        code: "custom",
+        message: `图片大小必须在 1B 到 ${MAX_CHAT_IMAGE_BYTES}B 之间。`,
+      });
+    }
+  }),
+});
+export type ChatImage = z.infer<typeof ChatImageSchema>;
+
+export const ChatImagesSchema = z.array(ChatImageSchema).max(MAX_CHAT_IMAGES);
+
+/**
  * 一轮对话（用户提问或模型回复）。
  * assistant 轮可以挂一个修改集，点击可重新打开预览——正文不会被隐式修改，
  * 修改集里定位不到的条目由 ChangeSetPreview 在渲染时判定为不可应用。
@@ -212,6 +263,7 @@ export type ChatReviewProposal = z.infer<typeof ChatReviewProposalSchema>;
 export const ChatTurnSchema = z.object({
   role: z.enum(["user", "assistant"]),
   content: z.string(),
+  images: ChatImagesSchema.optional(),
   changeSet: ChangeSetSchema.optional(),
   reviewProposal: ChatReviewProposalSchema.optional(),
 }).superRefine((turn, ctx) => {
@@ -219,6 +271,13 @@ export const ChatTurnSchema = z.object({
     ctx.addIssue({
       code: "custom",
       message: "user 轮次不能携带修改集或候选审阅意见",
+    });
+  }
+  if (turn.role === "assistant" && turn.images) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["images"],
+      message: "assistant 轮次不能携带用户图片。",
     });
   }
   if (turn.changeSet && turn.reviewProposal) {

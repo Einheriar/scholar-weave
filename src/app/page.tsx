@@ -18,12 +18,14 @@ import { Select } from "@/components/ui/select";
 import { Tooltip } from "@/components/ui/tooltip";
 import {
   loadSettings,
+  getActivePreset,
   settingsToRequestBody,
   type UserSettings,
 } from "@/lib/settings";
 import type {
   ChangeSet,
   ChatContext,
+  ChatImage,
   ChatNode,
   ChatTurn,
   ConcreteEdit,
@@ -1086,6 +1088,7 @@ export default function Home() {
       message: string,
       retryNodeId?: string,
       replaceAssistantIndex?: number,
+      attachedImages?: ChatImage[],
     ) => {
       const requestSnapshot = latestRef.current.doc;
       if (!requestSnapshot) return;
@@ -1096,6 +1099,13 @@ export default function Home() {
       const retryNode = retryNodeId
         ? latestRef.current.nodes.find((node) => node.id === retryNodeId)
         : undefined;
+      // Retries and regeneration reuse the original user turn's attachments.
+      const retryUserTurn = retryNode?.turns[
+        replaceAssistantIndex !== undefined ? replaceAssistantIndex - 1 : retryNode.turns.length - 1
+      ];
+      const images = retryNode ? retryUserTurn?.images : attachedImages;
+      message = message.trim() || (images?.length ? "请分析这些图片。" : "");
+      if (!message) return;
       // 默认要求局部锚点；固定全文入口或显式附带全文时允许无选区直接提问。
       if (!retryNode && chatForbidden) {
         setLlmRetry(null);
@@ -1118,6 +1128,19 @@ export default function Home() {
       // 发送那一刻才按身份找/建节点（规则 7）。从 latestRef 读最新节点，
       // 避免闭包里的 nodes 是旧快照导致新建节点冲掉已有节点。
       const existing = retryNode ?? findNodeByAnchor(latestRef.current.nodes, ctx);
+      const imageInputEnabled = getActivePreset(settings).imageInputEnabled;
+      const historySource =
+        replaceAssistantIndex !== undefined
+          ? (existing?.turns ?? []).slice(0, Math.max(0, replaceAssistantIndex - 1))
+          : retryNode
+            ? retryNode.turns.slice(0, -1)
+            : existing?.turns ?? [];
+      if (!imageInputEnabled && (images?.length || historySource.slice(-8).some((turn) => turn.images?.length))) {
+        const error = "当前模型配置已关闭图片输入，请在设置中开启后再发送含图片的讨论。";
+        setChatError(error);
+        setAnnounce(error);
+        return;
+      }
       const nodeId = existing?.id ?? `node_${crypto.randomUUID()}`;
       // 节点锚点原文快照：range 取选区原文；review 锚取建议定位到的原文（range/block 级）
       const originalText =
@@ -1148,6 +1171,10 @@ export default function Home() {
           };
       const requestAnchorStale =
         getChatNodeAnchorIssue(targetNode, requestSnapshot, currentReviews) !== null;
+      if (requestAnchorStale && replaceAssistantIndex !== undefined) {
+        setAnnounce("原文已变更，请重新选择正文后提问。");
+        return;
+      }
       // Retain the historical quote even if its source review was replaced.
       const requestContext = requestAnchorStale && !ctx.selectedText && targetNode.originalText
         ? { ...ctx, selectedText: targetNode.originalText }
@@ -1158,7 +1185,7 @@ export default function Home() {
         ? targetNode
         : {
             ...targetNode,
-            turns: [...targetNode.turns, { role: "user", content: message }],
+            turns: [...targetNode.turns, { role: "user", content: message, ...(images?.length ? { images } : {}) }],
           };
       // 基于 latestRef 先算好再 setState（updater 副作用在批处理下不可靠）：
       // 优先用回调里已写入的最新节点，其次用闭包 nodes
@@ -1179,14 +1206,9 @@ export default function Home() {
       // 规则 24：节点边界即上下文边界。history 取本节点全部轮次（不含跨节点），
       // blocks 默认取锚点段 ±1 段；显式附带全文、完整选段或 document 节点取
       // 发送瞬间的最新全文。建议仍只带锚点段的 open 建议。
-      const historySource =
-        replaceAssistantIndex !== undefined
-          ? targetNode.turns.slice(0, Math.max(0, replaceAssistantIndex - 1))
-          : retryNode
-            ? targetNode.turns.slice(0, -1)
-            : targetNode.turns;
       const history = historySource
-        .map((t) => ({ role: t.role, content: t.content }));
+        .slice(-8)
+        .map((t) => ({ role: t.role, content: t.content, ...(t.images?.length ? { images: t.images } : {}) }));
       const requestRangeBlock =
         ctx.type === "range"
           ? requestSnapshot.blocks.find((block) => block.id === ctx.blockId)
@@ -1245,6 +1267,8 @@ export default function Home() {
             anchorStale: requestAnchorStale,
             includeFullDocument: includeFullForRequest,
             message,
+            ...(images?.length ? { images } : {}),
+            imageInputEnabled,
             history,
             blocks,
             openReviews: openReviews.map((r) => ({
@@ -2266,6 +2290,8 @@ export default function Home() {
                 />
               )}
               <ContextChat
+                imageInputEnabled={getActivePreset(settings).imageInputEnabled}
+                historyHasImages={Boolean(findNodeByAnchor(nodes, chatContext)?.turns.slice(-8).some((turn) => turn.images?.length))}
                 context={chatContext}
                 contextReview={contextReview}
                 nodes={nodes}
@@ -2285,7 +2311,8 @@ export default function Home() {
                 }
                 minimized={chatMinimized}
                 onToggleMinimize={handleToggleChatMinimized}
-                onSend={sendChat}
+                onSend={(message, images) => void sendChat(message, undefined, undefined, images)}
+                draftScopeKey={`${doc.id}:${activeNodeId ?? VIRTUAL_DOCUMENT_NODE_ID}`}
                 onRegenerate={handleRegenerateChatReply}
                 onPreviewChangeSet={openChangeSet}
                 onUseReviewProposal={handleUseReviewProposal}

@@ -45,6 +45,8 @@ export type LLMPreset = {
   baseURL: string;
   model: string;
   reasoningEffort: ReasoningEffort;
+  /** 是否允许在该预设下向模型发送图片；旧设置缺省为 true 以保持图片聊天可用。 */
+  imageInputEnabled: boolean;
   /** 该预设专用的代理设置；enabled=false 时直连 */
   proxy: ProxyConfig;
 };
@@ -78,6 +80,7 @@ const DEFAULT_PRESET: LLMPreset = {
   baseURL: "https://api.deepseek.com",
   model: "deepseek-chat",
   reasoningEffort: "auto",
+  imageInputEnabled: true,
   proxy: { enabled: false, type: "http", host: "127.0.0.1", port: 7890 },
 };
 
@@ -154,6 +157,7 @@ export function createPreset(name?: string): LLMPreset {
     baseURL: "https://api.deepseek.com",
     model: "deepseek-chat",
     reasoningEffort: "auto",
+    imageInputEnabled: true,
     proxy: defaultProxy(),
   };
 }
@@ -176,6 +180,9 @@ function normalizePreset(raw: Partial<LLMPreset>, fallbackId: string): LLMPreset
     reasoningEffort: REASONING_EFFORT_OPTIONS.some((o) => o.value === raw.reasoningEffort)
       ? (raw.reasoningEffort as ReasoningEffort)
       : "auto",
+    // Missing capability metadata means an older saved preset. Preserve the
+    // existing image-chat behavior until the user explicitly turns it off.
+    imageInputEnabled: raw.imageInputEnabled !== false,
     proxy: {
       enabled: rawProxy?.enabled === true,
       type: rawProxy?.type === "socks5" ? "socks5" : "http",

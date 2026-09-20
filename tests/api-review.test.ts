@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "@/app/api/review/route";
 import * as providerMod from "@/lib/llm/provider";
-import type { LLMProvider } from "@/lib/llm/provider";
+import type { ChatMessage, LLMProvider } from "@/lib/llm/provider";
 
 /**
  * /api/review 的服务端测试（PLAN 12 / 15）。
@@ -322,7 +322,7 @@ describe("POST /api/review", () => {
   it("保留术语要求体现在 prompt 中（防 LLM 改动，重点场景 9）", async () => {
     const payload = { documentSummary: "…", items: [] };
     const gen = vi.fn(
-      async (messages: Array<{ content: string }>) => {
+      async (messages: ChatMessage[]) => {
         void messages;
         return JSON.stringify(payload);
       },

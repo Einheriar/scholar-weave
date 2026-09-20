@@ -39,6 +39,7 @@ ScholarWeave keeps the manuscript at the center of the workflow:
 
 - **Anchored feedback**: Suggestions can target the full document, a paragraph, or a precise text selection.
 - **Contextual conversations**: Ask the LLM about the current selection, a review suggestion, a paragraph, or the full document.
+- **Image discussions**: Paste or drop PNG, JPEG, and WebP images directly into chat, up to four per message, with previews and removal before sending. Requires a vision-capable model. Images are stored with the node history in this browser and sent to the configured model with relevant follow-up context.
 - **Controlled revisions**: Every edit is previewed and confirmed before it touches the manuscript. Nothing silently rewrites your work.
 - **A clear review lifecycle**: Accept, ignore, undo, and inspect stale suggestions that can no longer be located.
 - **Local-first storage**: Drafts and chat history stay in the current browser through IndexedDB.
@@ -78,6 +79,8 @@ ScholarWeave uses the OpenAI-compatible chat protocol and can connect to OpenAI,
 ### Configure through the web interface
 
 Open **Settings → Model** to create and switch between multiple model presets. Each preset can store its own API key, base URL, model name, reasoning effort, and proxy settings, making it easy to move between models or providers.
+
+After entering the provider's base URL and API key, focus the model field to fetch its model list. Typing filters the suggestions; use the arrow keys and Enter to select a model. Manual model IDs remain supported, including when the provider does not expose a model-list endpoint.
 
 Web presets are stored in the current browser's `localStorage`. They take effect immediately after being saved, are never written into project files, and cannot be committed through Git. Because API keys are stored as plaintext in the browser, this method should only be used on a trusted personal device.
 

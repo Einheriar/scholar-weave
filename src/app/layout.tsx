@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
-import { Geist_Mono } from "next/font/google";
 import "./globals.css";
 
 // 中文 UI + 编辑区（CJK 字符优先命中）
@@ -18,9 +17,11 @@ const inter = localFont({
 });
 
 // 保留等宽字体（API 预设徽标、设置面板代码框、mini-markdown 行内代码仍在用）
-const geistMono = Geist_Mono({
+const geistMono = localFont({
+  src: "./fonts/GeistMono-Variable.woff2",
   variable: "--font-geist-mono",
-  subsets: ["latin"],
+  weight: "100 900",
+  display: "swap",
 });
 
 export const metadata: Metadata = {

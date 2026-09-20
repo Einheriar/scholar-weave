@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  ChatImagesSchema,
   ChatContextSchema,
   ReviewCategorySchema,
   ReviewSeveritySchema,
@@ -14,6 +15,15 @@ import {
 export const ChatMessageSchema = z.object({
   role: z.enum(["user", "assistant"]),
   content: z.string(),
+  images: ChatImagesSchema.optional(),
+}).superRefine((message, ctx) => {
+  if (message.role === "assistant" && message.images) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["images"],
+      message: "assistant 历史轮次不能携带图片。",
+    });
+  }
 });
 export type ChatMessage = z.infer<typeof ChatMessageSchema>;
 
@@ -93,6 +103,10 @@ export const ChatRequestSchema = z.object({
   context: ChatContextSchema,
   /** 当前消息 */
   message: z.string().min(1),
+  /** 当前消息附带的用户图片 */
+  images: ChatImagesSchema.optional(),
+  /** Application capability override; never forwarded as a provider parameter. */
+  imageInputEnabled: z.boolean().optional(),
   /** 对话历史（已裁剪） */
   history: z.array(ChatMessageSchema).default([]),
   /** 必要文档片段：按上下文打包后的段落 */
