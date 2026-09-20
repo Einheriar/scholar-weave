@@ -27,6 +27,8 @@ export type ContextChatProps = {
   anchorAmbiguous: boolean;
   turns: ChatTurn[];
   busy: boolean;
+  /** Lock node mutations while any project request is in flight. */
+  interactionLocked?: boolean;
   /** 默认无选区且无建议时禁发；显式包含全文后由 page 解锁。 */
   sendDisabled: boolean;
   /** 当前消息是否附带最新的完整文档上下文。 */
@@ -84,6 +86,7 @@ export function ContextChat({
   anchorAmbiguous,
   turns,
   busy,
+  interactionLocked = false,
   sendDisabled,
   includeFullDocument,
   documentContextActive,
@@ -705,6 +708,7 @@ export function ContextChat({
       {timelineMounted && (
         <NodeTimeline
           nodes={nodes}
+          interactionLocked={interactionLocked}
           activeNodeId={activeNode?.id ?? null}
           documentContextActive={documentContextActive}
           staleNodeIds={staleNodeIds}

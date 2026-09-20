@@ -102,6 +102,9 @@ export default function Home() {
   const [reviews, setReviews] = useState<ReviewItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
+  const [manualSaveBusy, setManualSaveBusy] = useState(false);
+  const manualSaveBusyRef = useRef(false);
+  const [manualSaveError, setManualSaveError] = useState<string | null>(null);
   const saveVersionRef = useRef(0);
   const pendingProjectSavesRef = useRef(new Map<string, Set<Promise<void>>>());
   const deletingProjectIdRef = useRef<string | null>(null);
@@ -386,17 +389,42 @@ export default function Home() {
       latestRef.current.activeProjId === id
     ) {
       setSaveState("saved");
+      setManualSaveError(null);
     }
   }, []);
 
   // 防抖保存项目：编辑触发 saving 后延迟落库；聊天回复到达会立即落库（见 sendChat）。
   useEffect(() => {
-    if (!doc || saveState !== "saving") return;
+    if (!doc || saveState !== "saving" || manualSaveBusy) return;
     const t = setTimeout(() => {
       void persistProjectNow();
     }, 500);
     return () => clearTimeout(t);
-  }, [doc, reviews, nodes, saveState, activeProjId, persistProjectNow]);
+  }, [doc, reviews, nodes, saveState, activeProjId, persistProjectNow, manualSaveBusy]);
+
+  const handleManualSave = useCallback(async () => {
+    if (!latestRef.current.doc || requestLocked || manualSaveBusyRef.current) return;
+    manualSaveBusyRef.current = true;
+    setManualSaveBusy(true);
+    setManualSaveError(null);
+    setSaveState("saving");
+    // Start the minimum feedback window alongside the write, never before it.
+    const feedbackFinished = new Promise<void>((resolve) => window.setTimeout(resolve, 500));
+    const write = persistProjectNow();
+    const version = saveVersionRef.current;
+    try {
+      await write;
+    } catch {
+      if (saveVersionRef.current === version) {
+        setSaveState("idle");
+        setManualSaveError("保存失败，请重试");
+      }
+    } finally {
+      await feedbackFinished;
+      manualSaveBusyRef.current = false;
+      setManualSaveBusy(false);
+    }
+  }, [requestLocked, persistProjectNow]);
 
   // ── 项目：切换 / 新建 / 删除 ──
   /** 点开左栏项目：完整恢复正文 + 建议 + 聊天现场（规则 5 现场可回看） */
@@ -1623,8 +1651,8 @@ export default function Home() {
     [nodes, doc, reviews, ambiguousNodeIds],
   );
 
-  // 打开预览时暂时收起 sticky 聊天区，避免 z-40 的聊天面板把修改集完全盖住。
-  // 关闭动画结束后恢复打开前的状态；项目切换等外部关闭路径不走恢复。
+  // Preview and chat share the bottom dock; minimize chat while reviewing.
+  // Restore it after the exit animation, except when switching projects.
   const openChangeSet = useCallback(
     (cs: ChangeSet) => {
       if (!changeSetOpen) {
@@ -2094,12 +2122,31 @@ export default function Home() {
             {openCount} 条待处理
           </span>
           <span role="status" className="transition-opacity duration-300">
-            {saveState === "saving"
+            {saveState === "saving" || manualSaveBusy
               ? "保存中…"
               : saveState === "saved"
                 ? "已保存到本地"
                 : ""}
           </span>
+          {manualSaveError && <span role="alert" className="text-red-600 dark:text-red-400">{manualSaveError}</span>}
+          <Tooltip label={requestLocked ? "请求处理中，请稍候再保存" : "保存到本地"}>
+            <button
+              type="button"
+              aria-label="保存到本地"
+              aria-busy={saveState === "saving" || manualSaveBusy}
+              disabled={manualSaveBusy || requestLocked || !doc}
+              onClick={() => void handleManualSave()}
+              className="save-icon-button relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring disabled:cursor-default"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h12l4 4v12a2 2 0 0 1-2 2Z" />
+                <path d="M7 3v6h9V3M7 21v-8h10v8M13 5v2" />
+              </svg>
+              {(saveState === "saving" || manualSaveBusy) && (
+                <span key={manualSaveBusy ? "manual" : "auto"} aria-hidden="true" className="save-orbit-glow" />
+              )}
+            </button>
+          </Tooltip>
         </div>
       </header>
 
@@ -2171,21 +2218,6 @@ export default function Home() {
               onReviewEditUndoUnavailable={handleEditorReviewUndoUnavailable}
             />
 
-            {/* 修改集预览（对话或按意见生成时弹出）。常驻渲染：open 驱动进/出动画，
-                退出动画播完由 onClosed 卸载（延迟卸载，约定 8/15） */}
-            {changeSetMounted && activeChangeSet && (
-              <ChangeSetPreview
-                changeSet={activeChangeSet}
-                document={doc}
-                open={changeSetOpen}
-                onClosed={handleChangeSetClosed}
-                onAccept={acceptChangeSet}
-                onDiscard={discardChangeSet}
-                onPreviewEditChange={handlePreviewChangeSetEdit}
-                onRevealEdit={handleRevealChangeSetEdit}
-              />
-            )}
-
             {/* 上下文对话 */}
             {chatError && (
               <div className="animate-item-in flex items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300" role="alert">
@@ -2219,7 +2251,20 @@ export default function Home() {
               纯 CSS 无 JS 抖动；居中于内容列、左右留白天然避开左下两个 fixed 按钮。
               z-40 低于设置模态 z-50；reduced-motion 下 sticky 无位移动画。
             */}
-            <div className="sticky bottom-4 z-40">
+            <div data-editor-dock className="sticky bottom-4 z-40 flex flex-col gap-[4px]">
+              {/* Keep the preview available while navigating the document. */}
+              {changeSetMounted && activeChangeSet && (
+                <ChangeSetPreview
+                  changeSet={activeChangeSet}
+                  document={doc}
+                  open={changeSetOpen}
+                  onClosed={handleChangeSetClosed}
+                  onAccept={acceptChangeSet}
+                  onDiscard={discardChangeSet}
+                  onPreviewEditChange={handlePreviewChangeSetEdit}
+                  onRevealEdit={handleRevealChangeSetEdit}
+                />
+              )}
               <ContextChat
                 context={chatContext}
                 contextReview={contextReview}
@@ -2229,6 +2274,7 @@ export default function Home() {
                 anchorAmbiguous={anchorAmbiguous}
                 turns={displayedChatTurns}
                 busy={chatBusy}
+                interactionLocked={requestLocked}
                 sendDisabled={chatForbidden || requestLocked}
                 includeFullDocument={effectiveIncludeFullDocument}
                 documentContextActive={documentContextActive}

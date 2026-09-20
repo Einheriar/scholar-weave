@@ -705,8 +705,8 @@ function findChatAnchorPosition(
 }
 
 /**
- * 把正文锚点放到 sticky 聊天框上方的可读区域中央，而不是简单按整个视口居中。
- * 聊天框较高时，普通 scrollIntoView({block:"center"}) 可能把目标压在其后面。
+ * Place anchors in the readable area above the complete bottom dock.
+ * Both chat and ChangeSet previews can otherwise obscure centered targets.
  */
 function scrollChatAnchorIntoReadableArea(editor: Editor, position: number) {
   requestAnimationFrame(() => {
@@ -716,7 +716,8 @@ function scrollChatAnchorIntoReadableArea(editor: Editor, position: number) {
     } catch {
       return;
     }
-    const chat = document.querySelector('[aria-label="上下文对话"]');
+    const chat = document.querySelector('[data-editor-dock]') ??
+      document.querySelector('[aria-label="上下文对话"]');
     const chatTop =
       chat instanceof HTMLElement
         ? Math.min(window.innerHeight, chat.getBoundingClientRect().top)

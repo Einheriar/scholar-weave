@@ -1127,6 +1127,18 @@ test.describe("上下文对话（mock /api/chat）", () => {
 
     const dialog = page.getByRole("dialog", { name: "修改集预览" });
     await expect(dialog).toBeVisible();
+    const editorDock = page.locator("[data-editor-dock]");
+    await expect(editorDock).toBeVisible();
+    expect(
+      await editorDock.evaluate((element) => getComputedStyle(element).position),
+    ).toBe("sticky");
+    await expect
+      .poll(async () =>
+        dialog.evaluate(
+          (element) => element.closest("[data-editor-dock]") !== null,
+        ),
+      )
+      .toBe(true);
     await expect(page.getByRole("button", { name: "展开聊天区" })).toBeVisible();
     await expect
       .poll(async () => (await page.locator(".chat-body").boundingBox())?.height ?? -1)
@@ -1134,11 +1146,15 @@ test.describe("上下文对话（mock /api/chat）", () => {
     await expect
       .poll(async () => {
         const previewBox = await dialog.boundingBox();
-        const chatBox = await page
-          .locator('[aria-label="上下文对话"]')
-          .boundingBox();
+        const dockBox = await editorDock.boundingBox();
+        const viewportHeight = await page.evaluate(() => window.innerHeight);
         return Boolean(
-          previewBox && chatBox && previewBox.y + previewBox.height <= chatBox.y + 1,
+          previewBox &&
+            dockBox &&
+            previewBox.y >= dockBox.y &&
+            previewBox.y + previewBox.height <= dockBox.y + dockBox.height + 1 &&
+            previewBox.y >= 0 &&
+            previewBox.y + previewBox.height <= viewportHeight,
         );
       })
       .toBe(true);
@@ -1162,9 +1178,48 @@ test.describe("上下文对话（mock /api/chat）", () => {
     await expect
       .poll(async () => {
         const box = await bodyHighlight.boundingBox();
+        const dockBox = await editorDock.boundingBox();
+        return Boolean(
+          box && dockBox && box.y >= 0 && box.y + box.height <= dockBox.y - 8,
+        );
+      })
+      .toBe(true);
+    await expect
+      .poll(async () => {
+        const previewBox = await dialog.boundingBox();
         const viewportHeight = await page.evaluate(() => window.innerHeight);
         return Boolean(
-          box && box.y >= 0 && box.y + box.height <= viewportHeight,
+          previewBox &&
+            previewBox.y >= 0 &&
+            previewBox.y + previewBox.height <= viewportHeight,
+        );
+      })
+      .toBe(true);
+
+    // 预览停留在 sticky dock 中，滚动长文后仍可见并能继续操作。
+    await page.evaluate(() =>
+      window.scrollTo(0, document.documentElement.scrollHeight),
+    );
+    await expect
+      .poll(async () =>
+        page.evaluate(
+          () =>
+            window.scrollY >=
+            document.documentElement.scrollHeight - window.innerHeight - 8,
+        ),
+      )
+      .toBe(true);
+    await expect(dialog).toBeVisible();
+    await expect(editorDock).toBeVisible();
+    await expect(dialog.getByRole("button", { name: /全部接受/ })).toBeEnabled();
+    await expect
+      .poll(async () => {
+        const previewBox = await dialog.boundingBox();
+        const viewportHeight = await page.evaluate(() => window.innerHeight);
+        return Boolean(
+          previewBox &&
+            previewBox.y >= 0 &&
+            previewBox.y + previewBox.height <= viewportHeight,
         );
       })
       .toBe(true);

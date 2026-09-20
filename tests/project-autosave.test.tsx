@@ -267,6 +267,95 @@ describe("project autosave integration", () => {
     expect(screen.getByText("已保存到本地")).toBeInTheDocument();
   });
 
+  it("manual save persists the latest draft before the debounce elapses", async () => {
+    const project = makeProject("a", "original");
+    configureProjects([project]);
+    render(<Home />);
+    await settleInitialLoad();
+
+    await editBody("manual draft");
+    const saveButton = screen.getByRole("button", { name: "保存到本地" });
+    expect(saveButton).not.toBeDisabled();
+    expect(saveButton).toHaveAttribute("aria-busy", "true");
+
+    await act(async () => {
+      fireEvent.click(saveButton);
+      await Promise.resolve();
+    });
+    expect(storage.saveProject).toHaveBeenCalledTimes(1);
+    expect(storage.saveProject.mock.calls[0][0].doc.blocks[0].text).toBe("manual draft");
+
+    expect(saveButton).toBeDisabled();
+    expect(saveButton).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByText("保存中…")).toBeVisible();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(499);
+      fireEvent.click(saveButton);
+    });
+    expect(saveButton).toBeDisabled();
+    expect(storage.saveProject).toHaveBeenCalledTimes(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(saveButton).not.toBeDisabled();
+    expect(saveButton).toHaveAttribute("aria-busy", "false");
+    expect(screen.getByText("已保存到本地")).toBeVisible();
+    expect(storage.saveProject).toHaveBeenCalledTimes(1);
+  });
+
+  it("manual save pauses the pending debounce while its write is in flight", async () => {
+    const project = makeProject("a", "original");
+    configureProjects([project]);
+    const pendingSave = deferredSave();
+    storage.saveProject.mockImplementationOnce(() => pendingSave.promise);
+    render(<Home />);
+    await settleInitialLoad();
+
+    await editBody("manual draft");
+    const saveButton = screen.getByRole("button", { name: "保存到本地" });
+    await act(async () => {
+      fireEvent.click(saveButton);
+      await Promise.resolve();
+    });
+    expect(storage.saveProject).toHaveBeenCalledTimes(1);
+    expect(saveButton).toBeDisabled();
+    expect(saveButton).toHaveAttribute("aria-busy", "true");
+
+    await advanceDebounce();
+    expect(storage.saveProject).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      pendingSave.resolve();
+      await Promise.resolve();
+    });
+    expect(saveButton).not.toBeDisabled();
+  });
+
+  it("an edit made during manual save still gets a later automatic save", async () => {
+    const project = makeProject("a", "original");
+    configureProjects([project]);
+    const pendingSave = deferredSave();
+    storage.saveProject.mockImplementationOnce(() => pendingSave.promise);
+    render(<Home />);
+    await settleInitialLoad();
+
+    await editBody("manual draft");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "保存到本地" }));
+      await Promise.resolve();
+    });
+    expect(storage.saveProject).toHaveBeenCalledTimes(1);
+
+    await editBody("later edit");
+    await advanceDebounce();
+    await act(async () => {
+      pendingSave.resolve();
+      await Promise.resolve();
+    });
+    await advanceDebounce();
+
+    expect(storage.saveProject).toHaveBeenCalledTimes(2);
+    expect(storage.saveProject.mock.calls[1][0].doc.blocks[0].text).toBe("later edit");
+  });
+
   it("an old project save completing after a switch cannot cancel the new project's save", async () => {
     const projectA = makeProject("a", "A");
     const projectB = makeProject("b", "B");

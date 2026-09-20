@@ -10,6 +10,7 @@ import { Tooltip } from "@/components/ui/tooltip";
 
 export type NodeTimelineProps = {
   nodes: ChatNode[];
+  interactionLocked?: boolean;
   /** 当前查看的节点 id（当前节点行高亮，规则 18） */
   activeNodeId: string | null;
   /** 当前是否正在查看固定全文节点（包括尚未持久化的虚拟入口）。 */
@@ -52,6 +53,7 @@ const PAN_STEP = 2;
  */
 export function NodeTimeline({
   nodes,
+  interactionLocked = false,
   activeNodeId,
   documentContextActive,
   staleNodeIds,
@@ -162,6 +164,7 @@ export function NodeTimeline({
         <ul className="space-y-1 p-2">
           <NodeRow
             node={documentEntry}
+            interactionLocked={interactionLocked}
             isActive={documentContextActive}
             anchorStale={false}
             anchorAmbiguous={false}
@@ -178,6 +181,7 @@ export function NodeTimeline({
             <NodeRow
               key={node.id}
               node={node}
+              interactionLocked={interactionLocked}
               isActive={node.id === activeNodeId}
               anchorStale={staleNodeIds.has(node.id)}
               anchorAmbiguous={ambiguousNodeIds.has(node.id)}
@@ -215,6 +219,7 @@ export function NodeTimeline({
 /** 单行：节点身份竖条 + 尺子轨道（端点 = 提问，左对齐固定间距，溢出两端 hover 卷轴）+ N 问 + 删除 */
 function NodeRow({
   node,
+  interactionLocked,
   isActive,
   anchorStale,
   anchorAmbiguous,
@@ -228,6 +233,7 @@ function NodeRow({
   onDeleteNode,
 }: {
   node: ChatNode;
+  interactionLocked: boolean;
   isActive: boolean;
   anchorStale: boolean;
   anchorAmbiguous: boolean;
@@ -404,14 +410,22 @@ function NodeRow({
       {/* 固定全文入口不会消失：有讨论时这里只清空内容；0 问时不显示清空键。 */}
       {(!isDocument || userTurnCount > 0) && (
         <Tooltip
-          label={isDocument ? "清空全文节点讨论" : "删除该节点讨论"}
+          label={interactionLocked
+            ? "请求处理中，暂不能删除节点"
+            : isDocument ? "清空全文节点讨论" : "删除该节点讨论"}
           side="left"
         >
           <button
             type="button"
-            onClick={() => onDeleteNode(node.id)}
+            aria-disabled={interactionLocked}
+            onClick={() => {
+              if (!interactionLocked) onDeleteNode(node.id);
+            }}
             aria-label={isDocument ? "清空全文节点讨论" : "删除该节点讨论"}
-            className="shrink-0 rounded-md p-1 text-text-faint transition-colors hover:bg-surface hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring dark:hover:text-red-400"
+            className={"shrink-0 rounded-md p-1 text-text-faint transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring " +
+              (interactionLocked
+                ? "cursor-not-allowed opacity-45"
+                : "hover:bg-surface hover:text-red-600 dark:hover:text-red-400")}
           >
           <svg
             width="14"

@@ -785,7 +785,54 @@ body {
   animation: full-context-lock-confirm 300ms linear;
 }
 
+/* The save control stays quiet until hovered; only its halo orbits while saving. */
+.save-icon-button {
+  background: transparent;
+  transition: background-color 180ms ease, color 180ms ease, box-shadow 180ms ease;
+}
+.save-icon-button:hover,
+.save-icon-button:focus-visible {
+  background: var(--surface);
+  color: var(--brand);
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--text-muted) 18%, transparent);
+}
+.save-icon-button[aria-busy="true"] { color: var(--brand); }
+.save-orbit-glow {
+  pointer-events: none;
+  position: absolute;
+  inset: -3px;
+  padding: 3px;
+  border-radius: 11px;
+  /* Cut out the button interior so the blurred light cannot tint its icon. */
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+}
+.save-orbit-glow::before,
+.save-orbit-glow::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 12px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--brand);
+  /* 38px halo around a 32px button: start at top center and travel clockwise. */
+  offset-path: path("M19 1 H28 A9 9 0 0 1 37 10 V28 A9 9 0 0 1 28 37 H10 A9 9 0 0 1 1 28 V10 A9 9 0 0 1 10 1 H19 Z");
+  offset-position: 0 0;
+  offset-distance: 0%;
+  offset-rotate: auto;
+  animation: save-glow-orbit 500ms linear infinite;
+}
+.save-orbit-glow::before { filter: blur(2px); opacity: 0.45; }
+.save-orbit-glow::after { filter: blur(0.8px); opacity: 0.65; }
+@keyframes save-glow-orbit {
+  to { offset-distance: 100%; }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .save-orbit-glow::before, .save-orbit-glow::after { animation: none; }
+  .save-icon-button { transition: none; }
   html { transition: none; }
   .animate-modal-fade, .animate-modal-pop, .animate-item-in, .animate-item-out,
   .animate-drawer-in, .animate-drawer-out, .animate-modal-fade-out,
