@@ -310,6 +310,14 @@ export const DocumentEditor = forwardRef<
 
       if (transaction.docChanged) {
         const updates: ChatRangeLocatorUpdate[] = [];
+        const beforeDoc: DocumentState = {
+          ...docRef.current,
+          blocks: tiptapToBlocks(transaction.before.toJSON()).map((block) => ({
+            id: block.blockId ?? "",
+            type: "paragraph" as const,
+            text: block.text,
+          })),
+        };
         for (const node of chatNodesRef.current) {
           const anchor = node.anchor;
           const locator = node.rangeLocator;
@@ -321,33 +329,57 @@ export const DocumentEditor = forwardRef<
           ) {
             continue;
           }
-          const oldBlockStart = blockStartInPmDocument(
+          const blockIds = locator.blockIds?.length
+            ? locator.blockIds
+            : [anchor.blockId];
+          if (
+            !hasContiguousBlockIds(transaction.before, blockIds) ||
+            !hasContiguousBlockIds(transaction.doc, blockIds)
+          ) {
+            continue;
+          }
+          const previousHit = locateChatNodeRange(beforeDoc, node);
+          if (!previousHit.ok) continue;
+          const previousSegments = previousHit.segments ?? [previousHit];
+          const firstSegment = previousSegments[0];
+          const lastSegment = previousSegments[previousSegments.length - 1];
+          const oldFirstBlockStart = blockStartInPmDocument(
             transaction.before,
-            anchor.blockId,
+            firstSegment.blockId,
           );
-          const newBlockStart = blockStartInPmDocument(
-            transaction.doc,
-            anchor.blockId,
+          const oldLastBlockStart = blockStartInPmDocument(
+            transaction.before,
+            lastSegment.blockId,
           );
-          if (oldBlockStart == null || newBlockStart == null) continue;
+          if (
+            oldFirstBlockStart == null ||
+            oldLastBlockStart == null
+          ) {
+            continue;
+          }
 
           const mappedFrom = transaction.mapping.mapResult(
-            oldBlockStart + 1 + locator.start,
+            oldFirstBlockStart + 1 + firstSegment.start,
             1,
           );
           const mappedTo = transaction.mapping.mapResult(
-            oldBlockStart + 1 + locator.end,
+            oldLastBlockStart + 1 + lastSegment.end,
             -1,
           );
           if (mappedFrom.deleted || mappedTo.deleted) continue;
 
-          const nextBlock = transaction.doc.nodeAt(newBlockStart);
-          if (!nextBlock) continue;
-          const start = mappedFrom.pos - newBlockStart - 1;
-          const end = mappedTo.pos - newBlockStart - 1;
-          const nextText = pmPlainText(nextBlock);
-          if (nextText.slice(start, end) !== anchor.selectedText) continue;
-          const rangeLocator = createChatRangeLocator(nextText, start, end);
+          const nextText = pmPlainText(
+            transaction.doc,
+            mappedFrom.pos,
+            mappedTo.pos,
+          );
+          if (nextText !== anchor.selectedText) continue;
+          const rangeLocator = createRangeLocatorFromSelection(
+            transaction.doc,
+            mappedFrom.pos,
+            mappedTo.pos,
+            nextText,
+          );
           if (rangeLocator) updates.push({ nodeId: node.id, rangeLocator });
         }
         if (updates.length > 0) {
@@ -368,29 +400,24 @@ export const DocumentEditor = forwardRef<
       // 找到选区起点所在的段落 blockId
       const $from = editor.state.doc.resolve(from);
       let blockId: string | null = null;
-      let paragraphDepth: number | null = null;
-      let blockText = "";
       for (let d = $from.depth; d >= 0; d--) {
         const node = $from.node(d);
         if (node.type.name === "paragraph") {
           blockId = (node.attrs.blockId as string) ?? null;
-          paragraphDepth = d;
-          blockText = pmPlainText(node);
           break;
         }
       }
       const text = pmPlainText(editor.state.doc, from, to);
-      if (!blockId || paragraphDepth === null) {
+      if (!blockId) {
         cb(null);
         return;
       }
-      const paragraphStart = $from.start(paragraphDepth);
-      const start = from - paragraphStart;
-      const end = to - paragraphStart;
-      const rangeLocator =
-        blockText.slice(start, end) === text
-          ? createChatRangeLocator(blockText, start, end) ?? undefined
-          : undefined;
+      const rangeLocator = createRangeLocatorFromSelection(
+        editor.state.doc,
+        from,
+        to,
+        text,
+      );
       cb({ blockId, text, rangeLocator });
     },
   }, [document.id]);
@@ -695,11 +722,17 @@ function findChatAnchorPosition(
   if (!anchor.blockId || !anchor.selectedText) return null;
   const hit = locateChatNodeRange(doc, node);
   if (!hit.ok) return null;
-  const blockStart = blockStartPosition(editor, anchor.blockId);
-  if (blockStart == null) return null;
+  const segments = hit.segments?.length
+    ? hit.segments
+    : [{ blockId: hit.blockId, start: hit.start, end: hit.end }];
+  const first = segments[0];
+  const last = segments[segments.length - 1];
+  const firstBlockStart = blockStartPosition(editor, first.blockId);
+  const lastBlockStart = blockStartPosition(editor, last.blockId);
+  if (firstBlockStart == null || lastBlockStart == null) return null;
   return {
-    from: blockStart + 1 + hit.start,
-    to: blockStart + 1 + hit.end,
+    from: firstBlockStart + 1 + first.start,
+    to: lastBlockStart + 1 + last.end,
     selectRange: true,
   };
 }
@@ -770,6 +803,117 @@ function blockStartInPmDocument(
     return found === null;
   });
   return found;
+}
+
+/**
+ * Capture a manual selection as local-only evidence. A selection crossing
+ * paragraphs keeps the complete ordered paragraph snapshots joined with the
+ * same single-space separator used by ProseMirror textBetween.
+ */
+function createRangeLocatorFromSelection(
+  doc: Editor["state"]["doc"],
+  from: number,
+  to: number,
+  selectedText: string,
+): ChatRangeLocator | undefined {
+  if (to <= from || !selectedText) return undefined;
+
+  const allParagraphs: Array<{
+    blockId: string;
+    nodeStart: number;
+    contentSize: number;
+    blockText: string;
+  }> = [];
+  doc.descendants((node, pos) => {
+    if (node.type.name !== "paragraph") return false;
+    const blockId = node.attrs.blockId as string | null;
+    if (!blockId) return false;
+    allParagraphs.push({
+      blockId,
+      nodeStart: pos,
+      contentSize: node.content.size,
+      blockText: pmPlainText(node),
+    });
+    return false;
+  });
+
+  const selectedIndexes = allParagraphs.flatMap((paragraph, index) => {
+    const contentStart = paragraph.nodeStart + 1;
+    const contentEnd = contentStart + paragraph.contentSize;
+    return Math.max(from, contentStart) < Math.min(to, contentEnd)
+      ? [index]
+      : [];
+  });
+  if (selectedIndexes.length === 0) return undefined;
+  const firstIndex = selectedIndexes[0];
+  const lastIndex = selectedIndexes[selectedIndexes.length - 1];
+  const paragraphs = allParagraphs
+    .slice(firstIndex, lastIndex + 1)
+    .map((paragraph, relativeIndex) => {
+      const index = firstIndex + relativeIndex;
+      const contentStart = paragraph.nodeStart + 1;
+      const start = index === firstIndex
+        ? Math.max(0, Math.min(paragraph.contentSize, from - contentStart))
+        : 0;
+      const end = index === lastIndex
+        ? Math.max(0, Math.min(paragraph.contentSize, to - contentStart))
+        : paragraph.contentSize;
+      return {
+        ...paragraph,
+        start,
+        end,
+        text: pmPlainText(
+          doc.nodeAt(paragraph.nodeStart)!,
+          start,
+          end,
+        ),
+      };
+    });
+  if (paragraphs.map((entry) => entry.text).join(" ") !== selectedText) {
+    return undefined;
+  }
+
+  const first = paragraphs[0];
+  const last = paragraphs[paragraphs.length - 1];
+  const blockText = paragraphs.map((entry) => entry.blockText).join(" ");
+  let lastOffset = 0;
+  for (let index = 0; index < paragraphs.length - 1; index += 1) {
+    lastOffset += paragraphs[index].blockText.length + 1;
+  }
+  const start = first.start;
+  const end = lastOffset + last.end;
+  if (end <= start || blockText.slice(start, end) !== selectedText) {
+    return undefined;
+  }
+
+  const locator = createChatRangeLocator(blockText, start, end);
+  if (!locator) return undefined;
+  return {
+    ...locator,
+    ...(paragraphs.length > 1
+      ? { blockIds: paragraphs.map((entry) => entry.blockId) }
+      : {}),
+  } satisfies ChatRangeLocator;
+}
+
+/** Verify that a mapped range still covers the same ordered paragraph IDs. */
+function hasContiguousBlockIds(
+  doc: Editor["state"]["doc"],
+  blockIds: string[],
+): boolean {
+  if (blockIds.length === 0) return false;
+  const ids: string[] = [];
+  doc.forEach((node) => {
+    if (node.type.name !== "paragraph") return;
+    const blockId = node.attrs.blockId as string | null;
+    if (blockId) ids.push(blockId);
+  });
+  const first = ids.indexOf(blockIds[0]);
+  return (
+    first >= 0 &&
+    first + blockIds.length <= ids.length &&
+    blockIds.every((blockId, index) => ids[first + index] === blockId)
+  );
 }
 
 /**

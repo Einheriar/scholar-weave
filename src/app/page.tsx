@@ -38,6 +38,7 @@ import { buildSampleDocument, buildSampleReview } from "@/lib/sample-data";
 import { canLocateScope, locateRange } from "@/lib/anchoring";
 import {
   locateChatNodeRange,
+  selectionNeedsFullDocument,
   type ChatAnchorIssue,
 } from "@/lib/chat-range-anchor";
 import {
@@ -744,8 +745,32 @@ export default function Home() {
     if (next) {
       setSelectedId(null);
       setAnchorTop(null);
+      // Refresh an existing node as soon as trusted editor evidence arrives.
+      // Waiting until send leaves stale warnings and actions on a fresh selection.
+      const current = latestRef.current;
+      const anchor: ChatContext = {
+        type: "range",
+        blockId: next.blockId,
+        selectedText: next.text,
+      };
+      const existing = findNodeByAnchor(current.nodes, anchor);
+      if (existing && next.rangeLocator && current.doc) {
+        const refreshed = { ...existing, anchor, rangeLocator: next.rangeLocator };
+        if (
+          !getChatNodeAnchorIssue(refreshed, current.doc, current.reviews) &&
+          (existing.anchor.blockId !== next.blockId ||
+            JSON.stringify(existing.rangeLocator) !== JSON.stringify(next.rangeLocator))
+        ) {
+          const nextNodes = current.nodes.map((node) =>
+            node.id === existing.id ? refreshed : node,
+          );
+          latestRef.current.nodes = nextNodes;
+          setNodes(nextNodes);
+          markProjectDirty();
+        }
+      }
     }
-  }, []);
+  }, [markProjectDirty]);
 
   /**
    * ProseMirror knows the exact transaction mapping while the editor is open.
@@ -979,14 +1004,16 @@ export default function Home() {
   const displayedChatNode = activeNode;
   const displayedChatTurns = chatTurns;
 
-  /** 完整选中一个自然段时自动附带全文，但仍保留该段作为讨论锚点。 */
+  /** Full paragraphs and cross-paragraph selections retain their local anchor. */
   const fullParagraphSelected = useMemo(() => {
-    if (!doc || !selection || !selection.text.trim()) return false;
-    const block = doc.blocks.find((entry) => entry.id === selection.blockId);
-    return Boolean(
-      block && block.text.trim() && block.text.trim() === selection.text.trim(),
+    if (!doc) return false;
+    if (selection) return selectionNeedsFullDocument(
+      doc, selection.blockId, selection.text, selection.rangeLocator,
     );
-  }, [doc, selection]);
+    return activeNode?.anchor.type === "range" && selectionNeedsFullDocument(
+      doc, activeNode.anchor.blockId, activeNode.anchor.selectedText, activeNode.rangeLocator,
+    );
+  }, [doc, selection, activeNode]);
   const effectiveIncludeFullDocument =
     includeFullDocument || fullParagraphSelected || documentContextActive;
 
@@ -1156,10 +1183,8 @@ export default function Home() {
           ? selection.rangeLocator
           : undefined;
       const targetNode: ChatNode = existing
-        ? !existing.rangeLocator &&
-          selectedRangeLocator &&
-          existing.anchor.blockId === selection?.blockId
-          ? { ...existing, rangeLocator: selectedRangeLocator }
+        ? !retryNode && selectedRangeLocator
+          ? { ...existing, anchor: ctx, rangeLocator: selectedRangeLocator }
           : existing
         : {
             id: nodeId,
@@ -1209,14 +1234,10 @@ export default function Home() {
       const history = historySource
         .slice(-8)
         .map((t) => ({ role: t.role, content: t.content, ...(t.images?.length ? { images: t.images } : {}) }));
-      const requestRangeBlock =
-        ctx.type === "range"
-          ? requestSnapshot.blocks.find((block) => block.id === ctx.blockId)
-          : undefined;
-      const requestSelectsFullParagraph = Boolean(
-        requestRangeBlock?.text.trim() &&
-          requestRangeBlock.text.trim() === ctx.selectedText?.trim(),
-      );
+      const requestSelectsFullParagraph = ctx.type === "range" &&
+        selectionNeedsFullDocument(
+          requestSnapshot, ctx.blockId, ctx.selectedText, targetNode.rangeLocator,
+        );
       const includeFullForRequest =
         includeFullDocument ||
         requestSelectsFullParagraph ||
@@ -1425,6 +1446,11 @@ export default function Home() {
       }
 
       const scope = reviewScopeFromNode(node, current.reviews);
+      if (node.rangeLocator?.blockIds) {
+        setLlmRetry(null);
+        setChatError("跨段选区暂不支持转为单条审阅意见，请直接请求生成修改集，或选择单段后重试。");
+        return;
+      }
       if (!scope || !canLocateScope(currentDoc, scope)) {
         setLlmRetry(null);
         setChatError("正文已变化，无法把这条回复转为审阅意见。");

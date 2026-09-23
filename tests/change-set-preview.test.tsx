@@ -33,6 +33,63 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+describe("ChangeSetPreview 新增内容展示", () => {
+  function preview(original: string, replacement: string) {
+    const edit = { ...changeSet.edits[0], original, replacement };
+    const onAccept = vi.fn(() => true);
+    const onRevealEdit = vi.fn();
+    const view = render(
+      <ChangeSetPreview
+        changeSet={{ ...changeSet, edits: [edit] }}
+        document={{ ...doc, blocks: [{ ...doc.blocks[0], text: original }] }}
+        onAccept={onAccept}
+        onDiscard={() => {}}
+        open
+        onClosed={() => {}}
+        onPreviewEditChange={() => {}}
+        onRevealEdit={onRevealEdit}
+      />,
+    );
+    return { ...view, edit, onAccept, onRevealEdit };
+  }
+
+  it.each([
+    ["after", "The sample was assessed.", "The sample was assessed.\nWe retained 27 reports.", "\nWe retained 27 reports.", "之后"],
+    ["before", "保留原句。", "新增一句。 保留原句。", "新增一句。 ", "之前"],
+  ])("%s：保留原文，仅突出新增文本，定位与接受仍使用原 edit", (position, original, replacement, added, label) => {
+    const view = preview(original, replacement);
+    const row = view.container.querySelector(`[data-change-addition="${position}"]`)!;
+    expect(row).toBeInTheDocument();
+    expect(view.getByText(`新增 · 在以下原文${label}`)).toBeInTheDocument();
+    expect(view.getByText("原文（保留）")).toBeInTheDocument();
+    const originalElement = row.querySelector("[data-change-original]")!;
+    const addedElement = row.querySelector("[data-change-replacement]")!;
+    expect(originalElement.textContent).toBe(original);
+    expect(originalElement).not.toHaveClass("line-through");
+    expect(addedElement.textContent).toBe(added);
+    expect(Boolean(originalElement.compareDocumentPosition(addedElement) & Node.DOCUMENT_POSITION_FOLLOWING))
+      .toBe(position === "after");
+
+    fireEvent.click(view.getByRole("button", { name: "定位修改：首字母大写" }));
+    expect(view.onRevealEdit).toHaveBeenCalledWith(view.edit);
+    fireEvent.click(view.getByRole("button", { name: "接受选中（1）" }));
+    expect(view.onAccept).toHaveBeenCalledWith([view.edit.id]);
+  });
+
+  it.each([
+    ["改写并新增", "A sentence.", "A revised sentence. More text."],
+    ["删除", "A sentence.", ""],
+    ["无变化", "A sentence.", "A sentence."],
+    ["插在锚点内部", "First. Last.", "First. Added. Last."],
+    ["前后位置有歧义", "Again.", "Again.Again."],
+  ])("%s：仍显示完整原文与改文，不误标为前后新增", (_label, original, replacement) => {
+    const view = preview(original, replacement);
+    expect(view.container.querySelector("[data-change-addition]")).toBeNull();
+    expect(view.container.querySelector("[data-change-original]")).toHaveClass("line-through");
+    expect(view.container.querySelector("[data-change-replacement]")?.textContent).toBe(replacement);
+  });
+});
+
 describe("ChangeSetPreview 关闭收尾", () => {
   it("没有 animationend 时也会通过兜底定时器卸载", () => {
     vi.useFakeTimers();

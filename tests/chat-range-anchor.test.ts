@@ -2,9 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   createChatRangeLocator,
   locateChatNodeRange,
+  selectionNeedsFullDocument,
 } from "@/lib/chat-range-anchor";
 import { createDocument, updateBlockText } from "@/lib/revisions";
-import type { ChatNode, DocumentState } from "@/lib/review-schema";
+import { ChatNodeSchema, type ChatNode, type DocumentState } from "@/lib/review-schema";
 
 function rangeNode(
   doc: DocumentState,
@@ -28,6 +29,55 @@ function rangeNode(
 }
 
 describe("聊天 range 节点混合锚定", () => {
+  function multiNode(doc: DocumentState, start = 0, end?: number): ChatNode {
+    const blocks = doc.blocks.slice(0, 3);
+    const text = blocks.map((block) => block.text).join(" ");
+    const finish = end ?? text.length;
+    const selectedText = text.slice(start, finish);
+    return ChatNodeSchema.parse({
+      ...rangeNode(doc, selectedText, start),
+      rangeLocator: {
+        ...createChatRangeLocator(text, start, finish),
+        blockIds: blocks.map((block) => block.id),
+      },
+    });
+  }
+
+  it("跨三段选区刷新后仍逐段定位，并自动附带全文", () => {
+    const doc = createDocument("t", ["First paragraph.", "Second paragraph.", "Last paragraph.", "Outside."]);
+    const node = multiNode(doc, 6, 42);
+    const restored = ChatNodeSchema.parse(JSON.parse(JSON.stringify(node)));
+    const hit = locateChatNodeRange(doc, restored);
+    expect(hit).toMatchObject({ ok: true, segments: [
+      { blockId: doc.blocks[0].id, start: 6, end: 16 },
+      { blockId: doc.blocks[1].id, start: 0, end: 17 },
+      { blockId: doc.blocks[2].id, start: 0, end: 7 },
+    ] });
+    expect(selectionNeedsFullDocument(doc, node.anchor.blockId, node.anchor.selectedText, node.rangeLocator)).toBe(true);
+    expect(selectionNeedsFullDocument(doc, doc.blocks[0].id, "First")).toBe(false);
+    expect(selectionNeedsFullDocument(doc, doc.blocks[0].id, doc.blocks[0].text)).toBe(true);
+  });
+
+  it("跨段选区外编辑可重定位，但所选文本修改、删段、插段及重排均失效", () => {
+    const doc = createDocument("t", ["before target", "middle", "last after"]);
+    const node = multiNode(doc, 7, 25);
+    const edited = updateBlockText(doc, doc.blocks[0].id, "longer before target");
+    expect(locateChatNodeRange(edited, node)).toMatchObject({ ok: true, start: 14 });
+    expect(locateChatNodeRange(updateBlockText(doc, doc.blocks[1].id, "changed"), node).ok).toBe(false);
+    expect(locateChatNodeRange({ ...doc, blocks: [doc.blocks[0], doc.blocks[2]] }, node).ok).toBe(false);
+    expect(locateChatNodeRange({ ...doc, blocks: [doc.blocks[0], doc.blocks[2], doc.blocks[1]] }, node).ok).toBe(false);
+    expect(locateChatNodeRange({ ...doc, blocks: [doc.blocks[0], { ...doc.blocks[1], id: "inserted" }, ...doc.blocks.slice(1)] }, node).ok).toBe(false);
+  });
+
+  it("跨段保留硬换行和空段，不将选区扩大到未选中的段落", () => {
+    const doc = createDocument("t", ["first\nline", "", "last", "outside"]);
+    const node = multiNode(doc);
+    expect(locateChatNodeRange(doc, node)).toMatchObject({ ok: true, segments: [
+      { blockId: doc.blocks[0].id, start: 0, end: 10 },
+      { blockId: doc.blocks[2].id, start: 0, end: 4 },
+    ] });
+  });
+
   it("相同短语重复出现时按编辑器记录的位置恢复指定选区", () => {
     const text = "first target, second target.";
     const doc = createDocument("t", [text]);

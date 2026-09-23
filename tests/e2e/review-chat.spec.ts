@@ -815,6 +815,164 @@ test.describe("上下文对话（mock /api/chat）", () => {
     });
   });
 
+  for (const paragraphCount of [2, 3]) {
+    test(`跨${paragraphCount}个自然段的新选区会附带全文并保持可定位`, async ({ page }) => {
+    type CapturedChatRequest = ChatRequestCapture & { anchorStale: boolean };
+    const requests: CapturedChatRequest[] = [];
+    await mockChatRoute(page, {
+      withChanges: true,
+      onRequest: (body) => {
+        requests.push(body as CapturedChatRequest);
+      },
+    });
+    await gotoApp(page);
+    await loadSample(page);
+
+    const paragraphs = await paragraphTexts(page);
+    const selectedText = paragraphs.slice(1, paragraphCount + 1).join(" ");
+
+    // Use a real DOM range spanning consecutive editor paragraphs. The selection is
+    // intentionally made after sample decorations are mounted, so this also
+    // exercises the editor's selection-to-ProseMirror conversion.
+    const selectParagraphs = () => page.evaluate((count) => {
+      const paragraphs = Array.from(
+        document.querySelectorAll<HTMLElement>(".ProseMirror p"),
+      );
+      const startParagraph = paragraphs[1];
+      const endParagraph = paragraphs[count];
+      if (!startParagraph || !endParagraph) {
+        throw new Error("样例文档缺少用于跨段选区的段落");
+      }
+      const textNodes = (paragraph: HTMLElement) => {
+        const nodes: Text[] = [];
+        const walker = document.createTreeWalker(paragraph, NodeFilter.SHOW_TEXT);
+        let node: Node | null;
+        while ((node = walker.nextNode())) {
+          if (node instanceof Text) nodes.push(node);
+        }
+        return nodes;
+      };
+      const start = textNodes(startParagraph)[0];
+      const endNodes = textNodes(endParagraph);
+      const end = endNodes.at(-1);
+      if (!start || !end) throw new Error("跨段选区缺少文本节点");
+
+      const range = document.createRange();
+      range.setStart(start, 0);
+      range.setEnd(end, end.data.length);
+      const selection = window.getSelection();
+      if (!selection) throw new Error("浏览器不支持文本选区");
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.dispatchEvent(new Event("selectionchange", { bubbles: true }));
+      return selection.toString();
+    }, paragraphCount);
+    const nativeSelected = await selectParagraphs();
+    for (const paragraph of paragraphs.slice(1, paragraphCount + 1)) {
+      expect(nativeSelected).toContain(paragraph.slice(0, 32));
+    }
+
+    await expect(
+      page.getByRole("button", { name: "包含全文", exact: true }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator('[aria-label="上下文对话"]')).toContainText(
+      "当前上下文：选区",
+    );
+
+    await sendChatMessage(page, `结合这${paragraphCount}段直接给出修改`);
+    await expect(
+      page.getByText("我建议做一处措辞调整，让它更符合学术行文。", {
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(page.locator("[data-chat-anchor-stale]")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /预览修改/ })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "重新生成回复" })).toBeEnabled();
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0].includeFullDocument).toBe(true);
+    expect(requests[0].anchorStale).toBe(false);
+    expect(requests[0].blocks).toHaveLength(paragraphs.length);
+    expect(requests[0].context).toEqual({
+      type: "range",
+      blockId: expect.any(String),
+      selectedText,
+    });
+    expect(requests[0].context).not.toHaveProperty("rangeLocator");
+    expect(requests[0].context).not.toHaveProperty("blockIds");
+    expect(JSON.stringify(requests[0])).not.toContain("rangeLocator");
+    expect(JSON.stringify(requests[0])).not.toContain("blockIds");
+
+    // Regeneration must reuse the still-valid cross-paragraph anchor.
+    await page.getByRole("button", { name: "重新生成回复" }).click();
+    await expect.poll(() => requests.length).toBe(2);
+    await expect(page.locator("[data-chat-anchor-stale]")).toHaveCount(0);
+    expect(requests[1].includeFullDocument).toBe(true);
+    expect(requests[1].anchorStale).toBe(false);
+    expect(requests[1].context).toEqual({
+      type: "range",
+      blockId: expect.any(String),
+      selectedText,
+    });
+
+    await expect(page.getByRole("status").first()).toContainText("已保存到本地");
+    await page.reload();
+    await expect(page.locator(".ProseMirror")).toBeVisible();
+    await expect(
+      page.getByText("我建议做一处措辞调整，让它更符合学术行文。", {
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(page.locator("[data-chat-anchor-stale]")).toHaveCount(0);
+
+    const contextAnchor = page.getByRole("button", {
+      name: /定位到当前上下文正文：选区/,
+    });
+    await expect(contextAnchor).toBeEnabled();
+    await contextAnchor.click();
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          (window.getSelection()?.toString() ?? "").replace(/\s+/g, " ").trim(),
+        ),
+      )
+      .toBe(selectedText);
+
+    // Simulate a persisted chat created before multi-paragraph locator support.
+    await page.evaluate(async () => {
+      await new Promise<void>((resolve, reject) => {
+        const request = indexedDB.open("super-grammarly");
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          const db = request.result;
+          const tx = db.transaction("projects", "readwrite");
+          const table = tx.objectStore("projects");
+          const read = table.getAll();
+          read.onsuccess = () => {
+            for (const project of read.result) {
+              for (const node of project.nodes) delete node.rangeLocator;
+              table.put(project);
+            }
+          };
+          tx.oncomplete = () => { db.close(); resolve(); };
+          tx.onerror = () => { db.close(); reject(tx.error); };
+        };
+      });
+    });
+    await page.reload();
+    await expect(page.locator("[data-chat-anchor-stale]")).toBeVisible();
+    await selectParagraphs();
+    // A fresh manual selection repairs the existing node before sending anything.
+    await expect(page.locator("[data-chat-anchor-stale]")).toHaveCount(0);
+    await expect(contextAnchor).toBeEnabled();
+    await expect(page.getByRole("button", { name: "重新生成回复" })).toBeEnabled();
+    await expect(page.getByRole("status").first()).toContainText("已保存到本地");
+    await page.reload();
+    await expect(page.getByText("我建议做一处措辞调整，让它更符合学术行文。", { exact: true })).toBeVisible();
+    await expect(page.locator("[data-chat-anchor-stale]")).toHaveCount(0);
+    });
+  }
+
   test("纯解释回复不改正文", async ({ page }) => {
     await mockChatRoute(page, { withChanges: false });
     await gotoApp(page);

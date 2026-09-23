@@ -52,25 +52,31 @@ function buildDecorations(
     if (a.type === "range") {
       const hit = locateChatNodeRange(document, node);
       if (!hit.ok) continue;
-      const blockStart = a.blockId ? blockStarts.get(a.blockId) : undefined;
-      if (blockStart === undefined) continue;
-      const pmNode = doc.nodeAt(blockStart);
-      if (!pmNode) continue;
-      const from = blockStart + 1 + hit.start;
-      const to = blockStart + 1 + hit.end;
-      decos.push(
-        Decoration.inline(
-          from,
-          to,
-          {
-            class: "chat-anchor",
-            "data-chat-anchor-id": node.id,
-            role: "mark",
-            "aria-label": `聊天节点：${node.originalText || a.selectedText || "讨论"}`,
-          },
-          { chatNodeId: node.id },
-        ),
-      );
+      const segments = hit.segments?.length
+        ? hit.segments
+        : [{ blockId: hit.blockId, start: hit.start, end: hit.end }];
+      for (const segment of segments) {
+        const blockStart = blockStarts.get(segment.blockId);
+        if (blockStart === undefined) continue;
+        const pmNode = doc.nodeAt(blockStart);
+        if (!pmNode) continue;
+        const from = blockStart + 1 + segment.start;
+        const to = blockStart + 1 + segment.end;
+        if (to <= from) continue;
+        decos.push(
+          Decoration.inline(
+            from,
+            to,
+            {
+              class: "chat-anchor",
+              "data-chat-anchor-id": node.id,
+              role: "mark",
+              "aria-label": `聊天节点：${node.originalText || a.selectedText || "讨论"}`,
+            },
+            { chatNodeId: node.id },
+          ),
+        );
+      }
     } else if (a.type === "block") {
       if (!a.blockId || !canLocateScope(document, { type: "block", blockId: a.blockId })) {
         continue;

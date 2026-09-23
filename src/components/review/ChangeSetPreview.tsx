@@ -213,18 +213,7 @@ export function ChangeSetPreview({
                 }}
                 className="min-w-0 flex-1 cursor-pointer rounded-md text-left text-xs outline-none focus-visible:ring-2 focus-visible:ring-brand-ring"
               >
-                <div
-                  data-change-original
-                  className="min-w-0 break-words text-red-700 line-through decoration-red-400/60 dark:text-red-400"
-                >
-                  {r.edit.original}
-                </div>
-                <div
-                  data-change-replacement
-                  className="min-w-0 break-words font-medium text-emerald-700 dark:text-emerald-400"
-                >
-                  {r.edit.replacement}
-                </div>
+                <EditDiff edit={r.edit} />
                 {r.edit.explanation && (
                   <div className="mt-0.5 text-text-faint">
                     {renderMiniMarkdown(r.edit.explanation)}
@@ -278,5 +267,55 @@ export function ChangeSetPreview({
         </button>
       </div>
     </div>
+  );
+}
+
+function EditDiff({ edit }: { edit: ConcreteEdit }) {
+  const { original, replacement } = edit;
+  const hasAddition = original.length > 0 && replacement.length > original.length;
+  const after = hasAddition && replacement.startsWith(original);
+  const before = hasAddition && replacement.endsWith(original);
+
+  // Keep ambiguous repeated text and mixed rewrites in the full diff view.
+  if (after !== before) {
+    const added = after
+      ? replacement.slice(original.length)
+      : replacement.slice(0, replacement.length - original.length);
+    const addition = (
+      <div className="flex gap-1 rounded-md bg-brand-soft p-1.5 font-medium text-brand">
+        <span aria-hidden="true">＋</span>
+        <span data-change-replacement className="min-w-0 whitespace-pre-wrap break-words">{added}</span>
+      </div>
+    );
+    return (
+      <div className="space-y-1.5" data-change-addition={after ? "after" : "before"}>
+        <div className="font-medium text-brand">
+          新增 · 在以下原文{after ? "之后" : "之前"}
+        </div>
+        {before && addition}
+        <div className="text-text-muted">
+          <div className="mb-0.5 text-text-faint">原文（保留）</div>
+          <div data-change-original className="min-w-0 whitespace-pre-wrap break-words">{original}</div>
+        </div>
+        {after && addition}
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div
+        data-change-original
+        className="min-w-0 break-words text-red-700 line-through decoration-red-400/60 dark:text-red-400"
+      >
+        {original}
+      </div>
+      <div
+        data-change-replacement
+        className="min-w-0 break-words font-medium text-emerald-700 dark:text-emerald-400"
+      >
+        {replacement}
+      </div>
+    </>
   );
 }

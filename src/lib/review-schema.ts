@@ -173,14 +173,16 @@ export type ChatContext = z.infer<typeof ChatContextSchema>;
  */
 export const ChatRangeLocatorSchema = z
   .object({
-    /** 选区在建档时段落文本中的 UTF-16 起止偏移 */
+    /** UTF-16 offsets in the paragraph snapshot, or joined multi-block snapshot. */
     start: z.number().int().nonnegative(),
     end: z.number().int().positive(),
     /** 短上下文用于正文变化后的安全消歧 */
     prefix: z.string(),
     suffix: z.string(),
-    /** 建档时所在段落的完整快照，用于位置迁移与最终校验 */
+    /** Full snapshot; multiple paragraphs are joined with a single space. */
     blockText: z.string(),
+    /** Local-only ordered blocks for a cross-paragraph selection. */
+    blockIds: z.array(z.string().min(1)).min(2).optional(),
   })
   .refine((value) => value.end > value.start, {
     message: "range locator 的 end 必须大于 start",

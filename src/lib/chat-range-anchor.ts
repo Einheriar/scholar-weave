@@ -1,4 +1,4 @@
-import { locateInText, locateRange, type AnchorResult } from "./anchoring";
+import { locateInText, locateRange, type AnchorResult, type LocatedRange } from "./anchoring";
 import type {
   ChatNode,
   ChatRangeLocator,
@@ -10,6 +10,21 @@ const CONTEXT_LENGTH = 64;
 const MIN_FUZZY_CONTEXT = 8;
 
 export type ChatAnchorIssue = "changed" | "ambiguous";
+
+type ChatRangeResult = AnchorResult & { segments?: LocatedRange[] };
+
+/** Multi-paragraph selections need all selected blocks available for editing. */
+export function selectionNeedsFullDocument(
+  doc: DocumentState,
+  blockId: string | undefined,
+  text: string | undefined,
+  locator?: ChatRangeLocator,
+): boolean {
+  if (!text?.trim()) return false;
+  if (locator?.blockIds && locator.blockIds.length > 1) return true;
+  const block = doc.blocks.find((entry) => entry.id === blockId);
+  return Boolean(block?.text.trim() && block.text.trim() === text.trim());
+}
 
 /**
  * Build local-only evidence for a manual editor selection. This metadata is
@@ -49,7 +64,7 @@ export function createChatRangeLocator(
 export function locateChatNodeRange(
   doc: DocumentState,
   node: ChatNode,
-): AnchorResult {
+): ChatRangeResult {
   const anchor = node.anchor;
   const blockId = anchor.blockId ?? "";
   const original = anchor.selectedText ?? "";
@@ -66,6 +81,36 @@ export function locateChatNodeRange(
   }
 
   const locator = node.rangeLocator;
+  if (locator?.blockIds) {
+    const ids = locator.blockIds;
+    const blocks = doc.blocks.slice(blockIndex, blockIndex + ids.length);
+    if (
+      ids.length < 2 || new Set(ids).size !== ids.length ||
+      ids[0] !== blockId || blocks.length !== ids.length ||
+      blocks.some((block, index) => block.id !== ids[index])
+    ) {
+      return { ok: false, reason: "original_not_found", blockId, original };
+    }
+    // Use the same separator as editor plain-text selection extraction.
+    const combined = blocks.map((block) => block.text).join(" ");
+    const hit = locateChatNodeRange(
+      { ...doc, blocks: [{ ...blocks[0], text: combined }] },
+      { ...node, rangeLocator: { ...locator, blockIds: undefined } },
+    );
+    if (!hit.ok) return hit;
+    const segments: LocatedRange[] = [];
+    let offset = 0;
+    for (const block of blocks) {
+      const start = Math.max(0, hit.start - offset);
+      const end = Math.min(block.text.length, hit.end - offset);
+      if (end > start) segments.push({ blockId: block.id, start, end });
+      offset += block.text.length + 1;
+    }
+    if (segments.length === 0) {
+      return { ok: false, reason: "original_not_found", blockId, original };
+    }
+    return { ok: true, ...segments[0], segments };
+  }
   if (!locator || !isValidSnapshot(locator, original)) {
     return locateRange(doc, { type: "range", blockId, original });
   }
