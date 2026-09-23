@@ -3,10 +3,13 @@
   "version": "0.3.4",
   "license": "MIT",
   "private": true,
+  "type": "module",
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
+    "dev": "vite",
+    "build": "vite build",
+    "dev:next": "next dev",
+    "build:next": "next build",
+    "start:next": "next start",
     "package:app": "node scripts/package.mjs",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
@@ -15,6 +18,8 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-http": "^2.6.1",
     "@tiptap/pm": "^3.31.3",
     "@tiptap/react": "^3.31.3",
     "@tiptap/starter-kit": "^3.31.3",
@@ -26,7 +31,8 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
-    "@tailwindcss/postcss": "^4",
+    "@tailwindcss/vite": "^4.3.3",
+    "@tauri-apps/cli": "^2.11.5",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
@@ -41,6 +47,8 @@
     "playwright": "^1.63.0",
     "tailwindcss": "^4",
     "typescript": "^5",
+    "vite": "^8.3.0",
+    "vite-tsconfig-paths": "^6.1.1",
     "vitest": "^4.1.11"
   }
 }

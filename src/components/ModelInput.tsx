@@ -3,6 +3,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { LLMPreset } from "@/lib/settings";
+import { fetchModels } from "@/lib/api-client";
 
 type ModelList = { connection: string; models: string[]; error?: string };
 
@@ -41,14 +42,11 @@ export function ModelInput({ preset, onChange, className }: {
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
       try {
-        const response = await fetch("/api/models", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: connection,
-          signal: controller.signal,
-        });
-        const body = await response.json();
-        if (!response.ok || !Array.isArray(body.models) || !body.models.every((id: unknown) => typeof id === "string")) {
+        const body = await fetchModels(
+          JSON.parse(connection),
+          controller.signal,
+        );
+        if (!Array.isArray(body.models) || !body.models.every((id: unknown) => typeof id === "string")) {
           throw new Error("无法获取模型列表，可手动输入模型名称。");
         }
         if (!controller.signal.aborted) {

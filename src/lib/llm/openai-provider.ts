@@ -1,5 +1,6 @@
 import type { ChatMessage, GenerateOptions, LLMProvider, ProviderConfig } from "./provider";
 import { resolveThinkingParam } from "./thinking";
+import { isTauri, tauriProxyOptions } from "@/lib/platform";
 import { ProxyAgent } from "undici";
 
 /** Normalize the base URL shared by provider requests and model discovery. */
@@ -28,13 +29,16 @@ export class OpenAIProvider implements LLMProvider {
   private readonly apiKey: string;
   private readonly baseURL: string;
   private readonly model: string;
-  /** 代理 dispatcher；null 表示直连 */
+  /** 代理 dispatcher；null 表示直连（仅 Node 环境使用） */
   private readonly dispatcher: ProxyAgent | null;
+  /** 保留原始 proxy 配置，供 Tauri 分支用 plugin-http 的 proxy 参数 */
+  private readonly proxyConfig: ProviderConfig["proxy"];
 
   constructor(config: ProviderConfig) {
     this.apiKey = config.apiKey;
     this.baseURL = normalizeProviderBaseURL(config.baseURL);
     this.model = config.model;
+    this.proxyConfig = config.proxy;
     this.dispatcher = buildProxyDispatcher(config.proxy);
   }
 
@@ -59,17 +63,33 @@ export class OpenAIProvider implements LLMProvider {
 
     let res: Response;
     try {
-      const fetchOpts: RequestInit & { dispatcher?: ProxyAgent } = {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${this.apiKey}`,
-        },
-        body: JSON.stringify(body),
-        signal: options.signal,
-      };
-      if (this.dispatcher) fetchOpts.dispatcher = this.dispatcher;
-      res = await fetch(url, fetchOpts);
+      if (isTauri()) {
+        // Tauri 环境：用 plugin-http（Rust reqwest 发出），绕过 CORS
+        const { fetch: tauriFetch } = await import("@tauri-apps/plugin-http");
+        const proxy = await tauriProxyOptions(this.proxyConfig ?? undefined);
+        res = await tauriFetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${this.apiKey}`,
+          },
+          body: JSON.stringify(body),
+          signal: options.signal,
+          ...(proxy ? { proxy } : {}),
+        } as RequestInit);
+      } else {
+        const fetchOpts: RequestInit & { dispatcher?: ProxyAgent } = {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${this.apiKey}`,
+          },
+          body: JSON.stringify(body),
+          signal: options.signal,
+        };
+        if (this.dispatcher) fetchOpts.dispatcher = this.dispatcher;
+        res = await fetch(url, fetchOpts);
+      }
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") throw err;
       throw new Error(

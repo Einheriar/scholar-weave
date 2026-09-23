@@ -19,12 +19,14 @@
 
 ## 技术栈
 
-- Next.js 16 (App Router, Turbopack) + TypeScript + React 19
+- **Vite + React 19 + TypeScript**（Tauri 桌面版，发布路径）
+- **Next.js 16**（App Router, Turbopack）（浏览器版，开发/调试路径）
+- Tauri v2 + WebView2（Windows 桌面壳）
 - Tiptap 3 编辑器（Decoration 实现建议标记，不污染正文）
 - Zod 作为运行时数据协议的唯一来源
 - Dexie (IndexedDB) 本地持久化
 - Vitest + Testing Library（单元/集成测试）
-- Playwright（端到端测试）
+- Playwright（端到端测试，仅浏览器版）
 - LLM：OpenAI 兼容协议，当前默认接入 DeepSeek
 
 ## 本地运行
@@ -52,8 +54,7 @@ npm run dev                  # http://localhost:3000
 
 ## 版本号
 
-应用版本号的唯一来源是 `package.json` 的 `version`。构建时由 `next.config.ts`
-读取并以 `NEXT_PUBLIC_APP_VERSION` 内联给前端，页脚以 `v<major>.<minor>.<patch>` 形式展示。
+应用版本号的唯一来源是 `package.json` 的 `version`。构建时由 `next.config.ts`（Next.js 版）或 `vite.config.ts`（Vite/Tauri 版）读取并内联给前端，页脚以 `v<major>.<minor>.<patch>` 形式展示。
 
 发版时更新 `package.json` 的 `version` 并同步 `package-lock.json` 的项目版本，再运行 `npm run build`；不要在页面里硬编码版本号。
 `tests/version.test.ts` 会检查注入值确实来自 `package.json` 且符合 `v<major>.<minor>.<patch>` 格式。
@@ -61,20 +62,36 @@ npm run dev                  # http://localhost:3000
 ## 常用命令
 
 ```bash
-npm run dev        # 开发服务器
-npm run typecheck  # tsc --noEmit
-npm run lint       # ESLint
-npm run test       # Vitest（单元/集成）
-npm run test:e2e   # Playwright（端到端）
-npm run build      # 生产构建
-npm start          # 启动生产服务器
-npm run package:app # 打包成可双击启动的本地应用（见下）
+npm run dev           # Vite 开发服务器（http://localhost:5173，Tauri 路径）
+npm run dev:next      # Next.js 开发服务器（http://localhost:3000，浏览器版）
+npm run build         # Vite 生产构建（输出 dist/）
+npm run build:next    # Next.js 生产构建
+npm run typecheck     # tsc --noEmit
+npm run lint          # ESLint
+npm run test          # Vitest（单元/集成）
+npm run test:e2e      # Playwright（端到端，仅浏览器版）
+npx tauri dev         # Tauri 开发模式（Vite + 桌面窗口，热更新）
+npx tauri build       # Tauri 打包（NSIS 安装包）
+npm run package:app   # 旧方案：Next.js standalone + Node 启动器
 ```
 
 > **刚拿到源码（新克隆 / 解压 zip）时，先跑一次 `npm run build` 或 `npm run dev`。**
 > Next 会在构建时生成类型文件（`next-env.d.ts` 与 `.next/types/`），它们被 git 忽略、不在源码包里。
 > 少了它们，`npm run typecheck` 会报 `Cannot find name 'LayoutProps'`——这是缺生成物，不是代码有问题。
 > 跑一次构建即可恢复。
+
+### Tauri 开发
+
+```bash
+npx tauri dev    # 起 Vite dev server + 编译 Rust + 打开桌面窗口
+npx tauri build  # 出 NSIS 安装包（约 9 MB）
+```
+
+首次 `npx tauri dev` 会编译全部 Rust 依赖（1–2 分钟），之后增量编译很快。
+改前端代码走 Vite HMR 秒级生效；改 `src-tauri/` 下 Rust 代码会自动重新编译并重启应用。
+调试：窗口内右键 → Inspect（Edge DevTools）。
+
+需要本机有 Rust 工具链（`rustup`）和 WebView2（Win10 1803+ / Win11 自带）。
 
 ### 端到端测试
 
@@ -87,6 +104,16 @@ npm run test:e2e
 本机配置说明：用例使用系统安装的 Google Chrome（`channel: "chrome"`），而不是 Playwright 下载的 chromium——下载构建所需的系统依赖在本机不可用。若在别处运行，可先 `npx playwright install --with-deps chromium` 再改用默认浏览器。
 
 ## 打包成可双击启动的本地应用
+
+### 推荐方案：Tauri 桌面应用（发布路径）
+
+```bash
+npx tauri build
+```
+
+产物在 `src-tauri/target/release/bundle/nsis/superGrammarly_<version>_x64-setup.exe`（当前约 9 MB）。用户双击安装，有 WebView2 的机器零额外依赖，没有则安装包自动引导下载。
+
+### 旧方案：Next.js standalone（保留）
 
 日常使用不必每次开终端跑 `npm run dev`。可以打成一个自包含目录，双击启动、自动开浏览器：
 

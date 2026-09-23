@@ -15,7 +15,7 @@ export default defineConfig({
     setupFiles: ["./tests/setup.ts"],
     include: ["tests/**/*.test.{ts,tsx}", "src/**/*.test.{ts,tsx}"],
     // tests/e2e 下的 Playwright 用例不归 Vitest 管
-    exclude: ["node_modules/**", "tests/e2e/**", ".next/**"],
+    exclude: ["node_modules/**", "tests/e2e/**", ".next/**", "dist/**", "src-tauri/**"],
     coverage: {
       provider: "v8",
       include: ["src/lib/**"],

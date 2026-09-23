@@ -1,23 +1,16 @@
 import { NextResponse } from "next/server";
-import {
-  ChangeSetRequestSchema,
-  LLMChangeSetSchema,
-} from "@/lib/llm/chat-llm-schema";
-import { buildChangeSetMessages } from "@/lib/llm/chat-prompts";
-import { apiError, callLLMStructured } from "@/lib/llm/server-helpers";
-import { ChangeSetSchema, type ChangeSet, type DocumentState } from "@/lib/review-schema";
-import { resolveEdit } from "@/lib/changeset";
+import { processChangeSetRequest } from "@/lib/llm/change-set-core";
+import { getProviderFromEnv, getProviderFromUserConfig } from "@/lib/llm/provider";
+import { apiError } from "@/lib/llm/server-helpers";
+import { ChangeSetRequestSchema } from "@/lib/llm/chat-llm-schema";
 
 /**
  * POST /api/change-set（PLAN 12）。
- * 把一条 opinion（+ 用户补充要求）转化为可执行 ChangeSet，返回待预览形态。
- * 与 /api/chat 分离，便于 MVP 阶段独立测试；若后续 /api/chat 足够可靠可合并。
+ * 纯逻辑在 src/lib/llm/change-set-core.ts。
  */
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
-
-const MAX_TOTAL_CHARS = 60_000;
 
 export async function POST(request: Request) {
   let raw: unknown;
@@ -26,62 +19,37 @@ export async function POST(request: Request) {
   } catch {
     return apiError(400, "bad_json", "请求体不是合法 JSON。");
   }
-  const parsed = ChangeSetRequestSchema.safeParse(raw);
-  if (!parsed.success) {
+
+  const preParse = ChangeSetRequestSchema.safeParse(raw);
+  if (!preParse.success) {
     return apiError(
       400,
       "invalid_request",
-      `请求参数不合法：${parsed.error.issues[0]?.message ?? "未知错误"}`,
-    );
-  }
-  const body = parsed.data;
-
-  const totalChars = body.blocks.reduce((n, b) => n + b.text.length, 0);
-  if (totalChars > MAX_TOTAL_CHARS) {
-    return apiError(413, "too_long", `内容总字数超过上限（${MAX_TOTAL_CHARS}）。`);
-  }
-
-  const messages = buildChangeSetMessages(body);
-  const result = await callLLMStructured(request, messages, LLMChangeSetSchema, {
-    llmConfig: body.llmConfig,
-  });
-  if (!result.ok) return result.response;
-
-  const doc: DocumentState = {
-    id: body.documentId,
-    title: "",
-    blocks: body.blocks.map((b) => ({ id: b.id, type: "paragraph" as const, text: b.text })),
-    revision: body.revision,
-    checksum: body.checksum,
-    updatedAt: "",
-  };
-  const edits = result.data.edits
-    .map((e) => ({
-      ...e,
-      // 不信任 LLM 生成的标识，避免重复 ID 造成前端状态串联。
-      id: `edit_${crypto.randomUUID()}`,
-      status: "pending" as const,
-    }))
-    .filter((e) => resolveEdit(doc, e).ok);
-
-  if (edits.length === 0) {
-    return apiError(
-      502,
-      "no_applicable_edits",
-      "未能生成可定位的修改，请换个说法重试。",
+      `请求参数不合法：${preParse.error.issues[0]?.message ?? "未知错误"}`,
     );
   }
 
-  const changeSet: ChangeSet = {
-    id: `cs_${crypto.randomUUID()}`,
-    sourceReviewId: body.sourceReview.id,
-    documentRevision: body.revision,
-    summary: result.data.summary,
-    edits,
-  };
-  const validated = ChangeSetSchema.safeParse(changeSet);
-  if (!validated.success) {
-    return apiError(502, "llm_schema_mismatch", "修改集结构不合法。");
+  const llmConfig = preParse.data.llmConfig;
+
+  const getProvider = () =>
+    llmConfig?.apiKey
+      ? getProviderFromUserConfig(llmConfig)
+      : getProviderFromEnv();
+
+  const result = await processChangeSetRequest(raw, getProvider, { signal: request.signal });
+  if (!result.ok) {
+    const status =
+      result.error.code === "client_aborted"
+        ? 499
+        : result.error.code === "llm_timeout"
+          ? 504
+          : result.error.code === "too_long"
+            ? 413
+            : result.error.code === "invalid_request"
+              ? 400
+              : 502;
+    return apiError(status, result.error.code, result.error.message);
   }
-  return NextResponse.json({ changeSet: validated.data });
+
+  return NextResponse.json(result.data);
 }

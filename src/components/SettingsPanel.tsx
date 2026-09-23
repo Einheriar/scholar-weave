@@ -5,6 +5,7 @@ import { buttonClass } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { Tooltip } from "@/components/ui/tooltip";
 import { ModelInput } from "@/components/ModelInput";
+import { testConnection } from "@/lib/api-client";
 import { renderMiniMarkdown } from "@/lib/mini-markdown";
 import {
   saveSettings,
@@ -182,32 +183,25 @@ export function SettingsPanel({
     setTestResult(null);
     setTestErrorActive(false);
     try {
-      const res = await fetch("/api/test-connection", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          llmConfig: {
-            apiKey: preset.apiKey,
-            baseURL: preset.baseURL || undefined,
-            model: preset.model || undefined,
-            reasoningEffort: preset.reasoningEffort,
-            proxy: preset.proxy.enabled
-              ? { type: preset.proxy.type, host: preset.proxy.host, port: preset.proxy.port }
-              : undefined,
-          },
-        }),
+      const data = await testConnection({
+        llmConfig: {
+          apiKey: preset.apiKey,
+          baseURL: preset.baseURL || undefined,
+          model: preset.model || undefined,
+          reasoningEffort: preset.reasoningEffort,
+          proxy: preset.proxy.enabled
+            ? { type: preset.proxy.type, host: preset.proxy.host, port: preset.proxy.port }
+            : undefined,
+        },
       });
-      const data = await res.json();
-      if (res.ok && data.ok) {
+      if (data.ok) {
         setTestResult({ ok: true, message: "连接成功" });
         testResultTimerRef.current = window.setTimeout(() => {
           setTestResult(null);
           testResultTimerRef.current = null;
         }, 15000);
       } else {
-        showTestFailure(
-          data?.error?.message ?? `连接失败（HTTP ${res.status}）`,
-        );
+        showTestFailure(data?.error?.message ?? "连接失败。");
       }
     } catch (e) {
       showTestFailure(e instanceof Error ? e.message : "连接失败。");

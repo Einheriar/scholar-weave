@@ -1,5 +1,31 @@
 @import "tailwindcss";
 
+/* 字体经 @font-face 从 public/fonts/ 加载（原 next/font/local 的替代，变量名保持不变）。
+   浏览器版（Next.js）继续走 layout.tsx 的 next/font/local，那条路径不受影响。 */
+@font-face {
+  font-family: "MiSans";
+  src: url("/fonts/MiSans-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Inter";
+  src: url("/fonts/InterVariable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Geist Mono";
+  src: url("/fonts/GeistMono-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 /* 深浅色由用户手动切换（左下角浮动按钮），不跟随系统偏好：
    <html> 上的 .dark class 是唯一开关（ThemeToggle 写入，layout 内联脚本恢复）。 */
 @custom-variant dark (&:where(.dark, .dark *));
@@ -69,8 +95,8 @@
   --color-node-soft: var(--node-soft);
   --color-node-ring: var(--node-ring);
   /* 中文优先 MiSans，西文 fallback 到 Inter，再兜底系统字体栈 */
-  --font-sans: var(--font-misans), var(--font-inter), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --font-mono: var(--font-geist-mono);
+  --font-sans: "MiSans", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "Geist Mono", monospace;
 }
 
 html {

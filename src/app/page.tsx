@@ -7,6 +7,7 @@ import {
   type DocumentEditorHandle,
   type EditorSelection,
 } from "@/components/editor/DocumentEditor";
+import { callReview, callChat, callChangeSet } from "@/lib/api-client";
 import { ReviewSidebar } from "@/components/review/ReviewSidebar";
 import { ChangeSetPreview } from "@/components/review/ChangeSetPreview";
 import { ContextChat } from "@/components/chat/ContextChat";
@@ -668,11 +669,8 @@ export default function Home() {
     setSelectedId(null);
     const prefs = settingsToRequestBody(settings);
     try {
-      const res = await fetch("/api/review", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        signal: controller.signal,
-        body: JSON.stringify({
+      const data = await callReview(
+        {
           documentId: doc.id,
           revision: doc.revision,
           checksum: doc.checksum,
@@ -683,12 +681,9 @@ export default function Home() {
           customPrompt: prefs.reviewPrefs.customPrompt,
           llmConfig: prefs.llmConfig,
           blocks: doc.blocks.map((b) => ({ id: b.id, text: b.text })),
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data?.error?.message ?? `审阅失败（HTTP ${res.status}）`);
-      }
+        },
+        controller.signal,
+      );
       if (reviewRequestSeq.current !== requestId) return;
       const current = latestRef.current.doc;
       if (
@@ -1276,11 +1271,8 @@ export default function Home() {
       const prefs = settingsToRequestBody(settings);
 
       try {
-        const res = await fetch("/api/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          signal: controller.signal,
-          body: JSON.stringify({
+        const data = await callChat(
+          {
             documentId: requestSnapshot.id,
             revision: requestSnapshot.revision,
             checksum: requestSnapshot.checksum,
@@ -1308,12 +1300,9 @@ export default function Home() {
               : undefined,
             language: "en",
             llmConfig: prefs.llmConfig,
-          }),
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          throw new Error(data?.error?.message ?? `对话失败（HTTP ${res.status}）`);
-        }
+          },
+          controller.signal,
+        );
         if (chatRequestSeq.current !== requestId) return;
         const current = latestRef.current.doc;
         if (
@@ -1790,39 +1779,31 @@ export default function Home() {
       };
       const prefs = settingsToRequestBody(settings);
       try {
-        const res = await fetch("/api/change-set", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            documentId: doc.id,
-            revision: doc.revision,
-            checksum: doc.checksum,
-            sourceReview: {
-              id: item.id,
-              title: item.title,
-              explanation: item.explanation,
-              category: item.category,
-              scope:
-                item.scope.type === "document"
-                  ? { type: "document" }
-                  : { type: item.scope.type, blockId: scopeBlockId },
-            },
-            blocks:
+        const data = await callChangeSet({
+          documentId: doc.id,
+          revision: doc.revision,
+          checksum: doc.checksum,
+          sourceReview: {
+            id: item.id,
+            title: item.title,
+            explanation: item.explanation,
+            category: item.category,
+            scope:
               item.scope.type === "document"
-                ? doc.blocks.map((b) => ({ id: b.id, text: b.text }))
-                : packBlocks(
-                    doc,
-                    { type: "review", reviewId: id, blockId: scopeBlockId },
-                    false,
-                  ),
-            language: "en",
-            llmConfig: prefs.llmConfig,
-          }),
+                ? { type: "document" }
+                : { type: item.scope.type, blockId: scopeBlockId },
+          },
+          blocks:
+            item.scope.type === "document"
+              ? doc.blocks.map((b) => ({ id: b.id, text: b.text }))
+              : packBlocks(
+                  doc,
+                  { type: "review", reviewId: id, blockId: scopeBlockId },
+                  false,
+                ),
+          language: "en",
+          llmConfig: prefs.llmConfig,
         });
-        const data = await res.json();
-        if (!res.ok) {
-          throw new Error(data?.error?.message ?? `生成修改失败（HTTP ${res.status}）`);
-        }
         if (changeSetRequestSeq.current !== requestId) return;
         const current = latestRef.current.doc;
         if (

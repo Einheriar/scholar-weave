@@ -53,6 +53,24 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - 测试只覆盖自然段纯文本，编辑相关的 PM 位置计算改动后务必跑 `tests/editor-batch-apply.test.tsx`
 - 包管理：npm（有 `package-lock.json`）
 
+### 双轨架构（2026-09-23 起）
+
+同一个 `src/` 同时支持两条构建路径：
+
+| 路径 | 命令 | 用途 |
+|------|------|------|
+| **Vite + Tauri**（发布路径） | `npm run dev` / `npx tauri build` | 桌面应用，NSIS 安装包 |
+| **Next.js**（开发/调试路径） | `npm run dev:next` | 浏览器版，日常开发 |
+
+- **`npm run dev` 现在是 Vite（5173）**，不是 Next.js（3000）。Next.js 版用 `npm run dev:next`。
+- **LLM 调用的唯一入口是 `src/lib/api-client.ts`**。产品组件不直接 fetch `/api/*`，统一走 `callReview` / `callChat` / `callChangeSet` / `fetchModels` / `testConnection`。
+- **双轨共用的 LLM 逻辑在 `src/lib/llm/*-core.ts`**（review-core / chat-core / change-set-core / llm-core）。改 LLM 行为时必须同时考虑浏览器版和 Tauri 版。
+- **Tauri 版**用 `@tauri-apps/plugin-http`（Rust reqwest）直连 OpenAI 兼容 API，绕过 CORS。Key 仍存 localStorage。
+- **浏览器版**继续走 Next.js 服务端路由（`src/app/api/*`），Key 可存 `.env.local`。
+- `src/lib/platform.ts` 的 `isTauri()` 是前端代码里唯一感知运行平台的地方。
+- 打包产物：`npx tauri build` → `src-tauri/target/release/bundle/nsis/*.exe`（约 9 MB）。
+- **改 LLM 协议/行为时**：`*-core.ts` 是双轨共用的唯一来源，浏览器版的 `src/app/api/*/route.ts` 只是薄包装。
+
 ## 必须遵守的核心约束（实现时不要破坏）
 
 1. **不信任 LLM 字符坐标**：定位一律用 `blockId + 逐字 original + prefix/suffix` 消歧（`src/lib/anchoring.ts`）。定位失败标记 `stale`，**绝不猜测位置强行替换**。
@@ -313,14 +331,17 @@ tests/e2e/                      # Playwright 用例（helpers.ts 里是 mock 与
 ## 常用命令
 
 ```bash
-npm run dev         # 开发服务器（http://localhost:3000）
-npm run typecheck   # tsc --noEmit
-npm run lint        # ESLint
-npm run test        # Vitest（单元/集成）
-npm run test:e2e    # Playwright（自动起 dev server）
-npm run build       # 生产构建
-npm start           # 启动生产服务器
-npm run package:app # 打包成可双击启动的本地应用（见 README）
+npm run dev           # Vite 开发服务器（http://localhost:5173，Tauri 路径）
+npm run dev:next      # Next.js 开发服务器（http://localhost:3000，浏览器版）
+npm run build         # Vite 生产构建（输出 dist/）
+npm run build:next    # Next.js 生产构建
+npm run typecheck     # tsc --noEmit
+npm run lint          # ESLint
+npm run test          # Vitest（单元/集成）
+npm run test:e2e      # Playwright（自动起 dev server）
+npx tauri dev         # Tauri 开发模式（起 Vite + 桌面窗口）
+npx tauri build       # Tauri 打包（NSIS 安装包 → src-tauri/target/release/bundle/nsis/）
+npm run package:app   # 旧方案：Next.js standalone + Node 启动器（保留）
 ```
 
-每完成一项改动，跑 `typecheck` / `lint` / `test`，必要时加 `test:e2e`；提交前先征得用户同意（见上「Git 操作」）。
+每完成一项改动，跑 `typecheck` / `lint` / `test`；提交前先征得用户同意（见上「Git 操作」）。

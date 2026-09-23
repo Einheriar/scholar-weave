@@ -24,6 +24,10 @@
 # production
 /build
 
+# Tauri / Rust
+/src-tauri/target/
+/src-tauri/gen/
+
 # 打包产物（自包含本地应用，含 .env.local，勿提交）
 /dist/
 
