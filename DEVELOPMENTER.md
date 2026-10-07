@@ -62,10 +62,11 @@ npm run dev                  # http://localhost:3000
 ## 常用命令
 
 ```bash
-npm run dev           # Vite 开发服务器（http://localhost:5173，Tauri 路径）
-npm run dev:next      # Next.js 开发服务器（http://localhost:3000，浏览器版）
-npm run build         # Vite 生产构建（输出 dist/）
-npm run build:next    # Next.js 生产构建
+npm run dev           # Node.js / Next.js 开发服务器（http://localhost:3000）
+npm run build         # Next.js 生产构建
+npm start             # Next.js 生产服务
+npm run dev:vite      # Vite 前端开发服务器（http://localhost:5173，Tauri 路径）
+npm run build:vite    # Vite 生产构建（输出 dist/，供 Tauri 封装）
 npm run typecheck     # tsc --noEmit
 npm run lint          # ESLint
 npm run test          # Vitest（单元/集成）

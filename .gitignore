@@ -11,7 +11,9 @@
 !.yarn/versions
 
 # testing
-/coverage
+# Keep test sources in /tests/ tracked; ignore only generated artifacts.
+/coverage/
+# Playwright results include run metadata, screenshots, videos, and traces.
 /test-results/
 /playwright-report/
 /blob-report/

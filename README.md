@@ -60,6 +60,8 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
+`npm run dev` starts the Node.js / Next.js browser app with its `/api/*` server routes. Desktop development and packaging are separate: use `npx tauri dev` and `npx tauri build`, which start or build the Vite frontend automatically.
+
 The editor and built-in demo data work without an API key. To run a real review or chat, create a local environment file from the template:
 
 ```bash

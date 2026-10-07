@@ -7,25 +7,25 @@
 ## 已确认的决策
 
 - **LLM 调用走选项 1（直连）**：`src/lib/llm/` 逻辑搬到前端，Tauri 下用 `@tauri-apps/plugin-http`（Rust reqwest 发出，绕过 CORS）直连 OpenAI 兼容 API。Key 仍存 localStorage。Next.js 服务端路由保留给浏览器版，不删。
-- **保留双轨**：同一个 `src/` 同时支持 Vite（Tauri 开发路径）和 Next.js（浏览器开发路径）。`npm run dev` 切成 Vite，`npm run dev:next` 保留 Next。
+- **保留双轨**（2026-10-07 更新）：同一个 `src/` 同时支持 Next.js + Node.js（默认浏览器开发路径）和 Vite（独立 Tauri 封装路径）。`npm run dev` / `build` / `start` 使用 Next.js；Tauri 前置命令使用 `dev:vite` / `build:vite`。`dev:next` / `build:next` / `start:next` 保留为兼容别名。
 - **发布路径 = Tauri**，浏览器版 = 开发/调试载体。
 - **E2E 降级**：Playwright `channel: "chrome"` 对 Tauri 窗口无效，关键场景转手工回归 checklist 写进 `DEVELOPMENTER.md`，tauri-driver 重建留作后续可选任务。
 
 ## 阶段 0：Vite 基础设施
 
-目标：`npm run dev` 起 Vite（5173），产品行为与 Next 版（3000）一致，Vitest 320 全绿。不改任何产品逻辑。
+目标：`npm run dev:vite` 起 Vite（5173），`npm run dev` 起完整 Next.js 浏览器版（3000）。两条路径共用产品逻辑，测试保持通过。
 
-- [ ] 0.1 装依赖：`vite`、`@vitejs/plugin-react`、`@tailwindcss/vite`、`vite-tsconfig-paths`；移除 `@tailwindcss/postcss` + 删 `postcss.config.mjs`
+- [ ] 0.1 装依赖：`vite`、`@vitejs/plugin-react`、`@tailwindcss/vite`、`vite-tsconfig-paths`；保留 `@tailwindcss/postcss` 与 `postcss.config.mjs` 供 Next.js 处理样式
 - [ ] 0.2 新建 `vite.config.ts`：react + tailwindcss + tsconfig-paths 插件；`server.port: 5173 strictPort`；`build.target: chrome105`；`envPrefix: ['VITE_', 'TAURI_ENV_*']`
 - [ ] 0.3 新建 `index.html`：把 `layout.tsx` 的 `<html lang="zh-CN">`、三个字体变量、`suppressHydrationWarning`、主题恢复内联脚本原样搬过来
 - [ ] 0.4 字体：三个 woff2 从 `src/app/fonts/` 复制到 `public/fonts/`，`globals.css` 用 `@font-face` + `url('/fonts/...')` 声明（替代 next/font/local），`--font-misans` / `--font-inter` / `--font-geist-mono` 三个 CSS 变量名不变，下游零改动
 - [ ] 0.5 新建 `src/main.tsx`：`createRoot(...).render(<StrictMode><Page /></StrictMode>)`，从 `src/app/page.tsx` 导入
 - [ ] 0.6 新建 `src/vite-env.d.ts`：`/// <reference types="vite/client" />`
-- [ ] 0.7 `package.json` scripts：`dev` → `vite`，新增 `dev:next: next dev`，`build` → `vite build`，保留 `build:next`，加 `tauri`
-- [ ] 0.8 `tsconfig.json`：`include` 去掉 `.next/**`，加 `vite.config.ts` / `src/vite-env.d.ts`；删 `plugins: [{name: "next"}]`
-- [ ] 0.9 `vitest.config.mts`：`exclude` 里 `.next/**` → `dist/**`，其余照搬
+- [ ] 0.7 `package.json` scripts：`dev` / `build` / `start` 使用 Next.js；新增 `dev:vite` / `build:vite` 供 Tauri 前置命令使用；保留 Next.js 兼容别名
+- [ ] 0.8 `tsconfig.json`：保留 `.next/**` 类型与 Next.js 插件，同时包含 `vite.config.ts` / `src/vite-env.d.ts`
+- [ ] 0.9 `vitest.config.mts`：`exclude` 同时排除 `.next/**` / `dist/**` / `src-tauri/**`，其余照搬
 
-验证：5173 外观/交互与 3000 一致；test 全绿；typecheck 零报错；`npm run build` 出 `dist/`；`dev:next` 正常。
+验证：5173 前端正常渲染；3000 浏览器版含完整服务端路由；test 全绿；typecheck 零报错；`npm run build:vite` 出 `dist/`；`npm run dev` 正常。
 
 ## 阶段 1：抽出纯函数 LLM 核心
 

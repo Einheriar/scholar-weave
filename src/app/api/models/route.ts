@@ -1,9 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import {
-  buildProxyDispatcher,
-  normalizeProviderBaseURL,
-} from "@/lib/llm/openai-provider";
+import { normalizeProviderBaseURL } from "@/lib/llm/openai-provider";
+import { buildProxyDispatcher } from "@/lib/llm/server-proxy";
 import { normalizeModelIds } from "@/lib/llm/model-list";
 import type { ProxyAgent } from "undici";
 

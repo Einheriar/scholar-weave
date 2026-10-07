@@ -1,4 +1,5 @@
 import { OpenAIProvider } from "./openai-provider";
+import { buildProxyDispatcher } from "./server-proxy";
 
 /**
  * 轻量 LLM provider adapter（PLAN 8.1）。
@@ -62,7 +63,7 @@ export function getProviderFromEnv(): LLMProvider {
   const model = process.env.LLM_MODEL ?? "deepseek-chat";
   const baseURL = process.env.OPENAI_BASE_URL ?? "https://api.openai.com";
   const proxy = resolveProxyFromEnv();
-  return new OpenAIProvider({ apiKey, baseURL, model, proxy });
+  return new OpenAIProvider({ apiKey, baseURL, model, proxy }, buildProxyDispatcher(proxy));
 }
 
 /**
@@ -75,12 +76,15 @@ export function getProviderFromUserConfig(config: {
   model?: string;
   proxy?: ProxyConfig;
 }): LLMProvider {
-  return new OpenAIProvider({
-    apiKey: config.apiKey,
-    baseURL: config.baseURL,
-    model: config.model || "deepseek-chat",
-    proxy: config.proxy,
-  });
+  return new OpenAIProvider(
+    {
+      apiKey: config.apiKey,
+      baseURL: config.baseURL,
+      model: config.model || "deepseek-chat",
+      proxy: config.proxy,
+    },
+    buildProxyDispatcher(config.proxy),
+  );
 }
 
 /**

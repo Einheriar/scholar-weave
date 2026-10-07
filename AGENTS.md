@@ -59,10 +59,10 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 | 路径 | 命令 | 用途 |
 |------|------|------|
-| **Vite + Tauri**（发布路径） | `npm run dev` / `npx tauri build` | 桌面应用，NSIS 安装包 |
-| **Next.js**（开发/调试路径） | `npm run dev:next` | 浏览器版，日常开发 |
+| **Next.js + Node.js**（默认开发路径） | `npm run dev` / `npm run build` / `npm start` | 浏览器版，日常开发 |
+| **Vite + Tauri**（独立封装路径） | `npx tauri dev` / `npx tauri build` | 桌面应用，NSIS 安装包 |
 
-- **`npm run dev` 现在是 Vite（5173）**，不是 Next.js（3000）。Next.js 版用 `npm run dev:next`。
+- **`npm run dev` 默认启动 Node.js / Next.js（3000）**。桌面封装独立运行，Tauri 的前置命令使用 `dev:vite` / `build:vite`（5173 / dist），不要重新把默认开发命令切成 Vite。`dev:next` / `build:next` / `start:next` 仅保留为兼容别名。
 - **LLM 调用的唯一入口是 `src/lib/api-client.ts`**。产品组件不直接 fetch `/api/*`，统一走 `callReview` / `callChat` / `callChangeSet` / `fetchModels` / `testConnection`。
 - **双轨共用的 LLM 逻辑在 `src/lib/llm/*-core.ts`**（review-core / chat-core / change-set-core / llm-core）。改 LLM 行为时必须同时考虑浏览器版和 Tauri 版。
 - **Tauri 版**用 `@tauri-apps/plugin-http`（Rust reqwest）直连 OpenAI 兼容 API，绕过 CORS。Key 仍存 localStorage。
@@ -70,6 +70,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - `src/lib/platform.ts` 的 `isTauri()` 是前端代码里唯一感知运行平台的地方。
 - 打包产物：`npx tauri build` → `src-tauri/target/release/bundle/nsis/*.exe`（约 9 MB）。
 - **改 LLM 协议/行为时**：`*-core.ts` 是双轨共用的唯一来源，浏览器版的 `src/app/api/*/route.ts` 只是薄包装。
+- **Node 专属依赖不能进入客户端运行时依赖图。** `openai-provider.ts` 被 `api-client.ts` 供浏览器与 Tauri 共用，只能用 type import 引用 `undici`；代理 dispatcher 在 `server-proxy.ts` 创建，由服务端 provider factory 注入。静态导入 `undici` 会使 Vite 页面在渲染前报 `process is not defined` 并白屏。Next.js 的 Tailwind 4 处理仍需要 `postcss.config.mjs` 与 `@tailwindcss/postcss`，不能因 Vite 使用独立插件就移除。
 
 ## 必须遵守的核心约束（实现时不要破坏）
 
@@ -331,10 +332,11 @@ tests/e2e/                      # Playwright 用例（helpers.ts 里是 mock 与
 ## 常用命令
 
 ```bash
-npm run dev           # Vite 开发服务器（http://localhost:5173，Tauri 路径）
-npm run dev:next      # Next.js 开发服务器（http://localhost:3000，浏览器版）
-npm run build         # Vite 生产构建（输出 dist/）
-npm run build:next    # Next.js 生产构建
+npm run dev           # Node.js / Next.js 开发服务器（http://localhost:3000）
+npm run build         # Next.js 生产构建
+npm start             # Next.js 生产服务
+npm run dev:vite      # Vite 前端开发服务器（http://localhost:5173，Tauri 路径）
+npm run build:vite    # Vite 生产构建（输出 dist/，供 Tauri 封装）
 npm run typecheck     # tsc --noEmit
 npm run lint          # ESLint
 npm run test          # Vitest（单元/集成）

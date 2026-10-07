@@ -1,23 +1,11 @@
 import type { ChatMessage, GenerateOptions, LLMProvider, ProviderConfig } from "./provider";
 import { resolveThinkingParam } from "./thinking";
 import { isTauri, tauriProxyOptions } from "@/lib/platform";
-import { ProxyAgent } from "undici";
+import type { ProxyAgent } from "undici";
 
 /** Normalize the base URL shared by provider requests and model discovery. */
 export function normalizeProviderBaseURL(baseURL?: string): string {
   return (baseURL ?? "https://api.openai.com").replace(/\/+$/, "");
-}
-
-/**
- * 构造代理 dispatcher；proxy 为 undefined 时返回 null（直连）。
- * http:// 与 socks5:// 都通过 undici 的 ProxyAgent 支持（Node 内置模块）。
- */
-export function buildProxyDispatcher(
-  proxy: { type: "http" | "socks5"; host: string; port: number } | undefined,
-): ProxyAgent | null {
-  if (!proxy) return null;
-  const scheme = proxy.type === "socks5" ? "socks5://" : "http://";
-  return new ProxyAgent(`${scheme}${proxy.host}:${proxy.port}`);
 }
 
 /**
@@ -34,12 +22,12 @@ export class OpenAIProvider implements LLMProvider {
   /** 保留原始 proxy 配置，供 Tauri 分支用 plugin-http 的 proxy 参数 */
   private readonly proxyConfig: ProviderConfig["proxy"];
 
-  constructor(config: ProviderConfig) {
+  constructor(config: ProviderConfig, dispatcher: ProxyAgent | null = null) {
     this.apiKey = config.apiKey;
     this.baseURL = normalizeProviderBaseURL(config.baseURL);
     this.model = config.model;
     this.proxyConfig = config.proxy;
-    this.dispatcher = buildProxyDispatcher(config.proxy);
+    this.dispatcher = dispatcher;
   }
 
   async generate(

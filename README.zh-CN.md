@@ -60,6 +60,8 @@ npm run dev
 
 打开 [http://localhost:3000](http://localhost:3000)。
 
+`npm run dev` 启动 Node.js / Next.js 浏览器版，包含完整的 `/api/*` 服务端路由。桌面开发和封装独立使用 `npx tauri dev`、`npx tauri build`，它们会自动启动或构建 Vite 前端。
+
 编辑器和内置演示数据无需 API Key 即可使用。如果要执行真实审阅或聊天，请根据模板创建本地环境文件：
 
 ```bash
