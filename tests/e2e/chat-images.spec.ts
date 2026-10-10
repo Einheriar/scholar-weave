@@ -24,6 +24,62 @@ async function pasteImages(page: Page, names: string[]) {
   }, names);
 }
 
+test("image failure stays visible over a long document and retry preserves the attachment", async ({ page }) => {
+  await page.setViewportSize({ width: 1752, height: 900 });
+  await page.addInitScript(() => localStorage.setItem("supergrammarly-chat-height", "720"));
+  const requests: ChatRequest[] = [];
+  await page.route("**/api/chat", async (route) => {
+    requests.push(ChatRequestSchema.parse(route.request().postDataJSON()));
+    await route.fulfill({
+      status: requests.length === 1 ? 502 : 200,
+      contentType: "application/json",
+      body: JSON.stringify(requests.length === 1
+        ? { error: { code: "llm_error", message: "无法连接 LLM 服务：fetch failed" } }
+        : { type: "answer", answer: "图片重试成功。" }),
+    });
+  });
+  await gotoApp(page);
+  await loadSample(page);
+  await page.locator(".ProseMirror").fill(
+    "The upstanding participant provided a reference image.\n" +
+    "This paragraph makes the document long enough to scroll.\n".repeat(60),
+  );
+  await selectTextInEditor(page, "upstanding");
+  await pasteImages(page, ["reference.png"]);
+  await expect(page.locator("[data-chat-image-attachments] img")).toHaveCount(1);
+  await sendChatMessage(page, "请解释图片");
+  const chat = page.getByRole("region", { name: "上下文对话" });
+  const alert = chat.getByRole("alert");
+  await expect(alert).toContainText("fetch failed");
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await expect(alert).toBeInViewport({ ratio: 1 });
+  const [alertBox, inputBox] = await Promise.all([
+    alert.boundingBox(),
+    page.getByLabel("对话输入框").boundingBox(),
+  ]);
+  expect(alertBox!.y + alertBox!.height).toBeLessThanOrEqual(inputBox!.y);
+  expect(inputBox!.y - (alertBox!.y + alertBox!.height)).toBeLessThan(30);
+  await chat.locator("[data-chat-message-list]").evaluate((element) => { element.scrollTop = 0; });
+  await expect(alert).toBeInViewport({ ratio: 1 });
+  await expect(alert.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    return element.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
+  })).resolves.toBe(true);
+  await chat.getByRole("button", { name: "最小化聊天区" }).click();
+  await expect(alert).toHaveCount(1);
+  await expect(alert).toBeInViewport({ ratio: 1 });
+  await chat.getByRole("button", { name: "展开聊天区" }).click();
+  await expect(alert).toHaveCount(1);
+  await expect(alert).toBeInViewport({ ratio: 1 });
+  await alert.getByRole("button", { name: "重试对话" }).click();
+  await expect(page.getByText("图片重试成功。", { exact: true })).toBeVisible();
+  expect(requests).toHaveLength(2);
+  expect(requests[1].images).toEqual(requests[0].images);
+  expect(requests[1].history).toEqual([]);
+  await expect(page.getByText("请解释图片", { exact: true })).toHaveCount(1);
+  await expect(alert).toHaveCount(0);
+});
+
 test("pasted image survives reload and is included in follow-up history", async ({ page }) => {
   const requests: ChatRequest[] = [];
   await mockChatRoute(page, { onRequest: (body) => requests.push(ChatRequestSchema.parse(body)) });

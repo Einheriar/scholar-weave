@@ -65,7 +65,10 @@ export type ChatRangeLocatorUpdate = {
 
 export type DocumentEditorHandle = {
   /** 把编辑器滚动并选中到某条建议对应的正文位置（侧栏→正文定位） */
-  revealItem: (item: ReviewItem) => void;
+  revealItem: (item: ReviewItem, options?: {
+    viewportCenter?: number;
+    onAligned?: (viewportCenter: number) => void;
+  }) => void;
   /** 定位聊天节点的正文锚点；范围锚恢复选区，其余类型只落光标／高亮 */
   revealChatAnchor: (node: ChatNode, reviewItem?: ReviewItem | null) => boolean;
   /** 返回某条建议标记在视口中的纵向位置（相对 document），供侧栏对齐用 */
@@ -162,6 +165,7 @@ export const DocumentEditor = forwardRef<
    * 不能经 onSelectionUpdate 冒充用户手划的 range 上下文。
    */
   const locatingReviewRef = useRef(false);
+  const reviewScrollRef = useRef<(() => void) | null>(null);
   /** 惰性持有 editor.view，供 extensions 闭包内访问 DOM（不进 deps，避免重建） */
   const viewRef = useRef<Editor["view"] | null>(null);
   useEffect(() => {
@@ -273,6 +277,7 @@ export const DocumentEditor = forwardRef<
       setCanUndo(false);
     },
     onUpdate({ editor }) {
+      reviewScrollRef.current?.();
       const json = editor.getJSON() as PMDocNode;
       const blocks = tiptapToBlocks(json);
       const current = docRef.current;
@@ -389,6 +394,7 @@ export const DocumentEditor = forwardRef<
     },
     onSelectionUpdate({ editor }) {
       if (locatingReviewRef.current) return;
+      reviewScrollRef.current?.();
       const { from, to, empty } = editor.state.selection;
       editor.view.dom.dataset.manualSelection = empty ? "false" : "true";
       const cb = onSelChangeRef.current;
@@ -421,6 +427,8 @@ export const DocumentEditor = forwardRef<
       cb({ blockId, text, rangeLocator });
     },
   }, [document.id]);
+
+  useEffect(() => () => reviewScrollRef.current?.(), [editor]);
 
   // readOnly 可能在编辑器实例创建后变化，使用 Tiptap API 同步编辑能力。
   useEffect(() => {
@@ -482,7 +490,8 @@ export const DocumentEditor = forwardRef<
   }, [editor, chatNodes]);
 
   useImperativeHandle(ref, () => ({
-    revealItem(item) {
+    revealItem(item, options) {
+      reviewScrollRef.current?.();
       if (!editor) return;
       const pos = findItemPosition(editor, docRef.current, item);
       if (pos == null) return;
@@ -495,13 +504,13 @@ export const DocumentEditor = forwardRef<
         editor.view.dom.dataset.manualSelection = "false";
         editor
           .chain()
-          .focus()
+          .focus(undefined, { scrollIntoView: false })
           .setTextSelection(to > from ? { from, to } : from)
-          .scrollIntoView()
           .run();
       } finally {
         locatingReviewRef.current = false;
       }
+      reviewScrollRef.current = scrollReviewIntoReadableArea(editor, from, to, options);
     },
     revealChatAnchor(node, reviewItem) {
       if (!editor) return false;
@@ -735,6 +744,74 @@ function findChatAnchorPosition(
     to: lastBlockStart + 1 + last.end,
     selectRange: true,
   };
+}
+
+/**
+ * Align a review's first line with its card without scrolling behind the dock.
+ * A long paragraph keeps its beginning readable when the whole range cannot fit.
+ */
+function scrollReviewIntoReadableArea(
+  editor: Editor,
+  from: number,
+  to: number,
+  options?: { viewportCenter?: number; onAligned?: (viewportCenter: number) => void },
+): () => void {
+  let raf = 0;
+  const cancel = () => {
+    cancelAnimationFrame(raf);
+    window.removeEventListener("wheel", cancel);
+    window.removeEventListener("touchstart", cancel);
+    window.removeEventListener("pointerdown", cancel);
+    window.removeEventListener("keydown", cancel);
+  };
+  const finish = () => {
+    cancel();
+    if (editor.isDestroyed) return;
+    const rect = editor.view.coordsAtPos(from);
+    options?.onAligned?.((rect.top + rect.bottom) / 2);
+  };
+  raf = requestAnimationFrame(() => {
+    if (editor.isDestroyed) return;
+    const start = editor.view.coordsAtPos(from);
+    const end = editor.view.coordsAtPos(to);
+    const dock = document.querySelector("[data-editor-dock]");
+    const dockTop = dock instanceof HTMLElement ? dock.getBoundingClientRect().top : window.innerHeight;
+    const visibleTop = 24;
+    const visibleBottom = Math.max(visibleTop + 24, Math.min(window.innerHeight - 24, dockTop - 16));
+    const halfLine = (start.bottom - start.top) / 2;
+    const minCenter = visibleTop + halfLine;
+    const maxCenter = Math.max(minCenter, visibleBottom - (end.bottom - start.top) + halfLine);
+    const desiredY = Math.max(minCenter, Math.min(
+      options?.viewportCenter ?? visibleTop + (visibleBottom - visibleTop) * 0.45,
+      maxCenter,
+    ));
+    const initialY = window.scrollY;
+    const maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+    const targetY = Math.max(0, Math.min(maxScroll, initialY + (start.top + start.bottom) / 2 - desiredY));
+    const delta = targetY - initialY;
+    const reduce = navigator.webdriver ||
+      (typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+    if (reduce || Math.abs(delta) < 2) {
+      window.scrollTo({ top: targetY, behavior: "instant" });
+      finish();
+      return;
+    }
+    const startedAt = performance.now();
+    const duration = Math.min(500, 150 + Math.abs(delta) / 4);
+    const step = (now: number) => {
+      if (editor.isDestroyed) { cancel(); return; }
+      const progress = Math.min(1, (now - startedAt) / duration);
+      window.scrollTo({ top: initialY + delta * (1 - Math.pow(1 - progress, 3)), behavior: "instant" });
+      if (progress < 1) raf = requestAnimationFrame(step);
+      else finish();
+    };
+    raf = requestAnimationFrame(step);
+  });
+  window.addEventListener("wheel", cancel, { passive: true });
+  window.addEventListener("touchstart", cancel, { passive: true });
+  window.addEventListener("pointerdown", cancel);
+  window.addEventListener("keydown", cancel);
+  return cancel;
 }
 
 /**

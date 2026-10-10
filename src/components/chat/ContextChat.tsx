@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type {
   ChangeSet,
@@ -32,6 +32,8 @@ export type ContextChatProps = {
   anchorAmbiguous: boolean;
   turns: ChatTurn[];
   busy: boolean;
+  /** Request errors stay outside the scrolling messages, next to the composer. */
+  requestFeedback?: ReactNode;
   /** Lock node mutations while any project request is in flight. */
   interactionLocked?: boolean;
   /** 默认无选区且无建议时禁发；显式包含全文后由 page 解锁。 */
@@ -95,6 +97,7 @@ export function ContextChat({
   anchorAmbiguous,
   turns,
   busy,
+  requestFeedback,
   interactionLocked = false,
   sendDisabled,
   imageInputEnabled = true,
@@ -517,6 +520,9 @@ export function ContextChat({
           minimized 时塌成 0 高（内容 overflow hidden 裁掉），展开时撑满。
           把手、stale 提示、消息列表、输入框都常驻，靠行高压住而不是卸载——
           否则高度没过渡可动画（条件卸载是瞬间的）。 */}
+      {minimized && requestFeedback && (
+        <div className="mx-2.5 mb-2.5">{requestFeedback}</div>
+      )}
       <div className={"chat-body" + (minimized ? " chat-body-min" : "")}>
         <div>
           {/* 顶部拖拽把手：按住上/下拖调整聊天区高度（用户可控大小） */}
@@ -745,6 +751,9 @@ export function ContextChat({
           </div>
 
           <div className="border-t border-border p-2.5">
+            {!minimized && requestFeedback && (
+              <div className="mb-2.5">{requestFeedback}</div>
+            )}
             <div
               data-chat-composer
               onDragOver={(event) => {

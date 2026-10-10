@@ -51,6 +51,25 @@ function mockProvider(content: string): LLMProvider {
 beforeEach(() => vi.restoreAllMocks());
 
 describe("POST /api/chat", () => {
+  it("logs only diagnostic metadata when an image request fails", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(providerMod, "getProviderFromEnv").mockReturnValue({
+      name: "mock",
+      generate: vi.fn().mockRejectedValue(new Error("private provider error")),
+    });
+    const res = await POST(makeReq(validBody({
+      message: "private user message",
+      images: [testImage()],
+      history: [{ role: "user", content: "private history", images: [testImage("history")] }],
+    })));
+    expect(res.status).toBe(502);
+    expect(warn).toHaveBeenCalledExactlyOnceWith("[chat] request_failed", {
+      code: "llm_error",
+      elapsedMs: expect.any(Number),
+      imageCount: 2,
+    });
+  });
+
   it.each(["current", "history"])("blocks disabled image input in %s before calling the model", async (source) => {
     const provider = mockProvider(JSON.stringify({ type: "answer", answer: "ok" }));
     vi.spyOn(providerMod, "getProviderFromEnv").mockReturnValue(provider);

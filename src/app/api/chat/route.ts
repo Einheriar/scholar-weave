@@ -36,8 +36,16 @@ export async function POST(request: Request) {
       ? getProviderFromUserConfig(llmConfig)
       : getProviderFromEnv();
 
+  const startedAt = Date.now();
   const result = await processChatRequest(raw, getProvider, { signal: request.signal });
   if (!result.ok) {
+    // Log only diagnostic metadata; never log request bodies or provider messages.
+    console.warn("[chat] request_failed", {
+      code: result.error.code,
+      elapsedMs: Date.now() - startedAt,
+      imageCount: (preParse.data.images?.length ?? 0) +
+        preParse.data.history.reduce((count, turn) => count + (turn.images?.length ?? 0), 0),
+    });
     const status =
       result.error.code === "client_aborted"
         ? 499

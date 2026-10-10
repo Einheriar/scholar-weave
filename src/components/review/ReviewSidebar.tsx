@@ -155,13 +155,37 @@ export function ReviewSidebar({
         aligningRef.current = false;
       };
     } else {
-      card.scrollIntoView({ block: "nearest" });
+      // Only move this scroller; scrollIntoView can also move the document.
+      const cardRect = card.getBoundingClientRect();
+      const scrollerRect = scroller.getBoundingClientRect();
+      if (cardRect.top < scrollerRect.top + ALIGN_EDGE_GAP) {
+        scroller.scrollTop += cardRect.top - scrollerRect.top - ALIGN_EDGE_GAP;
+      } else if (cardRect.bottom > scrollerRect.bottom - ALIGN_EDGE_GAP) {
+        scroller.scrollTop += cardRect.bottom - scrollerRect.bottom + ALIGN_EDGE_GAP;
+      }
     }
     // 只在「选中了谁」或「正文标记位置」真正变化时对齐
   }, [selectedId, anchorTop]);
 
-  // 卸载时取消未完成的动画
-  useEffect(() => () => cancelAlignRef.current?.(), []);
+  // User input takes precedence over automatic alignment.
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    const cancel = () => {
+      cancelAlignRef.current?.();
+      cancelAlignRef.current = null;
+    };
+    scroller?.addEventListener("wheel", cancel, { passive: true });
+    scroller?.addEventListener("touchstart", cancel, { passive: true });
+    scroller?.addEventListener("pointerdown", cancel);
+    scroller?.addEventListener("keydown", cancel);
+    return () => {
+      cancel();
+      scroller?.removeEventListener("wheel", cancel);
+      scroller?.removeEventListener("touchstart", cancel);
+      scroller?.removeEventListener("pointerdown", cancel);
+      scroller?.removeEventListener("keydown", cancel);
+    };
+  }, []);
 
   // 用户滚动钳制：首尾 80vh 补空是给「程序对齐」用的行程储备，用户滚轮**完全不该**
   // 滚进去（会对着一大片纯空白）。监听滚动，一旦越界就拉回内容区边缘。

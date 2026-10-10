@@ -729,6 +729,7 @@ export default function Home() {
   // 由 handleBodySelectAnchor 以闭包捕获后交给侧栏做卡片对齐。
   // 声明在 handleSelect 之前：后者点击侧栏卡片时要清掉 anchorTop。
   const [anchorTop, setAnchorTop] = useState<number | null>(null);
+  const reviewNavigationRef = useRef(0);
   const summaryRef = useRef<HTMLParagraphElement | null>(null);
 
   /**
@@ -794,6 +795,7 @@ export default function Home() {
 
   const handleSelect = useCallback(
     (id: string) => {
+      const navigationId = ++reviewNavigationRef.current;
       // 侧栏发起的选中不带正文锚点；清掉 anchorTop 防止侧栏误用上一轮的旧坐标
       setAnchorTop(null);
       // 如果此前有人工选区，建议定位从此刻起成为唯一的主上下文。
@@ -803,7 +805,16 @@ export default function Home() {
       if (!item) return;
       if (item.scope.type !== "document") {
         // 定位到正文对应范围，并把键盘焦点交给编辑器（PLAN 6.2）
-        editorRef.current?.revealItem(item);
+        const card = window.document.querySelector(`[data-review-card="${CSS.escape(id)}"]`);
+        const rect = card instanceof HTMLElement ? card.getBoundingClientRect() : null;
+        editorRef.current?.revealItem(item, {
+          viewportCenter: rect && rect.top < window.innerHeight && rect.bottom > 0
+            ? rect.top + rect.height / 2
+            : undefined,
+          onAligned: (center) => {
+            if (reviewNavigationRef.current === navigationId) setAnchorTop(center);
+          },
+        });
         setAnnounce(`已定位到建议：${item.title}`);
       } else {
         // 全文建议选中时滚到「全文总结」横幅，便于对照阅读
@@ -829,6 +840,7 @@ export default function Home() {
   /** 点击正文标记（正文→侧栏）：只做选中与播报，不反向移动光标 */
   const handleBodySelect = useCallback(
     (id: string) => {
+      reviewNavigationRef.current += 1;
       setSelectedId(id);
       const item = reviews.find((r) => r.id === id);
       if (item) setAnnounce(`已选中正文中的建议：${item.title}`);
@@ -2249,33 +2261,6 @@ export default function Home() {
               onReviewEditUndoUnavailable={handleEditorReviewUndoUnavailable}
             />
 
-            {/* 上下文对话 */}
-            {chatError && (
-              <div className="animate-item-in flex items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300" role="alert">
-                <span>{chatError}</span>
-                {llmRetry && (
-                  <button
-                    type="button"
-                    className={buttonClass("secondary", "xs")}
-                    onClick={() => {
-                      const retry = llmRetry;
-                      if (retry.type === "chat") {
-                        void sendChat(
-                          retry.message,
-                          retry.nodeId,
-                          retry.replaceAssistantIndex,
-                        );
-                      } else {
-                        void applyOpinion(retry.reviewId);
-                      }
-                    }}
-                    disabled={requestLocked}
-                  >
-                    {llmRetry.type === "chat" ? "重试对话" : "重试生成"}
-                  </button>
-                )}
-              </div>
-            )}
             {/*
               聊天区浮动（规则 21 sticky-dock）：position sticky bottom 让它在文档流中
               自然吸附——上滑至聊天区即将滚出视口时整个吸附到视口底部，回滚归位。
@@ -2297,6 +2282,32 @@ export default function Home() {
                 />
               )}
               <ContextChat
+                requestFeedback={chatError && (
+                  <div className="animate-item-in flex items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300" role="alert">
+                    <span className="min-w-0 break-words">{chatError}</span>
+                    {llmRetry && (
+                      <button
+                        type="button"
+                        className={`${buttonClass("secondary", "xs")} shrink-0`}
+                        onClick={() => {
+                          const retry = llmRetry;
+                          if (retry.type === "chat") {
+                            void sendChat(
+                              retry.message,
+                              retry.nodeId,
+                              retry.replaceAssistantIndex,
+                            );
+                          } else {
+                            void applyOpinion(retry.reviewId);
+                          }
+                        }}
+                        disabled={requestLocked}
+                      >
+                        {llmRetry.type === "chat" ? "重试对话" : "重试生成"}
+                      </button>
+                    )}
+                  </div>
+                )}
                 imageInputEnabled={getActivePreset(settings).imageInputEnabled}
                 historyHasImages={Boolean(findNodeByAnchor(nodes, chatContext)?.turns.slice(-8).some((turn) => turn.images?.length))}
                 context={chatContext}

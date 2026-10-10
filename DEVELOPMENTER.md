@@ -195,6 +195,7 @@ npm start          # 默认 http://localhost:3000
   - 因此：你**修改后新发起的请求只包含修改后的正文**，改掉的内容不会作为"历史正文"一起发出去；
     但如果之前某轮问答里贴过某段文字，那段文字会留在对话历史里并随最近 8 轮一起发送。
 - 服务端默认不记录正文日志；服务端密钥只存在环境变量里，不会打包进前端代码。
+- 浏览器版聊天失败会输出 `[chat] request_failed`，仅包含 `code`、`elapsedMs` 和 `imageCount`；开发模式可在 `.next/dev/logs/next-development.log` 查看。网络错误提示保留已知的底层错误码（如 `UND_ERR_CONNECT_TIMEOUT`、`ECONNRESET`），便于区分连接超时与连接断开；不会记录图片、正文或密钥。
 - ⚠️ 若在设置面板里填了自己的 API Key，它**以明文保存在本浏览器 localStorage**，能打开 DevTools
   的人就能看到。这只适合个人本地使用，公开部署前必须先解决（见 [AGENTS.md](./AGENTS.md) 的安全注意）。
 - 文档内容在 prompt 中按不可信数据包裹，其中的指令性文本不会被当作系统指令执行。
