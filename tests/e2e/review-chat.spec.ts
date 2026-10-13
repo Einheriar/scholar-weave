@@ -23,6 +23,101 @@ function card(page: import("@playwright/test").Page, id: string) {
   return page.locator(`[data-review-card="${id}"]`);
 }
 
+async function prepareReviewRestartScenario(
+  page: import("@playwright/test").Page,
+  outcome: "success" | "failure" | "cancel",
+) {
+  await mockReviewRoute(page);
+  await mockChatRoute(page, { withChanges: true });
+
+  let releaseSecondReview!: () => void;
+  const secondReviewPending = new Promise<void>((resolve) => {
+    releaseSecondReview = resolve;
+  });
+  let secondReviewStarted!: () => void;
+  const secondReviewRequested = new Promise<void>((resolve) => {
+    secondReviewStarted = resolve;
+  });
+  let reviewRequests = 0;
+  await page.route("**/api/review", async (route) => {
+    reviewRequests += 1;
+    if (reviewRequests === 1) {
+      await route.fallback();
+      return;
+    }
+
+    secondReviewStarted();
+    await secondReviewPending;
+    const body = route.request().postDataJSON() as {
+      revision: number;
+      checksum: string;
+    };
+    try {
+      if (outcome === "failure") {
+        await route.fulfill({
+          status: 502,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: { code: "llm_error", message: "重新审阅失败（mock）。" },
+          }),
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          documentSummary: "新一轮审阅总结（mock）。",
+          items: [{
+            id: "new_review",
+            documentRevision: body.revision,
+            scope: { type: "document" },
+            kind: "opinion",
+            category: "structure",
+            severity: "suggestion",
+            title: "新一轮全文意见（mock）",
+            explanation: "这是重新审阅生成的新意见。",
+            status: "open",
+          }],
+          documentRevision: body.revision,
+          checksum: body.checksum,
+        }),
+      });
+    } catch {
+      // The cancellation case intentionally aborts this intercepted request.
+    }
+  });
+
+  await gotoApp(page);
+  await loadSample(page);
+  await page.getByRole("button", { name: "开始审阅" }).click();
+  await expect(card(page, "m_edit")).toBeVisible();
+
+  await page.getByLabel("文档标题").fill("Restart review keeps this title");
+  await card(page, "m_edit")
+    .getByRole("button", { name: "接受", exact: true })
+    .click();
+  await expect
+    .poll(async () => (await paragraphTexts(page))[4])
+    .toContain("may already have been decided");
+  const bodyAfterAcceptedEdit = await paragraphTexts(page);
+
+  await selectTextInEditor(page, "overlooking the interpersonal part");
+  await sendChatMessage(page, "请继续讨论并给出修改建议");
+  await expect(
+    page.getByText("我建议做一处措辞调整，让它更符合学术行文。"),
+  ).toBeVisible();
+  await page.getByRole("button", { name: /预览修改/ }).click();
+  await expect(page.getByRole("dialog", { name: "修改集预览" })).toBeVisible();
+  await expect(page.getByRole("status").first()).toContainText("已保存到本地");
+
+  return {
+    bodyAfterAcceptedEdit,
+    secondReviewRequested,
+    releaseSecondReview,
+  };
+}
+
 test.describe("LLM 审阅（mock /api/review）", () => {
   test("付费请求期间锁定当前文章，完成后恢复编辑", async ({ page }) => {
     let releaseRequest!: () => void;
@@ -101,6 +196,93 @@ test.describe("LLM 审阅（mock /api/review）", () => {
     await expect(card(page, "m_block")).toBeVisible();
     await expect(card(page, "m_edit")).toBeVisible();
   });
+
+  test("再次审阅立即清空旧记录，保留正文标题并只保存新结果", async ({
+    page,
+  }) => {
+    const scenario = await prepareReviewRestartScenario(page, "success");
+    await page.getByRole("button", { name: "开始审阅" }).click();
+    await scenario.secondReviewRequested;
+
+    await expect(card(page, "m_doc")).toHaveCount(0);
+    await expect(card(page, "m_block")).toHaveCount(0);
+    await expect(card(page, "m_edit")).toHaveCount(0);
+    await expect(page.getByText(MOCK_REVIEW_SUMMARY)).toHaveCount(0);
+    await expect(
+      page.getByText("我建议做一处措辞调整，让它更符合学术行文。"),
+    ).toHaveCount(0);
+    await expect(page.getByText("请继续讨论并给出修改建议")).toHaveCount(0);
+    await expect(page.getByRole("dialog", { name: "修改集预览" })).toHaveCount(0);
+    await expect(page.getByLabel("文档标题")).toHaveValue(
+      "Restart review keeps this title",
+    );
+    expect(await paragraphTexts(page)).toEqual(scenario.bodyAfterAcceptedEdit);
+
+    scenario.releaseSecondReview();
+    await expect(card(page, "new_review")).toBeVisible();
+    await expect(page.locator("[data-review-card]")).toHaveCount(1);
+    await expect(page.getByText("新一轮审阅总结（mock）。")).toBeVisible();
+    await expect(page.getByRole("button", { name: /预览修改/ })).toHaveCount(0);
+    await expect(page.getByRole("status").first()).toContainText("已保存到本地");
+
+    await page.reload();
+    await expect(card(page, "new_review")).toBeVisible();
+    await expect(card(page, "m_doc")).toHaveCount(0);
+    await expect(page.getByLabel("文档标题")).toHaveValue(
+      "Restart review keeps this title",
+    );
+    expect(await paragraphTexts(page)).toEqual(scenario.bodyAfterAcceptedEdit);
+    await expect(
+      page.getByText("我建议做一处措辞调整，让它更符合学术行文。"),
+    ).toHaveCount(0);
+    await expect(page.getByText("请继续讨论并给出修改建议")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /预览修改/ })).toHaveCount(0);
+  });
+
+  for (const outcome of ["failure", "cancel"] as const) {
+    test(`再次审阅${outcome === "failure" ? "失败" : "取消"}后刷新仍保持旧记录已清空`, async ({
+      page,
+    }) => {
+      const scenario = await prepareReviewRestartScenario(page, outcome);
+      await page.getByRole("button", { name: "开始审阅" }).click();
+      await scenario.secondReviewRequested;
+
+      await expect(card(page, "m_doc")).toHaveCount(0);
+      await expect(card(page, "m_edit")).toHaveCount(0);
+      await expect(
+        page.getByText("我建议做一处措辞调整，让它更符合学术行文。"),
+      ).toHaveCount(0);
+      await expect(page.getByText("请继续讨论并给出修改建议")).toHaveCount(0);
+      await expect(page.getByRole("dialog", { name: "修改集预览" })).toHaveCount(0);
+      await expect(page.getByLabel("文档标题")).toHaveValue(
+        "Restart review keeps this title",
+      );
+      expect(await paragraphTexts(page)).toEqual(scenario.bodyAfterAcceptedEdit);
+
+      if (outcome === "cancel") {
+        await page.getByRole("button", { name: "取消审阅" }).click();
+        scenario.releaseSecondReview();
+        await expect(page.getByText("正在审阅文档…", { exact: false })).toHaveCount(0);
+      } else {
+        scenario.releaseSecondReview();
+        await expect(page.getByRole("alert").filter({ hasText: "重新审阅失败（mock）。" })).toBeVisible();
+      }
+
+      await expect(page.getByRole("status").first()).toContainText("已保存到本地");
+      await page.reload();
+      await expect(card(page, "m_doc")).toHaveCount(0);
+      await expect(card(page, "m_edit")).toHaveCount(0);
+      await expect(page.getByText(MOCK_REVIEW_SUMMARY)).toHaveCount(0);
+      await expect(
+        page.getByText("我建议做一处措辞调整，让它更符合学术行文。"),
+      ).toHaveCount(0);
+      await expect(page.getByText("请继续讨论并给出修改建议")).toHaveCount(0);
+      await expect(page.getByLabel("文档标题")).toHaveValue(
+        "Restart review keeps this title",
+      );
+      expect(await paragraphTexts(page)).toEqual(scenario.bodyAfterAcceptedEdit);
+    });
+  }
 
   test("从收起的聊天区继续询问段落意见时展开聊天", async ({ page }) => {
     await mockReviewRoute(page);

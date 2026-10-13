@@ -124,6 +124,7 @@ export default function Home() {
   // 对话与修改集
   const [selection, setSelection] = useState<Selection>(null);
   const [chatTurns, setChatTurns] = useState<ChatTurn[]>([]);
+  const [chatSession, setChatSession] = useState(0);
   const [chatBusy, setChatBusy] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
   const [llmRetry, setLlmRetry] = useState<LlmRetryAction | null>(null);
@@ -649,6 +650,11 @@ export default function Home() {
     [projects, saveState, requestLocked, announceRequestLock, markProjectDirty],
   );
 
+  // Review navigation geometry is also reset when starting a new review.
+  const [anchorTop, setAnchorTop] = useState<number | null>(null);
+  const reviewNavigationRef = useRef(0);
+  const summaryRef = useRef<HTMLParagraphElement | null>(null);
+
   // ── 审阅 ──
   const runReview = useCallback(async () => {
     if (!doc) return;
@@ -665,8 +671,28 @@ export default function Home() {
       revision: doc.revision,
       checksum: doc.checksum,
     };
+    // A new review replaces the entire feedback session, even on failure or
+    // cancellation. Update the save snapshot before React commits the reset.
+    latestRef.current = { ...latestRef.current, reviews: [], nodes: [] };
+    activeNodeIdRef.current = null;
+    reviewNavigationRef.current += 1;
+    setReviews([]);
+    setNodes([]);
+    setActiveNodeId(null);
+    setChatTurns([]);
+    setChatSession((session) => session + 1);
+    setSelection(null);
+    setAnchorTop(null);
+    setLlmRetry(null);
+    setChatError(null);
+    editorRef.current?.previewChangeSetEdit(null);
+    if (changeSetOpen) {
+      changeSetChatRestoreRef.current = changeSetChatWasMinimizedRef.current;
+    }
+    setChangeSetOpen(false);
     setReviewUi({ phase: "loading" });
     setSelectedId(null);
+    markProjectDirty();
     const prefs = settingsToRequestBody(settings);
     try {
       const data = await callReview(
@@ -715,7 +741,7 @@ export default function Home() {
     } finally {
       if (reviewRequestSeq.current === requestId) abortRef.current = null;
     }
-  }, [doc, mode, settings, requestLocked, announceRequestLock, markProjectDirty]);
+  }, [doc, mode, settings, requestLocked, announceRequestLock, markProjectDirty, changeSetOpen]);
 
   const cancelReview = useCallback(() => {
     reviewRequestSeq.current += 1;
@@ -725,13 +751,6 @@ export default function Home() {
   }, []);
 
   // ── 建议定位 / 状态 ──
-  // 正文标记相对视口顶部的距离（正文→侧栏对齐用），
-  // 由 handleBodySelectAnchor 以闭包捕获后交给侧栏做卡片对齐。
-  // 声明在 handleSelect 之前：后者点击侧栏卡片时要清掉 anchorTop。
-  const [anchorTop, setAnchorTop] = useState<number | null>(null);
-  const reviewNavigationRef = useRef(0);
-  const summaryRef = useRef<HTMLParagraphElement | null>(null);
-
   /**
    * 只有用户实际划出的文本才建立 range 上下文。侧栏建议的程序化文本选区
    * 由 DocumentEditor 抑制回报，因此不会走到这里抢走 review 上下文。
@@ -1737,6 +1756,7 @@ export default function Home() {
   const handleChangeSetClosed = useCallback(() => {
     editorRef.current?.previewChangeSetEdit(null);
     setChangeSetMounted(false);
+    setActiveChangeSet(null);
     const restore = changeSetChatRestoreRef.current;
     changeSetChatRestoreRef.current = null;
     if (restore !== null) setChatMinimized(restore);
@@ -1854,7 +1874,7 @@ export default function Home() {
         announceRequestLock();
         return false;
       }
-      if (!doc || !activeChangeSet) return false;
+      if (!doc || !activeChangeSet || !changeSetOpen) return false;
       const subset: ChangeSet = {
         ...activeChangeSet,
         edits: activeChangeSet.edits.filter((e) => editIds.includes(e.id)),
@@ -1896,6 +1916,7 @@ export default function Home() {
     [
       doc,
       activeChangeSet,
+      changeSetOpen,
       reviews,
       closeChangeSet,
       requestLocked,
@@ -2330,7 +2351,7 @@ export default function Home() {
                 minimized={chatMinimized}
                 onToggleMinimize={handleToggleChatMinimized}
                 onSend={(message, images) => void sendChat(message, undefined, undefined, images)}
-                draftScopeKey={`${doc.id}:${activeNodeId ?? VIRTUAL_DOCUMENT_NODE_ID}`}
+                draftScopeKey={`${doc.id}:${chatSession}:${activeNodeId ?? VIRTUAL_DOCUMENT_NODE_ID}`}
                 onRegenerate={handleRegenerateChatReply}
                 onPreviewChangeSet={openChangeSet}
                 onUseReviewProposal={handleUseReviewProposal}

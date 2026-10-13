@@ -74,6 +74,8 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 ## 必须遵守的核心约束（实现时不要破坏）
 
+- **“开始审阅”意味着重开当前项目的反馈会话。** 请求开始前立即清空全部旧审阅建议、总结、聊天节点与消息，以及旧错误重试、上下文选中与修改集预览；保留当前正文、标题、项目 ID 和已写入正文的修改，其他项目不受影响。失败或取消也不恢复旧记录。必须同步推进 `latestRef` 并调用 `markProjectDirty()`，不能只在成功后保存，否则刷新会恢复旧记录。聊天草稿作用域需包含本轮会话标识，确保虚拟全文节点下的草稿／附件也会重置。预览关闭仍走退出动画，关闭期间不得接受旧修改集。`saveProject` 校验后直接发起同表 IndexedDB 写事务，提交按发起顺序排队；并发旧现场、清空现场、新结果的回归验证在 `tests/projects.test.ts`。
+
 1. **不信任 LLM 字符坐标**：定位一律用 `blockId + 逐字 original + prefix/suffix` 消歧（`src/lib/anchoring.ts`）。定位失败标记 `stale`，**绝不猜测位置强行替换**。
 2. **稳定 block ID**（`src/lib/revisions.ts` + `BlockIdExtension`）：普通编辑保留 ID、拆分保留前半段、合并保留目标段、粘贴全文重发 ID。
 3. **严格区分 `opinion` 与 `edit`**：`opinion` 不可执行且禁带 `replacement`；`edit` 必有 `replacement` 且 scope 不能是 `document`。由 schema 的 `superRefine` 强制。两种处于 `open` 状态的卡片都必须提供「忽略」入口，进入 `rejected` 后像 `accepted` 一样收起为“已处理”三行态，并可用「撤销」回到 `open` 后重新展开；不能因为 `opinion` 还有「继续询问／按此意见修改」就拿掉用户结束处理的出口。`stale` 仍保持展开，以便解释无法处理的原因。

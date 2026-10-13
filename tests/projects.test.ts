@@ -45,6 +45,28 @@ beforeEach(async () => {
 });
 
 describe("项目持久化", () => {
+  it("concurrent old feedback, review reset and new result writes commit in request order", async () => {
+    const project = makeProject("review-restart", "2026-10-13T00:00:00.000Z");
+    const old: Project = {
+      ...project,
+      reviews: [{
+        id: "old-review", documentRevision: 1, scope: { type: "document" },
+        kind: "opinion", category: "clarity", severity: "suggestion",
+        title: "Old review", explanation: "Old explanation", status: "open",
+      }],
+      nodes: [{
+        id: "old-node", anchor: { type: "document" }, originalText: "",
+        createdAt: project.lastActivityAt, turns: [{ role: "user", content: "Old question" }],
+      }],
+    };
+    // Issue the reset while the previous write is still in flight.
+    await Promise.all([saveProject(old), saveProject(project)]);
+    expect(await loadProject(project.id)).toEqual(project);
+    const renewed: Project = { ...project, reviews: [{ ...old.reviews[0], id: "new-review" }] };
+    await Promise.all([saveProject(old), saveProject(project), saveProject(renewed)]);
+    expect(await loadProject(project.id)).toEqual(renewed);
+  });
+
   it("保存后能读回，loadLatestProject 取最近更新的一个", async () => {
     await saveProject(makeProject("p_old", "2026-09-15T09:00:00.000Z"));
     await saveProject(makeProject("p_new", "2026-09-15T11:00:00.000Z"));

@@ -66,7 +66,7 @@ vi.mock("@/components/review/ChangeSetPreview", () => ({
 vi.mock("@/components/chat/ContextChat", () => ({
   ContextChat: (props: ContextChatProps) => {
     captured.chat = props;
-    return null;
+    return props.requestFeedback ?? null;
   },
 }));
 
@@ -171,6 +171,37 @@ function projectWithRangeHistory(): Project {
   return project;
 }
 
+function projectWithReviewHistory(): Project {
+  const project = projectWithRangeHistory();
+  project.reviews = [{
+    id: "old-opinion", documentRevision: 0, scope: { type: "document" },
+    kind: "opinion", category: "clarity", severity: "suggestion",
+    title: "Old opinion", explanation: "Old explanation", status: "open",
+  }];
+  project.nodes.push({
+    id: "review-discussion", anchor: { type: "review", reviewId: "old-opinion" },
+    originalText: "Old opinion", createdAt: project.lastActivityAt,
+    turns: [{ role: "assistant", content: "Old review discussion" }],
+  });
+  return project;
+}
+
+function pendingReview() {
+  let resolve!: (response: Response) => void;
+  const response = new Promise<Response>((done) => { resolve = done; });
+  const fetchMock = vi.fn<typeof fetch>().mockReturnValue(response);
+  vi.stubGlobal("fetch", fetchMock);
+  return { resolve, fetchMock };
+}
+
+function reviewResponse(project: Project): Response {
+  return new Response(JSON.stringify({
+    documentRevision: project.doc.revision, checksum: project.doc.checksum,
+    documentSummary: "New summary",
+    items: [{ ...project.reviews[0], id: "new-opinion", title: "New opinion" }],
+  }), { status: 200, headers: { "Content-Type": "application/json" } });
+}
+
 function captureChatRequests() {
   const requests: ChatRequest[] = [];
   const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
@@ -205,6 +236,95 @@ describe("project autosave integration", () => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     vi.useRealTimers();
+  });
+
+  it("restarting review immediately clears all old feedback and persists the unchanged manuscript", async () => {
+    const project = projectWithReviewHistory();
+    const other = makeProject("b", "Other manuscript");
+    configureProjects([project, other]);
+    const request = pendingReview();
+    render(<Home />);
+    await settleInitialLoad();
+    expect(captured.chat!.nodes).toHaveLength(3);
+    expect(captured.chat!.turns).not.toHaveLength(0);
+    await act(async () => { captured.review!.onSelect("old-opinion"); });
+
+    fireEvent.click(screen.getByRole("button", { name: "开始审阅" }));
+    expect(captured.review!.items).toEqual([]);
+    expect(captured.chat!.nodes).toEqual([]);
+    expect(captured.chat!.turns).toEqual([]);
+    expect(captured.chat!.activeNode).toBeNull();
+    expect(captured.editor!.document).toEqual(project.doc);
+    expect(screen.getByRole("textbox", { name: "文档标题" })).toHaveValue(project.title);
+    expect(captured.editor!.readOnly).toBe(true);
+    await advanceDebounce();
+    expect(storage.saveProject).toHaveBeenLastCalledWith(expect.objectContaining({
+      id: project.id, doc: project.doc, reviews: [], nodes: [],
+    }));
+    expect(captured.history!.projects.find((p) => p.id === other.id)).toEqual(other);
+
+    await act(async () => { request.resolve(reviewResponse(project)); });
+    expect(captured.review!.items.map((item) => item.id)).toEqual(["new-opinion"]);
+    expect(captured.chat!.turns).toEqual([]);
+    expect(screen.getByText("New summary")).toBeInTheDocument();
+    await advanceDebounce();
+    expect(storage.saveProject.mock.calls.at(-1)![0].nodes).toEqual([]);
+    expect(storage.saveProject.mock.calls.at(-1)![0].reviews[0].id).toBe("new-opinion");
+    await act(async () => { captured.history!.onSelect(other.id); });
+    await act(async () => { captured.history!.onSelect(project.id); });
+    expect(captured.chat!.nodes).toEqual([]);
+    expect(captured.review!.items.map((item) => item.id)).toEqual(["new-opinion"]);
+  });
+
+  it.each(["failure", "cancel"] as const)("a review %s keeps the reset saved and ignores late results", async (outcome) => {
+    const project = projectWithReviewHistory();
+    configureProjects([project]);
+    const request = pendingReview();
+    render(<Home />);
+    await settleInitialLoad();
+    fireEvent.click(screen.getByRole("button", { name: "开始审阅" }));
+    if (outcome === "cancel") {
+      fireEvent.click(screen.getByRole("button", { name: "取消审阅" }));
+      await act(async () => { request.resolve(reviewResponse(project)); });
+    } else {
+      await act(async () => {
+        request.resolve(new Response(JSON.stringify({ error: { message: "Review failed" } }), {
+          status: 502, headers: { "Content-Type": "application/json" },
+        }));
+      });
+      expect(screen.getByText("Review failed")).toBeInTheDocument();
+    }
+    expect(captured.review!.items).toEqual([]);
+    expect(captured.chat!.nodes).toEqual([]);
+    expect(captured.chat!.turns).toEqual([]);
+    expect(captured.editor!.document).toEqual(project.doc);
+    expect(captured.editor!.readOnly).toBe(false);
+    await advanceDebounce();
+    expect(storage.saveProject).toHaveBeenLastCalledWith(expect.objectContaining({
+      id: project.id, doc: project.doc, reviews: [], nodes: [],
+    }));
+  });
+
+  it("an older save completion cannot cancel saving the review reset", async () => {
+    const project = projectWithReviewHistory();
+    configureProjects([project]);
+    const firstSave = deferredSave();
+    storage.saveProject.mockImplementationOnce(() => firstSave.promise);
+    const request = pendingReview();
+    render(<Home />);
+    await settleInitialLoad();
+    await editBody("Latest manuscript with accepted edits");
+    await advanceDebounce();
+    fireEvent.click(screen.getByRole("button", { name: "开始审阅" }));
+    await act(async () => { firstSave.resolve(); });
+    expect(screen.getByText("保存中…")).toBeInTheDocument();
+    await advanceDebounce();
+    expect(storage.saveProject).toHaveBeenCalledTimes(2);
+    expect(storage.saveProject.mock.calls[1][0]).toMatchObject({
+      reviews: [], nodes: [], doc: { blocks: [{ text: "Latest manuscript with accepted edits" }] },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "取消审阅" }));
+    await act(async () => { request.resolve(reviewResponse(project)); });
   });
 
   it("clicking the current project preserves unsaved body and title and saves them", async () => {
