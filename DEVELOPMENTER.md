@@ -73,6 +73,7 @@ npm run test          # Vitest（单元/集成）
 npm run test:e2e      # Playwright（端到端，仅浏览器版）
 npx tauri dev         # Tauri 开发模式（Vite + 桌面窗口，热更新）
 npx tauri build       # Tauri 打包（NSIS 安装包）
+npm run package:portable  # Tauri 免安装绿色版 ZIP（含 exe + LICENSE + README）
 npm run package:app   # 旧方案：Next.js standalone + Node 启动器
 ```
 
@@ -113,6 +114,19 @@ npx tauri build
 ```
 
 产物在 `src-tauri/target/release/bundle/nsis/superGrammarly_<version>_x64-setup.exe`（当前约 9 MB）。用户双击安装，有 WebView2 的机器零额外依赖，没有则安装包自动引导下载。
+
+### 免安装绿色版
+
+```bash
+npm run package:portable              # 先构建再打包
+npm run package:portable -- --skip-build   # 复用已有 release 构建
+```
+
+产物在 `src-tauri/target/release/bundle/portable/superGrammarly_<version>_x64-portable.zip`（约 10 MB），内含 `superGrammarly.exe`、`LICENSE` 与 `README.txt`。解压后双击 exe 即可运行，不需要 Node.js，也不写注册表。
+
+**必须打成真正的 ZIP。** v0.4.0 首次发布时手工把 tar 归档改名成 `.zip`，部分解压工具直接报“不是 zip 文件”；同时该包内 exe 启动后窗口一片空白（前端资源未正常加载）。现由 `scripts/package-portable.mjs` 统一处理，并在结束时校验 ZIP 文件头（`PK`），不是 ZIP 就失败退出。
+
+绿色版与 Tauri 安装包共用同一份 release 二进制，因此两者必须来自同一次构建 — 只跑 `package:portable` 会顺带完成前端 Vite 构建与 Rust 编译。
 
 ### 旧方案：Next.js standalone（保留）
 

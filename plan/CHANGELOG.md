@@ -7,6 +7,14 @@
 - 这里的条目从提交历史整理而来，只保留对使用者/开发者有意义的变化，不逐字复述提交信息。
 - 近期改动按「未发布」与版本小节记录，最新记录放在前面；下方保留早期里程碑记录。发布时将对应未发布条目归入新版本。
 
+## 0.4.1 - 2026-10-22
+
+### 打包
+
+- `—` 新增 `npm run package:portable`（`scripts/package-portable.mjs`）：构建 Tauri release 后生成真正的 Windows 绿色版 ZIP（`superGrammarly_<version>_x64-portable.zip`，含 exe、LICENSE、README），末尾校验 ZIP 文件头，非 ZIP 直接失败。
+- `—` 重新打包并发布 0.4.1：修复 v0.4.0 首发绿色版的两个问题——发布物实为改名成 `.zip` 的 tar 归档，以及包内 exe 启动后窗口空白。新产物与 NSIS 安装包来自同一次 release 构建，解压即用。
+- `—` 补充 `AGENTS.md`、`DEVELOPMENTER.md` 的绿色版命令与排错说明。
+
 ## 未发布 - 2026-10-13
 
 ### 修复与交互
