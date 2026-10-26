@@ -6,6 +6,7 @@ import type { ChatHistoryProps } from "@/components/chat/ChatHistory";
 import type { ContextChatProps } from "@/components/chat/ContextChat";
 import type { ChatNode, DocumentState, Project } from "@/lib/review-schema";
 import type { ChatRequest } from "@/lib/llm/chat-llm-schema";
+import { CHAT_SESSION_HEADER } from "@/lib/llm/opencode";
 import Home from "@/app/page";
 
 type EditorProps = ComponentProps<
@@ -719,6 +720,24 @@ describe("project autosave integration", () => {
     expect(screen.getByText("已保存到本地")).toBeInTheDocument();
   });
 
+  it("keeps restored chat node identities through follow-ups, regeneration, and node switches", async () => {
+    configureProjects([projectWithRangeHistory()]);
+    const { fetchMock } = captureChatRequests();
+    render(<Home />);
+    await settleInitialLoad();
+    await act(async () => { captured.chat!.onJumpToTurn("range-discussion", 0); });
+    await act(async () => { captured.chat!.onSend("Follow-up"); });
+    const node = captured.chat!.activeNode!;
+    await act(async () => { captured.chat!.onRegenerate(node.id, node.turns.length - 1); });
+    await act(async () => { captured.chat!.onSend("Another follow-up"); });
+    await act(async () => { captured.chat!.onJumpToTurn("unrelated-discussion", 0); });
+    await act(async () => { captured.chat!.onSend("Other context"); });
+    await act(async () => { captured.chat!.onJumpToTurn("range-discussion", 0); });
+    await act(async () => { captured.chat!.onSend("Back to the first discussion"); });
+    expect(fetchMock.mock.calls.map(([, init]) => new Headers(init?.headers).get(CHAT_SESSION_HEADER)))
+      .toEqual(["range-discussion", "range-discussion", "range-discussion", "unrelated-discussion", "range-discussion"]);
+  });
+
   it("persists chat images and includes them in follow-ups and regeneration", async () => {
     configureProjects([projectWithRangeHistory()]);
     const { requests } = captureChatRequests();
@@ -752,6 +771,8 @@ describe("project autosave integration", () => {
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "重试对话" })); });
     expect(requests[0].images).toEqual(images);
     expect(captured.chat!.activeNode!.turns).toHaveLength(count + 1);
+    expect(fetchMock.mock.calls.map(([, init]) => new Headers(init?.headers).get(CHAT_SESSION_HEADER)))
+      .toEqual(["range-discussion", "range-discussion"]);
   });
 
   it("resumes a historical range discussion using its own history and the latest paragraph", async () => {

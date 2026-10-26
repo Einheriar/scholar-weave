@@ -3,6 +3,7 @@ import { processChatRequest } from "@/lib/llm/chat-core";
 import { getProviderFromEnv, getProviderFromUserConfig } from "@/lib/llm/provider";
 import { apiError } from "@/lib/llm/server-helpers";
 import { ChatRequestSchema } from "@/lib/llm/chat-llm-schema";
+import { CHAT_SESSION_HEADER } from "@/lib/llm/opencode";
 
 /**
  * POST /api/chat（PLAN 12）。
@@ -30,11 +31,12 @@ export async function POST(request: Request) {
   }
 
   const llmConfig = preParse.data.llmConfig;
+  const sessionId = request.headers.get(CHAT_SESSION_HEADER) ?? undefined;
 
   const getProvider = () =>
     llmConfig?.apiKey
-      ? getProviderFromUserConfig(llmConfig)
-      : getProviderFromEnv();
+      ? getProviderFromUserConfig(llmConfig, sessionId)
+      : getProviderFromEnv(sessionId);
 
   const startedAt = Date.now();
   const result = await processChatRequest(raw, getProvider, { signal: request.signal });

@@ -1,5 +1,6 @@
 import type { ChatMessage, GenerateOptions, LLMProvider, ProviderConfig } from "./provider";
 import { resolveThinkingParam } from "./thinking";
+import { openCodeSessionId } from "./opencode";
 import { isTauri, tauriProxyOptions } from "@/lib/platform";
 import type { ProxyAgent } from "undici";
 
@@ -49,6 +50,7 @@ export class OpenAIProvider implements LLMProvider {
   private readonly apiKey: string;
   private readonly baseURL: string;
   private readonly model: string;
+  private readonly sessionId: string | undefined;
   /** 代理 dispatcher；null 表示直连（仅 Node 环境使用） */
   private readonly dispatcher: ProxyAgent | null;
   /** 保留原始 proxy 配置，供 Tauri 分支用 plugin-http 的 proxy 参数 */
@@ -58,6 +60,7 @@ export class OpenAIProvider implements LLMProvider {
     this.apiKey = config.apiKey;
     this.baseURL = normalizeProviderBaseURL(config.baseURL);
     this.model = config.model;
+    this.sessionId = openCodeSessionId(this.baseURL, config.sessionId);
     this.proxyConfig = config.proxy;
     this.dispatcher = dispatcher;
   }
@@ -67,6 +70,11 @@ export class OpenAIProvider implements LLMProvider {
     options: GenerateOptions = {},
   ): Promise<string> {
     const url = `${this.baseURL}/chat/completions`;
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${this.apiKey}`,
+    };
+    if (this.sessionId) headers["x-opencode-session"] = this.sessionId;
     const body: Record<string, unknown> = {
       model: this.model,
       messages,
@@ -89,10 +97,7 @@ export class OpenAIProvider implements LLMProvider {
         const proxy = await tauriProxyOptions(this.proxyConfig ?? undefined);
         res = await tauriFetch(url, {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${this.apiKey}`,
-          },
+          headers,
           body: JSON.stringify(body),
           signal: options.signal,
           ...(proxy ? { proxy } : {}),
@@ -100,10 +105,7 @@ export class OpenAIProvider implements LLMProvider {
       } else {
         const fetchOpts: RequestInit & { dispatcher?: ProxyAgent } = {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${this.apiKey}`,
-          },
+          headers,
           body: JSON.stringify(body),
           signal: options.signal,
         };

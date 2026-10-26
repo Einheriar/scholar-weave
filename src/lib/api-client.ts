@@ -4,6 +4,7 @@ import { processReviewRequest } from "@/lib/llm/review-core";
 import { processChatRequest } from "@/lib/llm/chat-core";
 import { processChangeSetRequest } from "@/lib/llm/change-set-core";
 import { OpenAIProvider } from "@/lib/llm/openai-provider";
+import { CHAT_SESSION_HEADER } from "@/lib/llm/opencode";
 
 /**
  * 统一 API 调用层。
@@ -23,7 +24,7 @@ type LLMConfig = {
   proxy?: { type: "http" | "socks5"; host: string; port: number };
 };
 
-function makeTauriProvider(llmConfig?: LLMConfig): LLMProvider {
+function makeTauriProvider(llmConfig?: LLMConfig, sessionId?: string): LLMProvider {
   if (!llmConfig?.apiKey) {
     throw new Error("Tauri 版需要在设置面板配置 API Key。");
   }
@@ -32,13 +33,17 @@ function makeTauriProvider(llmConfig?: LLMConfig): LLMProvider {
     baseURL: llmConfig.baseURL,
     model: llmConfig.model || "deepseek-chat",
     proxy: llmConfig.proxy,
+    sessionId,
   });
 }
 
-async function fetchApi(path: string, body: unknown, signal?: AbortSignal) {
+async function fetchApi(path: string, body: unknown, signal?: AbortSignal, sessionId?: string) {
   const res = await fetch(path, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(sessionId ? { [CHAT_SESSION_HEADER]: sessionId } : {}),
+    },
     body: JSON.stringify(body),
     signal,
   });
@@ -64,15 +69,15 @@ export async function callReview(body: unknown, signal?: AbortSignal) {
 
 // ─── 对话 ──────────────────────────────────────────────────────
 
-export async function callChat(body: unknown, signal?: AbortSignal) {
+export async function callChat(body: unknown, signal?: AbortSignal, sessionId?: string) {
   if (isTauri()) {
     const llmConfig = (body as { llmConfig?: LLMConfig }).llmConfig;
-    const provider = makeTauriProvider(llmConfig);
+    const provider = makeTauriProvider(llmConfig, sessionId);
     const result = await processChatRequest(body, () => provider, { signal });
     if (!result.ok) throw new Error(result.error.message);
     return result.data;
   }
-  return fetchApi("/api/chat", body, signal);
+  return fetchApi("/api/chat", body, signal, sessionId);
 }
 
 // ─── 修改集 ────────────────────────────────────────────────────

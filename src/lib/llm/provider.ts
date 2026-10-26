@@ -47,13 +47,15 @@ export type ProviderConfig = {
   model: string;
   /** 代理；undefined 表示直连 */
   proxy?: ProxyConfig;
+  /** Stable conversation identity; never included in model prompts. */
+  sessionId?: string;
 };
 
 /**
  * 从环境变量构造当前配置的 provider（密钥只在服务端读取）。
  * 代理也支持从环境变量读：HTTPS_PROXY / HTTP_PROXY / SOCKS5_PROXY。
  */
-export function getProviderFromEnv(): LLMProvider {
+export function getProviderFromEnv(sessionId?: string): LLMProvider {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     throw new Error(
@@ -63,7 +65,7 @@ export function getProviderFromEnv(): LLMProvider {
   const model = process.env.LLM_MODEL ?? "deepseek-chat";
   const baseURL = process.env.OPENAI_BASE_URL ?? "https://api.openai.com";
   const proxy = resolveProxyFromEnv();
-  return new OpenAIProvider({ apiKey, baseURL, model, proxy }, buildProxyDispatcher(proxy));
+  return new OpenAIProvider({ apiKey, baseURL, model, proxy, sessionId }, buildProxyDispatcher(proxy));
 }
 
 /**
@@ -75,13 +77,14 @@ export function getProviderFromUserConfig(config: {
   baseURL?: string;
   model?: string;
   proxy?: ProxyConfig;
-}): LLMProvider {
+}, sessionId?: string): LLMProvider {
   return new OpenAIProvider(
     {
       apiKey: config.apiKey,
       baseURL: config.baseURL,
       model: config.model || "deepseek-chat",
       proxy: config.proxy,
+      sessionId,
     },
     buildProxyDispatcher(config.proxy),
   );

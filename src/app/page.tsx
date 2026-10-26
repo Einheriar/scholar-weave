@@ -1333,6 +1333,7 @@ export default function Home() {
             llmConfig: prefs.llmConfig,
           },
           controller.signal,
+          nodeId,
         );
         if (chatRequestSeq.current !== requestId) return;
         const current = latestRef.current.doc;
