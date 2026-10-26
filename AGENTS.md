@@ -68,7 +68,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - **Tauri 版**用 `@tauri-apps/plugin-http`（Rust reqwest）直连 OpenAI 兼容 API，绕过 CORS。Key 仍存 localStorage。
 - **浏览器版**继续走 Next.js 服务端路由（`src/app/api/*`），Key 可存 `.env.local`。
 - `src/lib/platform.ts` 的 `isTauri()` 是前端代码里唯一感知运行平台的地方。
-- 打包产物：`npx tauri build` → `src-tauri/target/release/bundle/nsis/*.exe`（约 9 MB）。
+- 打包产物：`npx tauri build` → `src-tauri/target/release/bundle/nsis/*.exe`（约 9 MB）。免安装绿色版用 `npm run package:portable` → `src-tauri/target/release/bundle/portable/superGrammarly_<version>_x64-portable.zip`（约 10 MB，脚本会校验产物确实是 ZIP）。
 - **改 LLM 协议/行为时**：`*-core.ts` 是双轨共用的唯一来源，浏览器版的 `src/app/api/*/route.ts` 只是薄包装。
 - **OpenCode 会话头由共享 Provider 自动添加。** `src/lib/llm/opencode.ts` 只识别 `opencode.ai` 域名下的 `/inference` 与旧 `/zen` API 路径。聊天把持久化的 `ChatNode.id` 作为 `callChat` 第三个参数传入；浏览器经内部 `x-scholarweave-session` 请求头透传，Tauri 直接传给 Provider，最终生成稳定的 `x-opencode-session`。测试连接、独立审阅和修改集各自生成随机会话 ID，同一 Provider 内的结构化纠错重试复用该 ID。会话标识只用于请求头，不进正文 prompt、JSON 业务协议或设置持久化；不能按预设名称猜服务商，也不能在每次聊天请求时重建会话 ID。
 - **Node 专属依赖不能进入客户端运行时依赖图。** `openai-provider.ts` 被 `api-client.ts` 供浏览器与 Tauri 共用，只能用 type import 引用 `undici`；代理 dispatcher 在 `server-proxy.ts` 创建，由服务端 provider factory 注入。静态导入 `undici` 会使 Vite 页面在渲染前报 `process is not defined` 并白屏。Next.js 的 Tailwind 4 处理仍需要 `postcss.config.mjs` 与 `@tailwindcss/postcss`，不能因 Vite 使用独立插件就移除。
@@ -350,6 +350,7 @@ npm run test          # Vitest（单元/集成）
 npm run test:e2e      # Playwright（自动起 dev server）
 npx tauri dev         # Tauri 开发模式（起 Vite + 桌面窗口）
 npx tauri build       # Tauri 打包（NSIS 安装包 → src-tauri/target/release/bundle/nsis/）
+npm run package:portable  # Tauri 免安装绿色版 ZIP（→ src-tauri/target/release/bundle/portable/）
 npm run package:app   # 旧方案：Next.js standalone + Node 启动器（保留）
 ```
 
