@@ -3,7 +3,7 @@ import type { LLMProvider } from "@/lib/llm/provider";
 import { processReviewRequest } from "@/lib/llm/review-core";
 import { processChatRequest } from "@/lib/llm/chat-core";
 import { processChangeSetRequest } from "@/lib/llm/change-set-core";
-import { OpenAIProvider } from "@/lib/llm/openai-provider";
+import { createProvider, connectionTestOptions } from "@/lib/llm/create-provider";
 import { CHAT_SESSION_HEADER } from "@/lib/llm/opencode";
 
 /**
@@ -28,7 +28,7 @@ function makeTauriProvider(llmConfig?: LLMConfig, sessionId?: string): LLMProvid
   if (!llmConfig?.apiKey) {
     throw new Error("Tauri 版需要在设置面板配置 API Key。");
   }
-  return new OpenAIProvider({
+  return createProvider({
     apiKey: llmConfig.apiKey,
     baseURL: llmConfig.baseURL,
     model: llmConfig.model || "deepseek-chat",
@@ -141,9 +141,8 @@ export async function testConnection(body: unknown, signal?: AbortSignal) {
     signal?.addEventListener("abort", onAbort);
     try {
       await provider.generate([{ role: "user", content: "hi" }], {
-        maxTokens: 64,
+        ...connectionTestOptions(llmConfig.model),
         signal: controller.signal,
-        reasoningEffort: "off",
       });
       return { ok: true };
     } finally {

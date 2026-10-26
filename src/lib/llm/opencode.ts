@@ -1,21 +1,22 @@
 /** Internal transport metadata, separate from the JSON and prompt protocols. */
 export const CHAT_SESSION_HEADER = "x-scholarweave-session";
 
-/** Only official OpenCode API paths receive the provider-specific session header. */
-export function openCodeSessionId(baseURL: string, sessionId?: string): string | undefined {
+/** Match the official host and API path boundaries, never names or query values. */
+export function isOpenCodeEndpoint(baseURL: string): boolean {
   let url: URL;
   try {
     url = new URL(baseURL);
   } catch {
-    return undefined;
+    return false;
   }
-  if (
-    url.hostname !== "opencode.ai" ||
-    !["https:", "http:"].includes(url.protocol) ||
-    !/^\/(?:inference|zen)(?:\/|$)/.test(url.pathname)
-  ) {
-    return undefined;
-  }
+  return url.hostname === "opencode.ai" &&
+    ["https:", "http:"].includes(url.protocol) &&
+    /^\/(?:inference|zen)(?:\/|$)/.test(url.pathname);
+}
+
+/** Only official OpenCode API paths receive the provider-specific session header. */
+export function openCodeSessionId(baseURL: string, sessionId?: string): string | undefined {
+  if (!isOpenCodeEndpoint(baseURL)) return undefined;
 
   // Node IDs are persisted with the conversation. Standalone requests get their
   // own ID, retained by the provider across structured-output retries.

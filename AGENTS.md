@@ -73,6 +73,8 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - **OpenCode 会话头由共享 Provider 自动添加。** `src/lib/llm/opencode.ts` 只识别 `opencode.ai` 域名下的 `/inference` 与旧 `/zen` API 路径。聊天把持久化的 `ChatNode.id` 作为 `callChat` 第三个参数传入；浏览器经内部 `x-scholarweave-session` 请求头透传，Tauri 直接传给 Provider，最终生成稳定的 `x-opencode-session`。测试连接、独立审阅和修改集各自生成随机会话 ID，同一 Provider 内的结构化纠错重试复用该 ID。会话标识只用于请求头，不进正文 prompt、JSON 业务协议或设置持久化；不能按预设名称猜服务商，也不能在每次聊天请求时重建会话 ID。
 - **Node 专属依赖不能进入客户端运行时依赖图。** `openai-provider.ts` 被 `api-client.ts` 供浏览器与 Tauri 共用，只能用 type import 引用 `undici`；代理 dispatcher 在 `server-proxy.ts` 创建，由服务端 provider factory 注入。静态导入 `undici` 会使 Vite 页面在渲染前报 `process is not defined` 并白屏。Next.js 的 Tailwind 4 处理仍需要 `postcss.config.mjs` 与 `@tailwindcss/postcss`，不能因 Vite 使用独立插件就移除。
 
+- **Gemini 原生协议按模型名称自动选择，不新增协议设置。** `create-provider.ts` 是浏览器服务端和 Tauri 共用的唯一选择入口，名称包含 `gemini`（不区分大小写）时使用 `gemini-provider.ts`；OpenCode 只在官方域名内转换原生路径，Google 官方使用请求头 `x-goog-api-key`，不得把 Key 放入 URL。`provider-http.ts` 共用代理与取消逻辑，客户端只能 type import `undici`。Gemini `off` 不得静默降为低档；无法关闭思考的型号明确报错，测试连接使用独立探测参数。原生响应只读首个候选的非思考文字，截断或被拦截不能当作正常回复。现有业务 JSON、项目存储和设置格式保持不变。
+
 ## 必须遵守的核心约束（实现时不要破坏）
 
 - **“开始审阅”意味着重开当前项目的反馈会话。** 请求开始前立即清空全部旧审阅建议、总结、聊天节点与消息，以及旧错误重试、上下文选中与修改集预览；保留当前正文、标题、项目 ID 和已写入正文的修改，其他项目不受影响。失败或取消也不恢复旧记录。必须同步推进 `latestRef` 并调用 `markProjectDirty()`，不能只在成功后保存，否则刷新会恢复旧记录。聊天草稿作用域需包含本轮会话标识，确保虚拟全文节点下的草稿／附件也会重置。预览关闭仍走退出动画，关闭期间不得接受旧修改集。`saveProject` 校验后直接发起同表 IndexedDB 写事务，提交按发起顺序排队；并发旧现场、清空现场、新结果的回归验证在 `tests/projects.test.ts`。

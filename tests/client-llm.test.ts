@@ -95,3 +95,47 @@ it.each(["review", "changeSet", "testConnection"] as const)("adds a standalone s
   expect(new Headers(vi.mocked(tauriFetch).mock.calls[0][1]?.headers).get("x-opencode-session"))
     .toMatch(/^ses_[0-9a-f-]{36}$/);
 });
+
+it.each(["review", "changeSet", "testConnection", "chat"] as const)("automatically selects native Gemini for Tauri %s", async (kind) => {
+  vi.stubGlobal("__TAURI__", {});
+  const { fetch: tauriFetch } = await import("@tauri-apps/plugin-http");
+  const content = kind === "review" ? { documentSummary: "Summary", items: [] }
+    : kind === "changeSet" ? { summary: "Revision", edits: [{ blockId: "p1", original: "Old text.", replacement: "New text.", explanation: "Improve wording." }] }
+    : kind === "chat" ? { type: "answer", answer: "ok" } : "ok";
+  vi.mocked(tauriFetch).mockImplementation(async () => new Response(JSON.stringify({
+    candidates: [{ content: { parts: [{ text: typeof content === "string" ? content : JSON.stringify(content) }] }, finishReason: "STOP" }],
+  })));
+  const body = {
+    documentId: "doc1", revision: 0, checksum: "abc", mode: "proofread",
+    context: { type: "document" }, message: "Explain", history: [],
+    images: [{ id: "img1", name: "figure.png", dataUrl: "data:image/png;base64,aGVsbG8=" }],
+    blocks: [{ id: "p1", text: "Old text." }],
+    sourceReview: { id: "r1", title: "Revise", explanation: "Improve wording.", category: "style", scope: { type: "document" } },
+    llmConfig: {
+      apiKey: "sk-test", baseURL: "https://opencode.ai/inference/go/openai/v1", model: "gemini-4-argon",
+      proxy: { type: "http", host: "127.0.0.1", port: 7897 },
+    },
+  };
+  if (kind === "chat") {
+    await callChat(body, undefined, "node_gemini");
+    await callChat(body, undefined, "node_gemini");
+  } else {
+    await { review: callReview, changeSet: callChangeSet, testConnection }[kind](body);
+  }
+  const init = vi.mocked(tauriFetch).mock.calls[0][1];
+  expect(tauriFetch).toHaveBeenCalledWith(
+    "https://opencode.ai/inference/go/google/v1beta/models/gemini-4-argon:generateContent",
+    expect.objectContaining({ proxy: { all: "http://127.0.0.1:7897" } }),
+  );
+  expect(new Headers(init?.headers).get("authorization")).toBe("Bearer sk-test");
+  expect(new Headers(init?.headers).get("x-opencode-session")).toBeTruthy();
+  const request = JSON.parse(String(init?.body));
+  if (kind === "chat") {
+    expect(vi.mocked(tauriFetch).mock.calls.map(([, options]) => new Headers(options?.headers).get("x-opencode-session")))
+      .toEqual(["ses_node_gemini", "ses_node_gemini"]);
+    expect(JSON.stringify(request.contents)).toContain('"inlineData":{"mimeType":"image/png","data":"aGVsbG8="}');
+  }
+  if (kind === "testConnection") {
+    expect(request.generationConfig).toMatchObject({ maxOutputTokens: 4096, thinkingConfig: { thinkingLevel: "LOW" } });
+  }
+});

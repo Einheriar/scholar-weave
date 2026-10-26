@@ -1,10 +1,9 @@
-import { OpenAIProvider } from "./openai-provider";
+import { createProvider } from "./create-provider";
 import { buildProxyDispatcher } from "./server-proxy";
 
 /**
- * 轻量 LLM provider adapter（PLAN 8.1）。
- * 定义统一接口，第一版接 OpenAI 兼容协议（DeepSeek 端点）。
- * 后续可平滑增加其他供应商或本地模型。
+ * Shared protocol interface; createProvider selects native Gemini by model name
+ * and otherwise uses OpenAI-compatible Chat Completions.
  */
 
 export type ChatMessage = {
@@ -17,14 +16,14 @@ export type ChatContentPart =
   | { type: "image_url"; image_url: { url: string } };
 
 export type GenerateOptions = {
-  /** 期望模型返回严格 JSON（对应 OpenAI 的 response_format: json_object） */
+  /** Request JSON output using the selected provider's native format. */
   jsonMode?: boolean;
   temperature?: number;
   maxTokens?: number;
   signal?: AbortSignal;
   /**
-   * 思考档位抽象：auto/off/low/high/max（见 src/lib/settings.ts）。
-   * auto 不传参；off 会转为 enable_thinking=false（DeepSeek 风格端点）。
+   * Abstract thinking effort: auto/off/low/high/max. Each adapter translates it
+   * to native parameters and rejects unsupported requests without downgrading.
    */
   reasoningEffort?: string;
 };
@@ -63,9 +62,9 @@ export function getProviderFromEnv(sessionId?: string): LLMProvider {
     );
   }
   const model = process.env.LLM_MODEL ?? "deepseek-chat";
-  const baseURL = process.env.OPENAI_BASE_URL ?? "https://api.openai.com";
+  const baseURL = process.env.OPENAI_BASE_URL;
   const proxy = resolveProxyFromEnv();
-  return new OpenAIProvider({ apiKey, baseURL, model, proxy, sessionId }, buildProxyDispatcher(proxy));
+  return createProvider({ apiKey, baseURL, model, proxy, sessionId }, buildProxyDispatcher(proxy));
 }
 
 /**
@@ -78,7 +77,7 @@ export function getProviderFromUserConfig(config: {
   model?: string;
   proxy?: ProxyConfig;
 }, sessionId?: string): LLMProvider {
-  return new OpenAIProvider(
+  return createProvider(
     {
       apiKey: config.apiKey,
       baseURL: config.baseURL,

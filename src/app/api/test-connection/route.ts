@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { connectionTestOptions } from "@/lib/llm/create-provider";
 import {
   getProviderFromEnv,
   getProviderFromUserConfig,
@@ -76,7 +77,7 @@ export async function POST(request: Request) {
   try {
     await provider.generate(
       [{ role: "user", content: "hi" }],
-      { maxTokens: 64, signal: controller.signal, reasoningEffort: "off" },
+      { ...connectionTestOptions(llmConfig?.model ?? process.env.LLM_MODEL), signal: controller.signal },
     );
   } catch (e) {
     if (e instanceof Error && e.name === "AbortError") {

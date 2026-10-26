@@ -76,7 +76,9 @@ Copy-Item .env.example .env.local
 
 ## 模型配置
 
-ScholarWeave 使用 OpenAI 兼容的聊天协议，可以连接 OpenAI、DeepSeek、OpenRouter，以及其他提供兼容接口的模型服务。模型信息可以通过以下两种方式配置。
+ScholarWeave 支持 OpenAI 兼容聊天协议和 Gemini 原生协议。模型名称包含 `gemini`（不区分大小写）时自动使用原生协议，其他模型继续使用 OpenAI 兼容协议，无需新增设置。Gemini 需要提供原生接口的服务商；仅提供 OpenAI 兼容接口的中转服务不适用此自动规则。
+
+OpenCode Go 可以保留现有 `https://opencode.ai/inference/go/openai/v1` 地址，程序会自动切换到同一套餐的 Gemini 路径并保留会话头；Google 官方 API 使用 `https://generativelanguage.googleapis.com/v1beta`。思考档位建议先选“默认”；无法关闭思考的型号选择“不思考”时会明确提示。模型信息可以通过以下两种方式配置。
 
 ### 通过网页配置
 

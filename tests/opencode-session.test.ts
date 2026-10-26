@@ -16,7 +16,7 @@ const outputs = {
   testConnection: "ok",
 };
 
-function request(sessionId?: string, useEnv = false) {
+function request(sessionId?: string, useEnv = false, model = "test-model") {
   return new Request("http://localhost/api/test", {
     method: "POST",
     headers: {
@@ -28,7 +28,7 @@ function request(sessionId?: string, useEnv = false) {
       blocks: [{ id: "p1", text: "Old text." }],
       context: { type: "document" }, message: "Explain", history: [],
       sourceReview: { id: "r1", title: "Revise", explanation: "Improve wording.", category: "style", scope: { type: "document" } },
-      ...(useEnv ? {} : { llmConfig }),
+      ...(useEnv ? {} : { llmConfig: { ...llmConfig, model } }),
     }),
   });
 }
@@ -72,6 +72,44 @@ describe("OpenCode endpoint detection", () => {
 });
 
 describe("OpenCode server requests", () => {
+  it.each(Object.keys(handlers) as (keyof typeof handlers)[])("automatically routes Gemini for %s without changing settings", async (kind) => {
+    const content = outputs[kind];
+    const fetchMock = vi.fn().mockImplementation(async () => new Response(JSON.stringify({
+      candidates: [{ finishReason: "STOP", content: { parts: [{ text: typeof content === "string" ? content : JSON.stringify(content) }] } }],
+    })));
+    vi.stubGlobal("fetch", fetchMock);
+    expect((await handlers[kind](request("node_a", false, "gemini-4-argon"))).status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://opencode.ai/inference/go/google/v1beta/models/gemini-4-argon:generateContent",
+      expect.any(Object),
+    );
+    const init = fetchMock.mock.calls[0][1];
+    expect(new Headers(init.headers).get("x-opencode-session")).toBeTruthy();
+    expect(new Headers(init.headers).get("authorization")).toBe("Bearer sk-test");
+    const body = JSON.parse(init.body);
+    expect(body).toHaveProperty("contents");
+    expect(body).not.toHaveProperty("messages");
+    if (kind === "testConnection") {
+      expect(body.generationConfig).toMatchObject({ maxOutputTokens: 4096, thinkingConfig: { thinkingLevel: "LOW" } });
+    }
+  });
+
+  it("selects Gemini from environment configuration with a native Google default", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "google-test-key");
+    vi.stubEnv("LLM_MODEL", "gemini-4-argon");
+    vi.stubEnv("OPENAI_BASE_URL", undefined);
+    for (const key of ["SOCKS5_PROXY", "HTTPS_PROXY", "HTTP_PROXY"]) vi.stubEnv(key, "");
+    const fetchMock = vi.fn().mockImplementation(async () => new Response(JSON.stringify({
+      candidates: [{ content: { parts: [{ text: JSON.stringify(outputs.chat) }] }, finishReason: "STOP" }],
+    })));
+    vi.stubGlobal("fetch", fetchMock);
+    expect((await chat(request("node_a", true))).status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-4-argon:generateContent",
+      expect.objectContaining({ headers: { "Content-Type": "application/json", "x-goog-api-key": "google-test-key" } }),
+    );
+  });
+
   it.each(Object.keys(handlers) as (keyof typeof handlers)[])("adds a standalone session to %s", async (kind) => {
     const fetchMock = vi.fn().mockImplementation(async () => response(outputs[kind]));
     vi.stubGlobal("fetch", fetchMock);

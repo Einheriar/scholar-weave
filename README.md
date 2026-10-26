@@ -76,7 +76,9 @@ Then fill in the model provider settings in `.env.local`, or configure an OpenAI
 
 ## Model configuration
 
-ScholarWeave uses the OpenAI-compatible chat protocol and can connect to OpenAI, DeepSeek, OpenRouter, and other services that provide a compatible API. Model details can be supplied through the local environment file described above or through the web interface.
+ScholarWeave supports OpenAI-compatible chat and native Gemini. Model names containing `gemini` (case-insensitive) automatically use the native protocol; other models keep using OpenAI-compatible chat. Gemini requires a service that exposes its native API, rather than an OpenAI-only gateway. No additional setting is required.
+
+For OpenCode Go, keep `https://opencode.ai/inference/go/openai/v1`: the app selects the matching Gemini route and retains session headers. For Google's API, use `https://generativelanguage.googleapis.com/v1beta`. Start with the default thinking effort; models that cannot disable thinking report an explicit error if “off” is selected. Model details can be supplied through the local environment file described above or through the web interface.
 
 ### Configure through the web interface
 

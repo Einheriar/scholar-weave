@@ -45,12 +45,16 @@ npm run dev                  # http://localhost:3000
 
 | 变量 | 说明 |
 |------|------|
-| `LLM_PROVIDER` | 目前只实现 `openai`（OpenAI 兼容协议） |
+| `LLM_PROVIDER` | 保留的兼容字段；实际协议由模型名称自动识别，包含 `gemini` 时使用 Gemini 原生协议，否则使用 OpenAI 兼容协议 |
 | `OPENAI_API_KEY` | 供应商密钥 |
-| `OPENAI_BASE_URL` | 兼容接口 base URL。DeepSeek 为 `https://api.deepseek.com`；用官方 OpenAI 时留空 |
+| `OPENAI_BASE_URL` | 服务商 base URL。DeepSeek 为 `https://api.deepseek.com`；Gemini 官方为 `https://generativelanguage.googleapis.com/v1beta`；留空时按模型名称选择 Google 或 OpenAI 官方地址 |
 | `LLM_MODEL` | 模型名。DeepSeek 可用 `deepseek-flash`、`deepseek-v4-pro` |
 
 > 注意：`deepseek-flash` 等推理模型会消耗 reasoning token。若审阅返回空结果（`finish=length`），需要提高 `/api/review` 的 `max_tokens`（当前 16000）。
+
+Gemini 的协议选择由客户端安全的 `src/lib/llm/create-provider.ts` 统一完成，服务端工厂与 Tauri 复用；`gemini-provider.ts` 转换系统提示、对话角色、内嵌图片与 JSON 输出，`provider-http.ts` 共用代理、取消与网络错误处理。OpenCode 的 `/inference[/go]/openai/v1` 自动转换为 `/inference[/go]/google/v1beta`，仍使用 Bearer Key 和既有会话头；Google 官方使用 `x-goog-api-key`，Key 不放在 URL 中。其他原生网关保留用户配置的域名和路径前缀，使用 Bearer Key。
+
+Gemini 思考参数：`auto` 不传；3/4 系列 `low/high/max` 转为 `LOW/HIGH/HIGH`；2.5 系列转为预算 `1024/8192/最高合法预算`（Flash 为 `24576`，Pro 为 `32768`）。`off` 仅在可关闭思考的 2.5 Flash 系列发送预算 `0`，其他型号本地明确报错，不静默降为低档。测试连接单独使用低档和 `4096` 输出预算，避免推理消耗原有 `64` token 探测上限。回复只读取首个候选的非思考文字，拦截、截断与空内容均拒绝作为正常回复。
 
 ## 版本号
 
